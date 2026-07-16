@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import type { Config } from '../config.js';
@@ -14,9 +15,12 @@ export interface ApiDeps {
 export function buildServer(deps: ApiDeps): FastifyInstance {
   const app = Fastify({ logger: false });
 
+  const expected = Buffer.from(`Bearer ${deps.cfg.API_AUTH_TOKEN}`);
   app.addHook('onRequest', async (req, reply) => {
-    const auth = req.headers.authorization;
-    if (auth !== `Bearer ${deps.cfg.API_AUTH_TOKEN}`) {
+    const given = Buffer.from(req.headers.authorization ?? '');
+    const ok =
+      given.length === expected.length && timingSafeEqual(given, expected);
+    if (!ok) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
   });

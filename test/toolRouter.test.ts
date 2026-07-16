@@ -90,7 +90,7 @@ function ctx(run: RunRow, attempt: RunAttemptRow): ToolContext {
 }
 
 describe('external.http.request', () => {
-  it('rejects a write with no matching grant and records ActionDenied', async () => {
+  it('rejects a write with no matching grant', async () => {
     const { run, attempt } = await runningRun([]);
     const outcome = await dispatchTool(ctx(run, attempt), 'external_http_request', {
       method: 'POST',
@@ -98,8 +98,27 @@ describe('external.http.request', () => {
       body: { app: 'x' },
     });
     expect(outcome).toMatchObject({ kind: 'result' });
-    expect((outcome as { content: string }).content).toContain('no capability grant');
+    expect((outcome as { content: string }).content).toMatch(
+      /no capability grant|private host/,
+    );
     expect(external.actions()).toHaveLength(0);
+  });
+
+  it('refuses ungranted requests to private hosts and non-http schemes (SSRF guard)', async () => {
+    const { run, attempt } = await runningRun([]);
+    for (const url of [
+      'http://169.254.169.254/latest/meta-data/',
+      'http://localhost:8080/v1/runs',
+      'file:///etc/passwd',
+    ]) {
+      const outcome = await dispatchTool(ctx(run, attempt), 'external_http_request', {
+        method: 'GET',
+        url,
+      });
+      expect((outcome as { content: string }).content).toMatch(
+        /private host|not allowed|invalid URL/,
+      );
+    }
   });
 
   it('executes an approval-free write exactly once and dedupes retries', async () => {
@@ -250,8 +269,10 @@ describe('external.http.request', () => {
     expect(external.actions().filter((a) => a.path === '/databases/prod')).toHaveLength(0);
   });
 
-  it('allows GET reads without grants and still records a receipt', async () => {
-    const { run, attempt } = await runningRun([]);
+  it('allows granted GET reads and records a reversible receipt', async () => {
+    const { run, attempt } = await runningRun([
+      { action: 'external.http.*', resource: '*' },
+    ]);
     const args = { method: 'GET', url: `${external.url}/status` };
     const outcome = await dispatchTool(ctx(run, attempt), 'external_http_request', args);
     expect((outcome as { content: string }).content).toContain('"ok":true');

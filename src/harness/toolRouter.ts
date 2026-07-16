@@ -218,6 +218,20 @@ async function externalHttpRequest(
   const isWrite = method !== 'GET';
   const idemKey = idempotencyKey({ runId: ctx.run.id, action: ACTION_NAME, args });
 
+  // SSRF guard: only http(s), and private/loopback/link-local hosts are
+  // reachable only when a capability grant explicitly covers the origin —
+  // GETs must not become an ungated probe into the worker's network.
+  const grants0 = await listGrants(ctx.pool, ctx.run.id);
+  const originGranted = grants0.some(
+    (g) =>
+      patternMatches(g.action_pattern, ACTION_NAME) &&
+      patternMatches(g.resource_pattern, resource),
+  );
+  const urlPolicy = checkUrlPolicy(url, originGranted);
+  if (!urlPolicy.ok) {
+    return { kind: 'result', content: `error: ${urlPolicy.reason}` };
+  }
+
   // Recovery dedupe: an already-committed identical action returns its
   // recorded result — the external effect happened exactly once.
   const existing = await findReceiptByKey(ctx.pool, ctx.run.id, idemKey);
@@ -331,13 +345,23 @@ async function externalHttpRequest(
 
   maybeCrash(ctx.cfg, ctx.run, 'before_external_commit');
 
+  // Model-supplied headers may add auth etc., but must never override the
+  // reserved headers — the idempotency key in particular is what makes the
+  // action exactly-once, so ours are applied last.
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(
+    (args.headers as Record<string, string> | undefined) ?? {},
+  )) {
+    if (!['host', 'content-length', 'transfer-encoding'].includes(k.toLowerCase())) {
+      headers[k] = String(v);
+    }
+  }
+  headers['content-type'] = 'application/json';
+  headers['idempotency-key'] = idemKey;
+
   const response = await fetch(url, {
     method,
-    headers: {
-      'content-type': 'application/json',
-      'idempotency-key': idemKey,
-      ...(args.headers as Record<string, string> | undefined),
-    },
+    headers,
     body: isWrite && args.body !== undefined ? JSON.stringify(args.body) : undefined,
   });
   const text = await response.text();
@@ -376,4 +400,34 @@ function safeOrigin(url: string): string {
   } catch {
     return url;
   }
+}
+
+const PRIVATE_HOST_RE =
+  /^(localhost|.*\.local|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[?::1\]?|\[?fe80:.*|\[?f[cd][0-9a-f]{2}:.*)$/i;
+
+/**
+ * Hostname-level SSRF policy (a pragmatic prototype guard — it does not
+ * defend against DNS rebinding): http(s) only, and private/loopback/
+ * link-local hosts require an explicit capability grant for the origin.
+ */
+function checkUrlPolicy(
+  url: string,
+  originGranted: boolean,
+): { ok: true } | { ok: false; reason: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, reason: `invalid URL: ${url}` };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, reason: `scheme ${parsed.protocol} is not allowed` };
+  }
+  if (PRIVATE_HOST_RE.test(parsed.hostname) && !originGranted) {
+    return {
+      ok: false,
+      reason: `requests to private host ${parsed.hostname} require an explicit capability grant for ${parsed.origin}`,
+    };
+  }
+  return { ok: true };
 }
