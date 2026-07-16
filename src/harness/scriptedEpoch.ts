@@ -1,0 +1,166 @@
+import type { EpochContext } from './worker.js';
+import type { EpochExitReason, SemanticAction } from '../core/types.js';
+import { withTransaction } from '../db/tx.js';
+import { appendEvent, transitionRun } from '../core/transition.js';
+import { insertCheckpoint, latestCheckpoint } from '../store/checkpoints.js';
+import { insertApproval, listApprovals } from '../store/approvals.js';
+
+/**
+ * Deterministic no-model epoch used by tests and pre-credential milestones.
+ * Interprets run.input.script — an array of ops — resuming from the last
+ * checkpoint's step index, exactly as the real epoch resumes from a
+ * checkpoint.
+ */
+export type ScriptOp =
+  | { op: 'progress'; note: string }
+  | { op: 'sleep'; ms: number }
+  | { op: 'checkpoint' }
+  | { op: 'requestApproval'; action: SemanticAction }
+  | { op: 'fail'; once?: boolean }
+  | { op: 'complete' };
+
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const t = setTimeout(done, ms);
+    function done() {
+      signal.removeEventListener('abort', done);
+      clearTimeout(t);
+      resolve();
+    }
+    signal.addEventListener('abort', done);
+  });
+}
+
+export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason> {
+  const { pool, run, attempt, signal } = ctx;
+  const script = (run.input.script ?? []) as ScriptOp[];
+
+  const ckpt = await latestCheckpoint(pool, run.id);
+  let step = ckpt?.agent_state.step ?? 0;
+
+  while (step < script.length) {
+    if (signal.aborted) return 'lease_lost';
+    const op = script[step]!;
+
+    switch (op.op) {
+      case 'progress':
+        await withTransaction(pool, (tx) =>
+          appendEvent(tx, run.id, {
+            type: 'ProgressUpdated',
+            payload: { note: op.note, step },
+          }, {
+            attemptId: attempt.id,
+            patch: { progress: { completed: [op.note] } },
+          }),
+        );
+        break;
+
+      case 'sleep':
+        await abortableSleep(op.ms, signal);
+        if (signal.aborted) return 'lease_lost';
+        break;
+
+      case 'checkpoint':
+        await withTransaction(pool, async (tx) => {
+          const seq = await appendEvent(
+            tx,
+            run.id,
+            { type: 'WorkspaceCheckpointed', payload: { step } },
+            { attemptId: attempt.id },
+          );
+          await insertCheckpoint(tx, {
+            runId: run.id,
+            attemptId: attempt.id,
+            eventSeq: seq,
+            progress: {},
+            agentState: { step: step + 1 },
+          });
+        });
+        break;
+
+      case 'requestApproval': {
+        // On resume after approval, this step is already decided — skip it.
+        const decided = (await listApprovals(pool, run.id)).find(
+          (a) =>
+            a.status !== 'PENDING' &&
+            (a.action.arguments as { scriptStep?: number }).scriptStep === step,
+        );
+        if (decided) break;
+
+        await withTransaction(pool, async (tx) => {
+          const approval = await insertApproval(tx, {
+            runId: run.id,
+            attemptId: attempt.id,
+            action: {
+              ...op.action,
+              arguments: { ...op.action.arguments, scriptStep: step },
+            },
+          });
+          const seq = await appendEvent(
+            tx,
+            run.id,
+            {
+              type: 'ApprovalRequested',
+              payload: { approvalId: approval.id, action: op.action.action },
+            },
+            { attemptId: attempt.id },
+          );
+          await insertCheckpoint(tx, {
+            runId: run.id,
+            attemptId: attempt.id,
+            eventSeq: seq,
+            progress: {},
+            agentState: { step: step + 1 },
+          });
+          await transitionRun(tx, run.id, {
+            expectFrom: ['RUNNING'],
+            to: 'WAITING_APPROVAL',
+            event: { type: 'ApprovalRequested', payload: { approvalId: approval.id } },
+            attemptId: attempt.id,
+          });
+        });
+        return 'suspended_for_approval';
+      }
+
+      case 'fail':
+        if (op.once && attempt.attempt_no > 1) break; // succeed on retry
+        throw new Error(`scripted failure at step ${step}`);
+
+      case 'complete':
+        await withTransaction(pool, async (tx) => {
+          await transitionRun(tx, run.id, {
+            expectFrom: ['RUNNING'],
+            to: 'VERIFYING',
+            event: { type: 'VerificationStarted' },
+            attemptId: attempt.id,
+          });
+          await transitionRun(tx, run.id, {
+            expectFrom: ['VERIFYING'],
+            to: 'COMPLETED',
+            event: { type: 'RunCompleted', payload: { verification: 'scripted-pass' } },
+            attemptId: attempt.id,
+          });
+        });
+        return 'completed';
+    }
+    step += 1;
+  }
+
+  // Script ended without an explicit complete op.
+  await withTransaction(pool, async (tx) => {
+    await transitionRun(tx, run.id, {
+      expectFrom: ['RUNNING'],
+      to: 'VERIFYING',
+      event: { type: 'VerificationStarted' },
+      attemptId: attempt.id,
+    });
+    await transitionRun(tx, run.id, {
+      expectFrom: ['VERIFYING'],
+      to: 'COMPLETED',
+      event: { type: 'RunCompleted' },
+      attemptId: attempt.id,
+    });
+  });
+  return 'completed';
+}

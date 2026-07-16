@@ -1,0 +1,16 @@
+# Local development database (environments with a Docker daemon).
+# Where Docker is unavailable, use scripts/dev-db.sh to run a native
+# PostgreSQL 16 instance with the same DATABASE_URL.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: managed_agents
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
