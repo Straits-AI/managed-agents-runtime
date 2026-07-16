@@ -27,6 +27,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
       region: cfg.BYTEPLUS_REGION,
       accessKeyId: required.BYTEPLUS_ACCESS_KEY_ID,
       secretAccessKey: required.BYTEPLUS_SECRET_ACCESS_KEY,
+      sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
     });
     this.functionId = required.VEFAAS_SANDBOX_FUNCTION_ID;
     this.defaultImage = cfg.SANDBOX_IMAGE;

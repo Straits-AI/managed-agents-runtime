@@ -33,6 +33,10 @@ export async function createTestDb(): Promise<TestDb> {
   const url = new URL(BASE_URL);
   url.pathname = `/${dbName}`;
   const pool = createPool(url.toString());
+  // DROP DATABASE ... WITH (FORCE) can kill an idle client's socket while it
+  // is still closing; pg surfaces that as a pool 'error' event, which is an
+  // uncaught exception if unhandled. Expected during teardown — swallow it.
+  pool.on('error', () => {});
   await migrate(pool, MIGRATIONS_DIR);
 
   return {

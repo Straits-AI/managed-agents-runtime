@@ -17,6 +17,7 @@ export class TosObjectStore implements ObjectStore {
     this.client = new TosClient({
       accessKeyId: required.BYTEPLUS_ACCESS_KEY_ID,
       accessKeySecret: required.BYTEPLUS_SECRET_ACCESS_KEY,
+      stsToken: cfg.BYTEPLUS_SESSION_TOKEN,
       region: cfg.TOS_REGION,
       endpoint: cfg.TOS_ENDPOINT,
     });

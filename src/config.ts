@@ -14,6 +14,9 @@ const configSchema = z.object({
 
   BYTEPLUS_ACCESS_KEY_ID: z.string().optional(),
   BYTEPLUS_SECRET_ACCESS_KEY: z.string().optional(),
+  // Set when using STS temporary credentials (e.g. synced from `bp login`
+  // via scripts/refresh-creds.py). Empty/absent for long-term IAM keys.
+  BYTEPLUS_SESSION_TOKEN: z.string().optional(),
   BYTEPLUS_OPENAPI_HOST: z.string().default('open.byteplusapi.com'),
   BYTEPLUS_REGION: z.string().default('ap-southeast-1'),
   VEFAAS_SANDBOX_FUNCTION_ID: z.string().optional(),

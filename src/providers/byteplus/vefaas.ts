@@ -10,6 +10,7 @@ export interface VefaasClientOptions {
   region: string;
   accessKeyId: string;
   secretAccessKey: string;
+  sessionToken?: string;
 }
 
 const VEFAAS_VERSION = '2024-06-06';
@@ -45,6 +46,7 @@ export class VefaasClient {
       body: JSON.stringify(body),
       accessKeyId: this.opts.accessKeyId,
       secretAccessKey: this.opts.secretAccessKey,
+      sessionToken: this.opts.sessionToken,
     });
   }
 
