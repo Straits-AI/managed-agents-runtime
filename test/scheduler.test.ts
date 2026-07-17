@@ -251,6 +251,79 @@ describe('scheduler + worker', () => {
     expect(types[types.length - 1]).toBe('RunCompleted');
   }, 60_000); // heaviest test: worker boot + 4 sequential claim/epoch cycles (parent, 2 children, resume)
 
+  it('replaces a failed delegated child, then resumes the parent once replacements are exhausted', async () => {
+    const parent = await newRun([
+      { op: 'progress', note: 'planning' },
+      { op: 'delegate', goals: ['flaky subtask'], childScript: [{ op: 'fail' }] },
+      { op: 'progress', note: 'merging' },
+      { op: 'complete' },
+    ]);
+    // The child always fails; allow one replacement. MAX_ATTEMPTS=1 fails each
+    // child on its first attempt (no in-run retry), so the failure is the
+    // subagent's, and replacement — not retry — is what gets exercised.
+    newWorker({ MAX_CHILD_REPLACEMENTS: '1', MAX_ATTEMPTS: '1' });
+
+    const done = await waitFor(
+      async () => {
+        const r = await getRun(db.pool, parent.id);
+        return r?.status === 'COMPLETED' ? r : null;
+      },
+      { label: 'parent COMPLETED after replacement exhausted', timeoutMs: 30_000 },
+    );
+    expect(done.status).toBe('COMPLETED');
+
+    // The original child was replaced once; both attempts of the subtask failed.
+    const { rows: kids } = await db.pool.query<{
+      id: string;
+      status: string;
+      replacement_generation: number;
+      replaces_run_id: string | null;
+    }>(
+      `SELECT id, status, replacement_generation, replaces_run_id
+       FROM runs WHERE parent_run_id = $1 ORDER BY created_at`,
+      [parent.id],
+    );
+    expect(kids).toHaveLength(2);
+    expect(kids[0]!.replacement_generation).toBe(0);
+    expect(kids[1]!.replacement_generation).toBe(1);
+    expect(kids[1]!.replaces_run_id).toBe(kids[0]!.id);
+    expect(kids.every((k) => k.status === 'FAILED')).toBe(true);
+
+    const types = (await listEvents(db.pool, parent.id)).map((e) => e.type);
+    expect(types.filter((t) => t === 'ChildRunReplaced')).toHaveLength(1);
+    // Replacement happened before the parent finally resolved.
+    expect(types.indexOf('ChildRunReplaced')).toBeLessThan(types.indexOf('ChildrenResolved'));
+    expect(types[types.length - 1]).toBe('RunCompleted');
+  }, 60_000);
+
+  it('with replacement disabled, a failed child resolves the parent immediately', async () => {
+    const parent = await newRun([
+      { op: 'delegate', goals: ['doomed subtask'], childScript: [{ op: 'fail' }] },
+      { op: 'complete' },
+    ]);
+    newWorker({ MAX_CHILD_REPLACEMENTS: '0', MAX_ATTEMPTS: '1' });
+
+    const done = await waitFor(
+      async () => {
+        const r = await getRun(db.pool, parent.id);
+        return r?.status === 'COMPLETED' ? r : null;
+      },
+      { label: 'parent COMPLETED with failed child, no replacement', timeoutMs: 30_000 },
+    );
+    expect(done.status).toBe('COMPLETED');
+
+    const { rows: kids } = await db.pool.query<{ status: string }>(
+      `SELECT status FROM runs WHERE parent_run_id = $1`,
+      [parent.id],
+    );
+    expect(kids).toHaveLength(1); // no replacement spawned
+    expect(kids[0]!.status).toBe('FAILED');
+
+    const types = (await listEvents(db.pool, parent.id)).map((e) => e.type);
+    expect(types).not.toContain('ChildRunReplaced');
+    expect(types).toContain('ChildrenResolved');
+  }, 60_000);
+
   it('recovers when the worker is SIGKILLed mid-run (benchmark steps 4-5)', async () => {
     const run = await newRun([
       { op: 'progress', note: 'phase 1 work' },

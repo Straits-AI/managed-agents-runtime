@@ -66,6 +66,10 @@ const configSchema = z.object({
   SUPERVISOR_MAX_ESCALATIONS: intFromEnv(2),
   // Fraction of step/token budget below which budget-aware wind-down kicks in.
   SUPERVISOR_BUDGET_HEADROOM: z.coerce.number().min(0).max(1).default(0.15),
+  // Subagent replacement (memo §25, Phase 5B): how many times a failed delegated
+  // child is replaced with a fresh attempt before the parent resumes with the
+  // failure. 0 disables replacement (a failed child wakes the parent directly).
+  MAX_CHILD_REPLACEMENTS: z.coerce.number().int().min(0).default(1),
 
   HARNESS_ENABLE_FAULTS: z.coerce.number().int().min(0).max(1).default(0),
 });

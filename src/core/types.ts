@@ -65,6 +65,7 @@ export type EventType =
   | 'BudgetPlanUpdated'
   | 'SignalReceived'
   | 'ChildRunSpawned'
+  | 'ChildRunReplaced'
   | 'ChildrenResolved'
   | 'ApprovalRequested'
   | 'ApprovalReceived'
@@ -83,6 +84,10 @@ export interface RunRow {
   tenant_id: string;
   agent_version_id: string;
   parent_run_id: string | null;
+  /** The failed child run this run replaces (memo §25 subagent replacement). */
+  replaces_run_id: string | null;
+  /** 0 for an original child; N for its Nth replacement. */
+  replacement_generation: number;
   goal: string;
   input: Record<string, unknown>;
   status: RunStatus;

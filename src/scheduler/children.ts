@@ -53,14 +53,43 @@ export async function spawnChildren(
   return ids;
 }
 
+interface ChildResolution {
+  id: string;
+  status: string;
+  goal: string;
+  agent_version_id: string;
+  input: Record<string, unknown>;
+  replacement_generation: number;
+  superseded: boolean;
+}
+
+export interface WakeResult {
+  /** Parent ids resumed because their children fully resolved. */
+  woken: string[];
+  /** Replacement child ids spawned for failed subtasks (memo §25). */
+  replaced: string[];
+}
+
 /**
- * Wake any parent run whose delegated children have all reached a terminal
- * state (memo §15). Runs in the worker loop alongside the lease reaper. Uses
- * FOR UPDATE SKIP LOCKED so concurrent workers never double-wake a parent.
- * Returns the woken parent ids.
+ * Resolve parents whose delegated children have all reached a terminal state
+ * (memo §15). For each such parent, before waking it:
+ *   - a child that FAILED and is still under the replacement cap is replaced
+ *     with a fresh child for the same subtask (memo §25 subagent replacement),
+ *     and the parent keeps waiting;
+ *   - only once every current-generation child has COMPLETED (or failed at the
+ *     cap) does the parent resume, with the latest child outcomes to merge.
+ *
+ * Runs in the worker loop alongside the lease reaper. FOR UPDATE SKIP LOCKED so
+ * concurrent workers never double-resolve a parent.
  */
-export async function wakeReadyParents(pool: Pool): Promise<string[]> {
+export async function wakeReadyParents(
+  pool: Pool,
+  maxChildReplacements = 0,
+): Promise<WakeResult> {
   return withTransaction(pool, async (tx) => {
+    // A parent is a candidate when none of its *non-superseded* children are
+    // still running. Superseded children (already replaced) are terminal by
+    // construction, so the simple "no non-terminal child" test is sufficient.
     const { rows } = await tx.query<{ id: string }>(
       `SELECT p.id
        FROM runs p
@@ -75,25 +104,67 @@ export async function wakeReadyParents(pool: Pool): Promise<string[]> {
     );
 
     const woken: string[] = [];
+    const replaced: string[] = [];
+
     for (const { id } of rows) {
-      // Summarize child outcomes for the parent's resume context.
-      const { rows: kids } = await tx.query<{ id: string; status: string; goal: string }>(
-        `SELECT id, status, goal FROM runs WHERE parent_run_id = $1 ORDER BY created_at`,
+      const { rows: kids } = await tx.query<ChildResolution>(
+        `SELECT c.id, c.status, c.goal, c.agent_version_id, c.input,
+                c.replacement_generation,
+                EXISTS (SELECT 1 FROM runs r WHERE r.replaces_run_id = c.id) AS superseded
+         FROM runs c WHERE c.parent_run_id = $1 ORDER BY c.created_at`,
         [id],
       );
+      // Only the current generation of each subtask matters for resolution.
+      const active = kids.filter((k) => !k.superseded);
+      const replaceable = active.filter(
+        (k) => k.status === 'FAILED' && k.replacement_generation < maxChildReplacements,
+      );
+
+      if (replaceable.length > 0) {
+        // Swap each failed subtask for a fresh attempt; the parent keeps waiting.
+        for (const k of replaceable) {
+          const gen = k.replacement_generation + 1;
+          const child = await createRun(tx, {
+            agentVersionId: k.agent_version_id,
+            goal: k.goal,
+            input: {
+              ...k.input,
+              // Give the fresh attempt the context that its predecessor failed.
+              replacedFrom: k.id,
+              replacementGeneration: gen,
+            },
+            parentRunId: id,
+            replacesRunId: k.id,
+            replacementGeneration: gen,
+          });
+          await appendEvent(tx, id, {
+            type: 'ChildRunReplaced',
+            payload: {
+              failedChildId: k.id,
+              replacementChildId: child.id,
+              goal: k.goal,
+              generation: gen,
+            },
+          });
+          replaced.push(child.id);
+        }
+        continue; // do not wake — wait for the replacements
+      }
+
+      // Every current-generation child is resolved and none is replaceable.
       await transitionRun(tx, id, {
         expectFrom: ['WAITING_CHILDREN'],
         to: 'QUEUED',
         event: {
           type: 'ChildrenResolved',
           payload: {
-            children: kids.map((k) => ({ id: k.id, status: k.status, goal: k.goal })),
+            children: active.map((k) => ({ id: k.id, status: k.status, goal: k.goal })),
           },
         },
         patch: { current_attempt_id: null },
       });
       woken.push(id);
     }
-    return woken;
+    return { woken, replaced };
   });
 }

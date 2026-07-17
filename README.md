@@ -33,7 +33,11 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
   child runs that execute in **parallel** (each with an isolated
   copy-on-write workspace seeded from the parent, and a carved share of the
   parent's token budget). The parent suspends to `WAITING_CHILDREN` with zero
-  compute and resumes with the children's outcomes to merge.
+  compute and resumes with the children's outcomes to merge. A child that
+  **fails is replaced** with a fresh attempt for the same subtask (memo §25,
+  bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes — the
+  replacement lineage is durable (`replaces_run_id` / `replacement_generation`)
+  and every swap is a `ChildRunReplaced` ledger event.
 - **Scheduler** (`src/scheduler/`): lease-based claims with
   `FOR UPDATE SKIP LOCKED`; heartbeat fencing; a reaper requeues orphaned
   attempts (bounded by `MAX_ATTEMPTS`).
@@ -176,7 +180,8 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | Phase 2 — Knowledge / Skills / MCP | ✅ Knowledge (RAG `knowledge_search`), Skills (version-pinned, materialized into the workspace), MCP (namespaced toolsets routed through the capability layer). Postgres/registry defaults + AgentKit adapter seams. |
 | Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. |
 | Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). |
-| Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. 80 tests. Subagent replacement deferred to Phase 5B. |
+| Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. |
+| Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. 82 tests. |
 
 Phase 1 scope cuts (per memo §22.4): subagents, Kafka/RocketMQ (outbox is
 in-process), AgentKit Memory/Knowledge/Identity, KMS/FileNAS, multi-tenancy,

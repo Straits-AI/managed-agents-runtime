@@ -16,6 +16,10 @@ export interface CreateRunInput {
   scheduledFor?: string;
   /** Parent run when this is a delegated subrun (memo §15/§19). */
   parentRunId?: string;
+  /** The failed child this run replaces, when spawned as a replacement (§25). */
+  replacesRunId?: string;
+  /** Generation of this child in its replacement lineage (0 = original). */
+  replacementGeneration?: number;
   grants?: {
     action: string;
     resource?: string;
@@ -36,8 +40,9 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
 
   await tx.query(
     `INSERT INTO runs (id, agent_version_id, goal, input, status, max_steps,
-                       token_budget, scheduled_for, parent_run_id, debug_fault_points)
-     VALUES ($1, $2, $3, $4, 'CREATED', $5, $6, $7, $8, $9)`,
+                       token_budget, scheduled_for, parent_run_id, debug_fault_points,
+                       replaces_run_id, replacement_generation)
+     VALUES ($1, $2, $3, $4, 'CREATED', $5, $6, $7, $8, $9, $10, $11)`,
     [
       runId,
       input.agentVersionId,
@@ -48,6 +53,8 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
       input.scheduledFor ?? null,
       input.parentRunId ?? null,
       JSON.stringify(input.debugFaultPoints ?? []),
+      input.replacesRunId ?? null,
+      input.replacementGeneration ?? 0,
     ],
   );
   await tx.query(`INSERT INTO workspaces (id, run_id) VALUES ($1, $2)`, [wsId, runId]);

@@ -94,7 +94,8 @@ export function startWorker(
     while (!shutdown.signal.aborted) {
       try {
         await reap();
-        await wakeReadyParents(pool).catch(() => []); // subagent parents
+        // Resolve delegated parents, replacing failed children first (memo §25).
+        await wakeReadyParents(pool, cfg.MAX_CHILD_REPLACEMENTS).catch(() => {});
         const claimed = await claimRun(pool, cfg.WORKER_ID, cfg.LEASE_TTL_MS);
         if (claimed) {
           await executeClaimed(claimed.run, claimed.attempt);

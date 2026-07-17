@@ -20,7 +20,7 @@ export type ScriptOp =
   | { op: 'checkpoint' }
   | { op: 'requestApproval'; action: SemanticAction }
   | { op: 'waitSignal'; name: string }
-  | { op: 'delegate'; goals: string[] }
+  | { op: 'delegate'; goals: string[]; childScript?: ScriptOp[] }
   | { op: 'fail'; once?: boolean }
   | { op: 'complete' };
 
@@ -188,7 +188,7 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
             children: op.goals.map((g) => ({
               agentVersionId: run.agent_version_id,
               goal: g,
-              input: { script: [{ op: 'complete' }] as ScriptOp[] },
+              input: { script: (op.childScript ?? [{ op: 'complete' }]) as ScriptOp[] },
             })),
           });
         });

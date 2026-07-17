@@ -17,6 +17,7 @@ function fakeVersion(): AgentVersionRow {
 function fakeRun(): RunRow {
   return {
     id: 'r1', tenant_id: 'default', agent_version_id: 'av1', parent_run_id: null,
+    replaces_run_id: null, replacement_generation: 0,
     goal: 'g', input: {}, status: 'RUNNING', status_reason: null, progress: {},
     workspace_id: 'w1', current_attempt_id: null, last_event_seq: '0', max_steps: 50,
     token_budget: null, tokens_used: '0', awaited_signal: null, scheduled_for: null,
