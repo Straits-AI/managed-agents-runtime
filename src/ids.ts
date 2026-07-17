@@ -12,7 +12,9 @@ export type IdPrefix =
   | 'apr'  // approval
   | 'cap'  // capability grant
   | 'mem'  // agent memory
-  | 'kdoc'; // knowledge document
+  | 'kdoc' // knowledge document
+  | 'tnt'  // tenant
+  | 'key'; // api key
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${ulid().toLowerCase()}`;

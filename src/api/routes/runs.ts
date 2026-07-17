@@ -3,13 +3,16 @@ import { z } from 'zod';
 import type { ApiDeps } from '../server.js';
 import { withTransaction } from '../../db/tx.js';
 import { createRun, getRun } from '../../store/runs.js';
-import { getAgentVersion } from '../../store/agents.js';
+import { getAgentVersion, getAgentDefinition } from '../../store/agents.js';
 import { listEvents } from '../../store/events.js';
 import { listAttempts } from '../../store/attempts.js';
 import { listApprovals, decideApproval, getApproval } from '../../store/approvals.js';
 import { listRevisions } from '../../store/workspaces.js';
+import { getTenant } from '../../store/tenants.js';
+import { runUsage, tenantUsage, countActiveRuns, tenantTokensToday } from '../../store/usage.js';
 import { appendEvent, transitionRun } from '../../core/transition.js';
 import { isTerminal } from '../../core/stateMachine.js';
+import type { ModelPrice } from '../../core/costs.js';
 
 const createRunBody = z.object({
   agentVersionId: z.string(),
@@ -33,6 +36,10 @@ const createRunBody = z.object({
 
 export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
   const { pool } = deps;
+  const price: ModelPrice = {
+    inputPerMTok: deps.cfg.MODEL_PRICE_INPUT_PER_MTOK,
+    outputPerMTok: deps.cfg.MODEL_PRICE_OUTPUT_PER_MTOK,
+  };
 
   app.post('/v1/runs', async (req, reply) => {
     const body = createRunBody.parse(req.body);
@@ -42,24 +49,58 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
       return reply.code(400).send({ error: 'fault injection disabled' });
     }
     const version = await getAgentVersion(pool, body.agentVersionId);
-    if (!version) return reply.code(404).send({ error: 'agent version not found' });
+    // The version must belong to an agent owned by the caller's tenant, else a
+    // tenant could run another tenant's agent. Report as not-found either way.
+    const owner = version && (await getAgentDefinition(pool, version.agent_id, req.tenantId));
+    if (!version || !owner) return reply.code(404).send({ error: 'agent version not found' });
 
-    const run = await withTransaction(pool, (tx) => createRun(tx, body));
+    // Per-tenant quotas (Phase 2). NULL quota = unlimited.
+    const tenant = await getTenant(pool, req.tenantId);
+    if (
+      tenant?.max_concurrent_runs != null &&
+      (await countActiveRuns(pool, req.tenantId)) >= tenant.max_concurrent_runs
+    ) {
+      return reply.code(429).send({ error: 'concurrent run quota exceeded' });
+    }
+    if (
+      tenant?.daily_token_budget != null &&
+      (await tenantTokensToday(pool, req.tenantId)) >= BigInt(tenant.daily_token_budget)
+    ) {
+      return reply.code(429).send({ error: 'daily token budget exhausted' });
+    }
+
+    const run = await withTransaction(pool, (tx) =>
+      createRun(tx, { ...body, tenantId: req.tenantId }),
+    );
     return reply.code(201).send(run);
   });
 
   app.get<{ Params: { runId: string } }>('/v1/runs/:runId', async (req, reply) => {
-    const run = await getRun(pool, req.params.runId);
+    const run = await getRun(pool, req.params.runId, req.tenantId);
     if (!run) return reply.code(404).send({ error: 'run not found' });
     const attempts = await listAttempts(pool, run.id);
     return { ...run, attempts };
+  });
+
+  // Tenant-wide usage rollup (memo §20 /usage). Defaults to the current UTC day;
+  // pass ?since=ISO to widen the window.
+  app.get<{ Querystring: { since?: string } }>('/v1/usage', async (req) => {
+    return tenantUsage(pool, req.tenantId, price, req.query.since);
+  });
+
+  // Per-run usage + estimated model cost (memo §20). Tenant-scoped.
+  app.get<{ Params: { runId: string } }>('/v1/runs/:runId/usage', async (req, reply) => {
+    if (!(await getRun(pool, req.params.runId, req.tenantId))) {
+      return reply.code(404).send({ error: 'run not found' });
+    }
+    return runUsage(pool, req.params.runId, price);
   });
 
   app.get<{
     Params: { runId: string };
     Querystring: { afterSeq?: string; wait?: string };
   }>('/v1/runs/:runId/events', async (req, reply) => {
-    const run = await getRun(pool, req.params.runId);
+    const run = await getRun(pool, req.params.runId, req.tenantId);
     if (!run) return reply.code(404).send({ error: 'run not found' });
 
     const afterSeq = BigInt(req.query.afterSeq ?? '0');
@@ -78,7 +119,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
     '/v1/runs/:runId/messages',
     async (req, reply) => {
       const message = z.object({ message: z.string().min(1) }).parse(req.body).message;
-      const run = await getRun(pool, req.params.runId);
+      const run = await getRun(pool, req.params.runId, req.tenantId);
       if (!run) return reply.code(404).send({ error: 'run not found' });
       if (isTerminal(run.status)) {
         return reply.code(409).send({ error: `run is ${run.status}` });
@@ -96,7 +137,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get<{ Params: { runId: string } }>(
     '/v1/runs/:runId/approvals',
     async (req, reply) => {
-      const run = await getRun(pool, req.params.runId);
+      const run = await getRun(pool, req.params.runId, req.tenantId);
       if (!run) return reply.code(404).send({ error: 'run not found' });
       return { approvals: await listApprovals(pool, run.id) };
     },
@@ -115,6 +156,10 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
 
     const approval = await getApproval(pool, req.params.approvalId);
     if (!approval || approval.run_id !== req.params.runId) {
+      return reply.code(404).send({ error: 'approval not found' });
+    }
+    // Scope to the caller's tenant: an approval on another tenant's run is 404.
+    if (!(await getRun(pool, req.params.runId, req.tenantId))) {
       return reply.code(404).send({ error: 'approval not found' });
     }
 
@@ -158,7 +203,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
       .parse(req.body);
 
     const result = await withTransaction(pool, async (tx) => {
-      const run = await getRun(tx, req.params.runId);
+      const run = await getRun(tx, req.params.runId, req.tenantId);
       if (!run) return { code: 404 as const };
       if (isTerminal(run.status)) return { code: 409 as const, status: run.status };
 
@@ -193,7 +238,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
     '/v1/runs/:runId/cancel',
     async (req, reply) => {
       const result = await withTransaction(pool, async (tx) => {
-        const run = await getRun(tx, req.params.runId);
+        const run = await getRun(tx, req.params.runId, req.tenantId);
         if (!run) return { code: 404 as const };
         if (isTerminal(run.status)) return { code: 409 as const, status: run.status };
 
@@ -231,11 +276,15 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
       }
       const { exportRunBundle } = await import('../../export/runBundle.js');
       try {
-        // Single-token API today (no per-tenant identity). When the token
-        // carries a tenant, pass it here so export is scoped — an export is a
-        // bulk dump of a run's entire state (events, receipts, grants,
-        // workspace snapshot) and must never cross tenants.
-        const bundle = await exportRunBundle(pool, deps.objectStore, req.params.runId);
+        // Tenant-scoped: an export is a bulk dump of a run's entire state
+        // (events, receipts, grants, workspace snapshot) and must never cross
+        // tenants. A run owned by another tenant reports as not-found.
+        const bundle = await exportRunBundle(
+          pool,
+          deps.objectStore,
+          req.params.runId,
+          req.tenantId,
+        );
         return bundle;
       } catch (err) {
         if ((err as Error).message.includes('not found')) {
@@ -249,7 +298,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get<{ Params: { runId: string } }>(
     '/v1/runs/:runId/artifacts',
     async (req, reply) => {
-      const run = await getRun(pool, req.params.runId);
+      const run = await getRun(pool, req.params.runId, req.tenantId);
       if (!run) return reply.code(404).send({ error: 'run not found' });
       const revisions = run.workspace_id
         ? await listRevisions(pool, run.workspace_id)

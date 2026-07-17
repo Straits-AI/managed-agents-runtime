@@ -5,8 +5,18 @@ const intFromEnv = (def: number) =>
 
 const configSchema = z.object({
   DATABASE_URL: z.string().default('postgres://postgres@127.0.0.1:5433/managed_agents'),
+  // Operator token → the built-in 'default' tenant. Per-tenant API keys (mak_…)
+  // authenticate as their own tenant; see src/api/auth.ts.
   API_AUTH_TOKEN: z.string().default('dev-token'),
   API_PORT: intFromEnv(8080),
+  // Max request body size (bytes). Bounds memory per request.
+  API_BODY_LIMIT_BYTES: intFromEnv(1_048_576),
+  // Per-tenant token-bucket rate limit: RATE_LIMIT_PER_SEC sustained, with a
+  // RATE_LIMIT_BURST bucket. Set RATE_LIMIT_PER_SEC=0 to disable.
+  RATE_LIMIT_PER_SEC: z.coerce.number().min(0).default(20),
+  RATE_LIMIT_BURST: intFromEnv(40),
+  // Max time to drain in-flight work on SIGTERM/SIGINT before forcing exit.
+  SHUTDOWN_TIMEOUT_MS: intFromEnv(15_000),
 
   ARK_API_KEY: z.string().optional(),
   ARK_BASE_URL: z.string().default('https://ark.ap-southeast.bytepluses.com/api/v3'),
@@ -14,6 +24,11 @@ const configSchema = z.object({
   // Stronger model the semantic supervisor routes to when a stuck run is
   // escalated (memo §25). Per-agent `model_policy.escalationModel` overrides it.
   ESCALATION_MODEL: z.string().optional(),
+  // Cost attribution (memo §25 / Phase 2). USD per MILLION tokens; defaults are
+  // BytePlus ModelArk Seed-2.0-lite ($0.25/M input, $2.00/M output). Override
+  // per deployment/model. Used by /usage cost estimates — not billing-authoritative.
+  MODEL_PRICE_INPUT_PER_MTOK: z.coerce.number().min(0).default(0.25),
+  MODEL_PRICE_OUTPUT_PER_MTOK: z.coerce.number().min(0).default(2.0),
 
   BYTEPLUS_ACCESS_KEY_ID: z.string().optional(),
   BYTEPLUS_SECRET_ACCESS_KEY: z.string().optional(),

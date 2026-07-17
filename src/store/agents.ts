@@ -41,12 +41,12 @@ export interface AgentVersionRow {
 
 export async function createAgentDefinition(
   q: Q,
-  input: { name: string; description?: string },
+  input: { name: string; description?: string; tenantId?: string },
 ): Promise<AgentDefinitionRow> {
   const { rows } = await q.query<AgentDefinitionRow>(
-    `INSERT INTO agent_definitions (id, name, description)
-     VALUES ($1, $2, $3) RETURNING *`,
-    [newId('ad'), input.name, input.description ?? null],
+    `INSERT INTO agent_definitions (id, tenant_id, name, description)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [newId('ad'), input.tenantId ?? 'default', input.name, input.description ?? null],
   );
   return rows[0]!;
 }
@@ -54,11 +54,15 @@ export async function createAgentDefinition(
 export async function getAgentDefinition(
   q: Q,
   id: string,
+  tenantId?: string,
 ): Promise<AgentDefinitionRow | null> {
-  const { rows } = await q.query<AgentDefinitionRow>(
-    'SELECT * FROM agent_definitions WHERE id = $1',
-    [id],
-  );
+  const { rows } =
+    tenantId === undefined
+      ? await q.query<AgentDefinitionRow>('SELECT * FROM agent_definitions WHERE id = $1', [id])
+      : await q.query<AgentDefinitionRow>(
+          'SELECT * FROM agent_definitions WHERE id = $1 AND tenant_id = $2',
+          [id, tenantId],
+        );
   return rows[0] ?? null;
 }
 

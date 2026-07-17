@@ -2,6 +2,7 @@ import { loadConfig } from '../config.js';
 import { createPool } from '../db/pool.js';
 import { startWorker, type EpochRunner } from '../harness/worker.js';
 import { scriptedEpoch } from '../harness/scriptedEpoch.js';
+import { log } from '../log.js';
 
 const cfg = loadConfig();
 const pool = createPool(cfg.DATABASE_URL);
@@ -73,11 +74,21 @@ if (epochMode === 'scripted') {
   onSandboxOrphaned = (id) => sandbox.terminateById(id);
 }
 
-console.log(`[worker] ${cfg.WORKER_ID} starting (epoch=${epochMode})`);
+const wlog = log.child({ component: 'worker', workerId: cfg.WORKER_ID });
+wlog.info('starting', { epoch: epochMode });
 const handle = startWorker(pool, cfg, epoch, { onSandboxOrphaned });
 
+let shuttingDown = false;
 async function shutdown(sig: string) {
-  console.log(`[worker] ${sig} received, stopping`);
+  if (shuttingDown) return;
+  shuttingDown = true;
+  wlog.info('shutting down', { signal: sig });
+  // Bound the drain: a wedged in-flight epoch can't block termination forever.
+  const forced = setTimeout(() => {
+    wlog.error('shutdown timed out, forcing exit');
+    process.exit(1);
+  }, cfg.SHUTDOWN_TIMEOUT_MS);
+  forced.unref();
   await handle.stop();
   await pool.end();
   process.exit(0);

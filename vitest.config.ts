@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
+    // Keep the structured request/access logger quiet during tests.
+    env: { LOG_LEVEL: 'error' },
     // Integration suite: worker subprocesses + CPU contention add latency, so
     // give correct tests headroom. Real failures still surface instantly via
     // assertions; observed full-suite runs are ~15-20s.

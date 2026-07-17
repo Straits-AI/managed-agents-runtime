@@ -7,6 +7,9 @@ import { claimRun } from '../scheduler/claim.js';
 import { reapExpiredLeases } from '../scheduler/reaper.js';
 import { wakeReadyParents } from '../scheduler/children.js';
 import { exitAttempt, heartbeatAttempt } from '../store/attempts.js';
+import { log } from '../log.js';
+
+const wlog = log.child({ component: 'worker' });
 
 export interface EpochContext {
   pool: Pool;
@@ -80,7 +83,7 @@ export function startWorker(
     } catch (err) {
       exitReason = epochAbort.signal.aborted ? 'lease_lost' : 'error';
       if (exitReason === 'error') {
-        console.error(`[worker] epoch error for ${run.id}:`, err);
+        wlog.error('epoch error', { runId: run.id, err: (err as Error).message });
       }
     } finally {
       clearInterval(heartbeat);
@@ -102,7 +105,7 @@ export function startWorker(
           continue; // look for more work immediately
         }
       } catch (err) {
-        console.error('[worker] loop error:', err);
+        wlog.error('loop error', { err: (err as Error).message });
       }
       await sleep(cfg.POLL_MS, shutdown.signal);
     }

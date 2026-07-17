@@ -72,6 +72,21 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
   terminate — so a run can never spin forever burning budget. State is
   checkpointed, so detection survives crashes; every decision is a ledger event
   (`LoopDetected`, `StagnationDetected`, `ModelEscalated`, …).
+- **Multi-tenancy & authorization** (`src/api/auth.ts`, `src/store/tenants.ts`):
+  every request authenticates to a **tenant** — the operator token maps to a
+  built-in `default` tenant, and per-tenant API keys (`mak_…`, stored only as
+  SHA-256 hashes) map to their own. All run/agent reads and writes are
+  tenant-scoped (a cross-tenant id reads as *not-found*, never leaking
+  existence), and per-tenant **quotas** (`max_concurrent_runs`,
+  `daily_token_budget`) cap spend. Mint tenants/keys with `npm run admin`.
+- **Cost attribution** (`src/core/costs.ts`, `src/store/usage.ts`): per-run and
+  per-tenant token/cost rollups at `GET /v1/runs/{id}/usage` and `GET /v1/usage`.
+  See [`docs/COST.md`](./docs/COST.md) — a real run costs ≈ half a cent in model
+  tokens, and durable waits cost zero compute.
+- **Operations** (`src/log.ts`, `src/api/`): structured JSON logging,
+  unauthenticated `/healthz` + `/readyz` (DB-checked) probes, per-tenant rate
+  limiting, request body limits, and bounded graceful shutdown on the API and
+  worker.
 
 ## Getting started (no BytePlus credentials needed)
 
@@ -181,9 +196,13 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. |
 | Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). |
 | Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. |
-| Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. 82 tests. |
+| Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. |
+| Productionization | ✅ multi-tenant auth (per-tenant API keys, tenant-scoped everything), per-tenant quotas, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Cost reference in [`docs/COST.md`](./docs/COST.md). 90 tests. |
 
-Phase 1 scope cuts (per memo §22.4): subagents, Kafka/RocketMQ (outbox is
-in-process), AgentKit Memory/Knowledge/Identity, KMS/FileNAS, multi-tenancy,
-streaming events (long-poll only), `fork`/`signals` endpoints. AgentKit
-Skills/MCP are deferred to a thin adapter milestone (M10).
+Built well beyond the original Phase 1 cut: subagents (Phase 3), signals +
+scheduling, AgentKit Memory/Knowledge/Skills/MCP (Phase 2), the semantic
+supervisor (Phase 5), and multi-tenant auth + quotas + cost attribution
+(Productionization) all landed. Remaining deferrals: Kafka/RocketMQ (the outbox
+is still in-process), KMS/FileNAS, credential escrow, streaming events (long-poll
+only), and the `fork` endpoint. Multi-instance rate limiting is per-instance
+today (a shared store like Redis would make it global).

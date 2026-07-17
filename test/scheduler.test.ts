@@ -205,7 +205,10 @@ describe('scheduler + worker', () => {
       { op: 'progress', note: 'merging child results' },
       { op: 'complete' },
     ]);
-    newWorker();
+    // This is the happy-path delegation test — disable subagent replacement so a
+    // child that transiently fails under CPU load can't add a replacement run
+    // and perturb the exact child count. Replacement has its own tests below.
+    newWorker({ MAX_CHILD_REPLACEMENTS: '0' });
 
     // The parent suspends to WAITING_CHILDREN, its children run, and it resumes
     // to COMPLETED. With scripted no-op children a single worker does the whole

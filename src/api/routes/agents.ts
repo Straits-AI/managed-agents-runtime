@@ -17,6 +17,7 @@ const createVersionBody = z.object({
   instructions: z.string().min(1),
   modelPolicy: z.object({
     model: z.string().optional(),
+    escalationModel: z.string().optional(),
     maxTokens: z.number().int().positive().optional(),
     temperature: z.number().min(0).max(2).optional(),
   }).default({}),
@@ -37,14 +38,15 @@ const createVersionBody = z.object({
 export function registerAgentRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.post('/v1/agents', async (req, reply) => {
     const body = createAgentBody.parse(req.body);
-    const agent = await createAgentDefinition(deps.pool, body);
+    const agent = await createAgentDefinition(deps.pool, { ...body, tenantId: req.tenantId });
     return reply.code(201).send(agent);
   });
 
   app.post<{ Params: { agentId: string } }>(
     '/v1/agents/:agentId/versions',
     async (req, reply) => {
-      const agent = await getAgentDefinition(deps.pool, req.params.agentId);
+      // Only the owning tenant can add versions to an agent.
+      const agent = await getAgentDefinition(deps.pool, req.params.agentId, req.tenantId);
       if (!agent) return reply.code(404).send({ error: 'agent not found' });
 
       const body = createVersionBody.parse(req.body);

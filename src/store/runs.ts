@@ -7,6 +7,8 @@ import { newId } from '../ids.js';
 type Q = Pool | Tx;
 
 export interface CreateRunInput {
+  /** Owning tenant. Defaults to 'default' for back-compat / internal callers. */
+  tenantId?: string;
   agentVersionId: string;
   goal: string;
   input?: Record<string, unknown>;
@@ -39,12 +41,13 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
   const wsId = newId('ws');
 
   await tx.query(
-    `INSERT INTO runs (id, agent_version_id, goal, input, status, max_steps,
+    `INSERT INTO runs (id, tenant_id, agent_version_id, goal, input, status, max_steps,
                        token_budget, scheduled_for, parent_run_id, debug_fault_points,
                        replaces_run_id, replacement_generation)
-     VALUES ($1, $2, $3, $4, 'CREATED', $5, $6, $7, $8, $9, $10, $11)`,
+     VALUES ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11, $12)`,
     [
       runId,
+      input.tenantId ?? 'default',
       input.agentVersionId,
       input.goal,
       JSON.stringify(input.input ?? {}),
@@ -91,7 +94,16 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
   });
 }
 
-export async function getRun(q: Q, id: string): Promise<RunRow | null> {
-  const { rows } = await q.query<RunRow>('SELECT * FROM runs WHERE id = $1', [id]);
+/**
+ * Fetch a run by id. When `tenantId` is given, a run owned by a different tenant
+ * is returned as null — the caller reports it as not-found so cross-tenant
+ * probing can't even confirm a run exists. Internal callers (scheduler, worker,
+ * child spawning) omit `tenantId` and see all runs.
+ */
+export async function getRun(q: Q, id: string, tenantId?: string): Promise<RunRow | null> {
+  const { rows } =
+    tenantId === undefined
+      ? await q.query<RunRow>('SELECT * FROM runs WHERE id = $1', [id])
+      : await q.query<RunRow>('SELECT * FROM runs WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
   return rows[0] ?? null;
 }
