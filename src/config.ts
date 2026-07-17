@@ -70,6 +70,11 @@ const configSchema = z.object({
   // Knowledge backend: 'pg' (Postgres, default), 'agentkit' (Knowledge Base),
   // or 'none'.
   KNOWLEDGE_PROVIDER: z.enum(['pg', 'agentkit', 'none']).default('pg'),
+  // Credential broker (memo §9.5): 'local' = encrypted Postgres store (needs
+  // CREDENTIAL_ENCRYPTION_KEY, a base64 32-byte AES-256 key); 'none' disables
+  // credential injection (default). Injected secrets never reach model context.
+  CREDENTIAL_PROVIDER: z.enum(['local', 'none']).default('none'),
+  CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
 
   WORKER_ID: z.string().default(`worker-${process.pid}`),
   LEASE_TTL_MS: intFromEnv(30_000),

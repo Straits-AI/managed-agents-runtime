@@ -18,6 +18,7 @@ import type {
   SkillProvider,
   SkillRef,
   McpToolProvider,
+  CredentialProvider,
   ToolCall,
   ToolDef,
 } from '../providers/types.js';
@@ -62,6 +63,8 @@ export interface EpochProviders {
   skills?: SkillProvider;
   /** MCP toolsets surfaced to the model and routed through policy (optional). */
   mcp?: McpToolProvider;
+  /** Credential broker: injects scoped secrets into tool calls (memo §9.5). */
+  credentials?: CredentialProvider;
 }
 
 /** How many memories to recall into context at the start of an epoch. */
@@ -195,6 +198,7 @@ export function createRealEpoch(providers: EpochProviders) {
           ?.knowledgeBaseId,
         mcp: providers.mcp,
         mcpRoute: mcp.route,
+        credentials: providers.credentials,
       };
 
       // Recall long-term memory once per epoch (stable within a run): the most

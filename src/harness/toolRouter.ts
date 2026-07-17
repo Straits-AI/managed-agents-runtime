@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { Config } from '../config.js';
 import type { RunAttemptRow, RunRow, ProgressLedger } from '../core/types.js';
 import type {
+  CredentialProvider,
   KnowledgeProvider,
   McpToolProvider,
   MemoryProvider,
@@ -52,6 +53,8 @@ export interface ToolContext {
   /** MCP toolsets: provider + name→toolset route for resolved MCP tools. */
   mcp?: McpToolProvider;
   mcpRoute?: Map<string, McpRouteEntry>;
+  /** Credential broker: injects scoped secrets into outbound calls (memo §9.5). */
+  credentials?: CredentialProvider;
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -660,6 +663,19 @@ async function externalHttpRequest(
     if (!['host', 'content-length', 'transfer-encoding'].includes(k.toLowerCase())) {
       headers[k] = String(v);
     }
+  }
+  // Credential broker (memo §9.5): inject the tenant's scoped secret for this
+  // action+resource, applied after model headers so it wins. The secret is set
+  // on the outbound request only — it never enters tool args, the result, the
+  // receipt, or the model context.
+  if (ctx.credentials) {
+    const cred = await ctx.credentials.resolve({
+      tenantId: ctx.run.tenant_id,
+      runId: ctx.run.id,
+      action: ACTION_NAME,
+      resource,
+    });
+    if (cred) headers[cred.headerName] = cred.headerValue;
   }
   headers['content-type'] = 'application/json';
   headers['idempotency-key'] = idemKey;

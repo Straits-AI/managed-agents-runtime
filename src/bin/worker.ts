@@ -62,6 +62,15 @@ if (epochMode === 'scripted') {
   // AgentKit MCP gateway adapter in a real deployment).
   const { RegistryMcpProvider } = await import('../providers/registryMcp.js');
   const mcp = new RegistryMcpProvider();
+  // Credential broker: local encrypted store (memo §9.5), off by default.
+  let credentials;
+  if (cfg.CREDENTIAL_PROVIDER === 'local') {
+    const { LocalCredentialProvider } = await import('../providers/local/credentialBroker.js');
+    const { loadKey } = await import('../crypto.js');
+    const { requireConfig } = await import('../config.js');
+    const req = requireConfig(cfg, ['CREDENTIAL_ENCRYPTION_KEY']);
+    credentials = new LocalCredentialProvider(pool, loadKey(req.CREDENTIAL_ENCRYPTION_KEY));
+  }
   epoch = createRealEpoch({
     model: new ModelArkProvider(cfg),
     sandbox,
@@ -70,6 +79,7 @@ if (epochMode === 'scripted') {
     knowledge,
     skills,
     mcp,
+    credentials,
   });
   onSandboxOrphaned = (id) => sandbox.terminateById(id);
 }

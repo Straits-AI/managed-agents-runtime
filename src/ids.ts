@@ -14,7 +14,8 @@ export type IdPrefix =
   | 'mem'  // agent memory
   | 'kdoc' // knowledge document
   | 'tnt'  // tenant
-  | 'key'; // api key
+  | 'key'  // api key
+  | 'cred'; // credential
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${ulid().toLowerCase()}`;

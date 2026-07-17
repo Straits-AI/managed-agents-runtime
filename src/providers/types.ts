@@ -182,3 +182,20 @@ export interface PublishableEvent {
 export interface EventPublisher {
   publish(events: PublishableEvent[]): Promise<void>;
 }
+
+/**
+ * Credential broker (memo §9.5, §19 layer 5). Releases a scoped secret to a
+ * run's outbound tool call after verifying the request. The returned header is
+ * injected into the tool adapter's request and MUST never enter the model
+ * context, tool arguments, results, or the audit ledger. Returns null when no
+ * credential is authorized for the request. Local (encrypted store) and KMS
+ * adapters are interchangeable.
+ */
+export interface CredentialProvider {
+  resolve(input: {
+    tenantId: string;
+    runId: string;
+    action: string;
+    resource: string;
+  }): Promise<{ headerName: string; headerValue: string } | null>;
+}
