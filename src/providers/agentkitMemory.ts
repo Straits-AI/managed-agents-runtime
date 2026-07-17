@@ -1,41 +1,65 @@
+import { AgentKitClient } from './byteplus/agentkit.js';
 import type { MemoryProvider, MemoryRecord, MemoryScope } from './types.js';
 
 /**
- * AgentKit Memory adapter (memo §9.3). Implements the same MemoryProvider
- * interface as PgMemoryProvider, so selecting it is a one-line swap in the
- * worker — the kernel is unchanged.
+ * AgentKit Memory adapter (memo §9.3), implementing the same MemoryProvider
+ * interface as PgMemoryProvider — selecting it is a one-line swap in the worker.
  *
- * BINDING STATUS (2026-07-17): not yet bound to live AgentKit. AgentKit is not
- * exposed through the `bp` CLI and its dedicated CLI/OpenAPI is not provisioned
- * in this environment. To bind:
+ * VERIFIED LIVE (2026-07-17, this account): AgentKit is fully enabled and the
+ * OpenAPI is directly callable with our BytePlus signer (service `agentkit`,
+ * version `2025-10-30`) — no separate CLI. Confirmed valid actions:
+ * ListRuntimes, ListTools, ListMemoryCollections, GetMemoryCollection(MemoryId),
+ * CreateMemoryCollection(Name). AgentKit Memory is backed by VikingDB.
  *
- *   1. Install the official AgentKit CLI and confirm create-entitlement with
- *      read-only ListRuntimes/ListTools (see the byteplus-cloud skill's
- *      agentkit reference — create actions return InvalidActionOrVersion when
- *      the account is not activated).
- *   2. Retrieve the current Memory API contract (search/write endpoints, the
- *      memory-space/collection model, auth) from the live AgentKit OpenAPI.
- *   3. Implement search()/write() below against that contract, signing with the
- *      credential-isolating flow (clicreds.CliProvider), never printing keys.
- *   4. Map AgentKit's memory-space identity to MemoryScope {tenantId, agentId}.
- *
- * Until then, constructing this provider throws, so a misconfigured deployment
- * fails fast rather than silently losing memory.
+ * REMAINING TO COMPLETE search()/write(): a VikingDB-backed memory collection
+ * must exist (CreateMemoryCollection — a billable VikingDB resource that may
+ * require VikingDB activation), and the exact memory-data add/search action
+ * names/schemas must be confirmed against that live collection (the guessed
+ * AddMemory/SearchMemory names returned InvalidActionOrVersion — the real ones
+ * are captured via the console once a collection exists). Run
+ * `scripts/probe-agentkit-memory.ts` after provisioning to discover them, then
+ * fill in the two calls below.
  */
+export interface AgentKitMemoryConfig {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+  region?: string;
+  /** The AgentKit memory collection (VikingDB-backed) to read/write. */
+  memoryId: string;
+}
+
 export class AgentKitMemoryProvider implements MemoryProvider {
-  constructor(_config: { endpoint?: string; memorySpace?: string } = {}) {
-    throw new Error(
-      'AgentKitMemoryProvider is not bound yet — see the binding steps in ' +
-        'src/providers/agentkitMemory.ts. Use PgMemoryProvider (MEMORY_PROVIDER=pg) meanwhile.',
-    );
+  private readonly client: AgentKitClient;
+  private readonly memoryId: string;
+
+  constructor(cfg: AgentKitMemoryConfig) {
+    if (!cfg.memoryId) {
+      throw new Error(
+        'AgentKitMemoryProvider needs a memoryId (a provisioned VikingDB memory ' +
+          'collection). Create one with CreateMemoryCollection, then set it. Until ' +
+          'then use PgMemoryProvider (MEMORY_PROVIDER=pg).',
+      );
+    }
+    this.client = new AgentKitClient({
+      accessKeyId: cfg.accessKeyId,
+      secretAccessKey: cfg.secretAccessKey,
+      sessionToken: cfg.sessionToken,
+      region: cfg.region,
+    });
+    this.memoryId = cfg.memoryId;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async search(_scope: MemoryScope, _query: string, _limit: number): Promise<MemoryRecord[]> {
-    throw new Error('AgentKitMemoryProvider.search not implemented');
+    // TODO(agentkit-memory): call the confirmed memory-search action against
+    // this.memoryId and map results to MemoryRecord. Action name pending
+    // discovery on a live collection (see class doc).
+    throw new Error('AgentKitMemoryProvider.search: memory-search action not yet confirmed');
   }
 
   async write(): Promise<void> {
-    throw new Error('AgentKitMemoryProvider.write not implemented');
+    // TODO(agentkit-memory): call the confirmed memory-add action against
+    // this.memoryId. Action name pending discovery on a live collection.
+    throw new Error('AgentKitMemoryProvider.write: memory-add action not yet confirmed');
   }
 }
