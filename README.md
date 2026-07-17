@@ -84,6 +84,26 @@ npm run api         # public API (set API_PORT if 8080 is taken)
 npm run worker      # harness worker (WORKER_EPOCH=scripted for no-model runs)
 ```
 
+## Real-world scenarios & course material
+
+Beyond the acceptance benchmark, the runtime is exercised across diverse
+workloads — data analysis, code generation, governed operations, document
+processing — with every run captured for teaching:
+
+```bash
+node --env-file=.env --import tsx scenarios/run.ts data-analysis
+node --env-file=.env --import tsx scenarios/run.ts code-gen
+node --env-file=.env --import tsx scenarios/run.ts approval-gated
+node --env-file=.env --import tsx scenarios/run.ts doc-processing
+```
+
+Each writes a structured result (event timeline, artifacts, receipts, token
+usage) to `scenarios/results/`. The consolidated tutorial write-up —
+per-scenario lessons plus cross-cutting teaching points on durability,
+governance, and objective verification — is in
+**[`docs/COURSE-MATERIAL.md`](./docs/COURSE-MATERIAL.md)**. All four scenarios
+completed correctly on the live BytePlus stack (Seed-2.0-lite, ~30–45 s each).
+
 ## The acceptance benchmark (memo §24)
 
 ```bash

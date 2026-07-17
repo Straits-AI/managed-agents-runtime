@@ -1,0 +1,148 @@
+{
+  "id": "data-analysis",
+  "title": "Data analysis agent — CSV to summary report",
+  "teaches": "The core loop: seed data into the durable workspace, let the agent compute with real tools (python/bash), verify a required artifact exists, and retrieve it from TOS.",
+  "status": "COMPLETED",
+  "durationMs": 41403,
+  "goal": "The file sales.csv (columns: region,month,amount) is in your workspace. 1) Compute total revenue, revenue per region, and the single best month by total revenue. 2) Write REPORT.md with those figures clearly labelled. 3) Call run_complete with artifacts [\"REPORT.md\"].",
+  "seedFiles": {
+    "sales.csv": "region,month,amount\nAPAC,Jan,1200\nAPAC,Feb,1500\nAPAC,Mar,1800\nEMEA,Jan,900\nEMEA,Feb,1100\nEMEA,Mar,1300\nAMER,Jan,2000\nAMER,Feb,1700\nAMER,Mar,2100\n"
+  },
+  "grants": [],
+  "eventTimeline": [
+    {
+      "seq": 1,
+      "type": "RunCreated",
+      "at": "2026-07-17T03:56:11.545Z"
+    },
+    {
+      "seq": 2,
+      "type": "RunQueued",
+      "at": "2026-07-17T03:56:11.545Z"
+    },
+    {
+      "seq": 3,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T03:56:13.386Z"
+    },
+    {
+      "seq": 4,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T03:56:13.408Z"
+    },
+    {
+      "seq": 5,
+      "type": "SandboxAllocated",
+      "at": "2026-07-17T03:56:25.373Z"
+    },
+    {
+      "seq": 6,
+      "type": "WorkspaceRestored",
+      "at": "2026-07-17T03:56:26.081Z"
+    },
+    {
+      "seq": 7,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T03:56:26.104Z"
+    },
+    {
+      "seq": 8,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T03:56:28.831Z"
+    },
+    {
+      "seq": 9,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T03:56:28.910Z"
+    },
+    {
+      "seq": 10,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T03:56:30.608Z"
+    },
+    {
+      "seq": 11,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T03:56:30.683Z"
+    },
+    {
+      "seq": 12,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T03:56:40.403Z"
+    },
+    {
+      "seq": 13,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T03:56:40.576Z"
+    },
+    {
+      "seq": 14,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T03:56:45.348Z"
+    },
+    {
+      "seq": 15,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T03:56:45.780Z"
+    },
+    {
+      "seq": 16,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T03:56:49.448Z"
+    },
+    {
+      "seq": 17,
+      "type": "VerificationStarted",
+      "at": "2026-07-17T03:56:49.466Z"
+    },
+    {
+      "seq": 18,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T03:56:50.404Z"
+    },
+    {
+      "seq": 19,
+      "type": "RunCompleted",
+      "at": "2026-07-17T03:56:50.419Z"
+    }
+  ],
+  "eventCounts": {
+    "RunCreated": 1,
+    "RunQueued": 1,
+    "AttemptStarted": 2,
+    "SandboxAllocated": 1,
+    "WorkspaceRestored": 1,
+    "ModelInvocationStarted": 5,
+    "ModelInvocationCompleted": 5,
+    "VerificationStarted": 1,
+    "WorkspaceCheckpointed": 1,
+    "RunCompleted": 1
+  },
+  "attempts": [
+    {
+      "id": "att_01kxq3fe6dkcwhmzmberfpcj6d",
+      "run_id": "run_01kxq3fcctgkfgj87rahqfay2d",
+      "attempt_no": 1,
+      "worker_id": "data-analysis-worker",
+      "state": "ACTIVE",
+      "lease_expires_at": "2026-07-17T03:57:03.413Z",
+      "heartbeat_at": "2026-07-17T03:56:48.413Z",
+      "sandbox_id": "vefaas-jsdzgnxi-0d9v4raq51-d9cqfn807v3l4ko01dc0-sandbox",
+      "sandbox_domain": "https://s061f54q9u6u9vfjfs4s3.apigateway-ap-southeast-1.apigw-byteplus.com",
+      "started_from_checkpoint_id": null,
+      "exit_reason": null,
+      "created_at": "2026-07-17T03:56:13.386Z"
+    }
+  ],
+  "approvals": [],
+  "externalActions": [],
+  "toolReceipts": [],
+  "tokenUsage": {
+    "inputTokens": 8329,
+    "outputTokens": 1263,
+    "calls": 5
+  },
+  "artifacts": {
+    "REPORT.md": "# Sales Report\n\n## Total Revenue\nThe total revenue across all regions and months is **$13,600**.\n\n## Revenue by Region\n- AMER: $5,800\n- APAC: $4,500\n- EMEA: $3,300\n\n## Best Month by Total Revenue\nThe single best month by total revenue is **March**, with a total revenue of $5,200."
+  }
+}

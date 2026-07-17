@@ -1,0 +1,258 @@
+{
+  "id": "approval-gated",
+  "title": "Governed operations agent — human-approved external write",
+  "teaches": "The governance story: a side-effecting external call is gated by a capability grant that requires human approval; the run suspends with zero compute, resumes on approval, and the write is recorded exactly once via a durable receipt.",
+  "status": "COMPLETED",
+  "durationMs": 43948,
+  "goal": "Compute the sum of the integers in numbers.txt (one per line). Then register it by POSTing {\"sum\": <the sum>} to http://127.0.0.1:50734/results using external_http_request (this needs human approval — request it and wait for the decision). After it succeeds, call run_complete with artifacts [].",
+  "seedFiles": {
+    "numbers.txt": "11\n22\n33\n44\n"
+  },
+  "grants": [
+    {
+      "action": "external.http.*",
+      "resource": "{{EXTERNAL}}",
+      "requiresApproval": true
+    }
+  ],
+  "eventTimeline": [
+    {
+      "seq": 1,
+      "type": "RunCreated",
+      "at": "2026-07-17T04:00:34.249Z"
+    },
+    {
+      "seq": 2,
+      "type": "RunQueued",
+      "at": "2026-07-17T04:00:34.249Z"
+    },
+    {
+      "seq": 3,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:00:34.934Z"
+    },
+    {
+      "seq": 4,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:00:34.944Z"
+    },
+    {
+      "seq": 5,
+      "type": "SandboxAllocated",
+      "at": "2026-07-17T04:00:46.560Z"
+    },
+    {
+      "seq": 6,
+      "type": "WorkspaceRestored",
+      "at": "2026-07-17T04:00:47.043Z"
+    },
+    {
+      "seq": 7,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:00:47.072Z"
+    },
+    {
+      "seq": 8,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:00:52.510Z"
+    },
+    {
+      "seq": 9,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:00:52.670Z"
+    },
+    {
+      "seq": 10,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:00:54.667Z"
+    },
+    {
+      "seq": 11,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:00:54.880Z"
+    },
+    {
+      "seq": 12,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:00:57.830Z"
+    },
+    {
+      "seq": 13,
+      "type": "ApprovalRequested",
+      "at": "2026-07-17T04:00:57.852Z"
+    },
+    {
+      "seq": 14,
+      "type": "ApprovalReceived",
+      "at": "2026-07-17T04:00:58.454Z"
+    },
+    {
+      "seq": 15,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:00:58.552Z"
+    },
+    {
+      "seq": 16,
+      "type": "SandboxTerminated",
+      "at": "2026-07-17T04:00:58.765Z"
+    },
+    {
+      "seq": 17,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:00:58.785Z"
+    },
+    {
+      "seq": 18,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:00:58.795Z"
+    },
+    {
+      "seq": 19,
+      "type": "SandboxAllocated",
+      "at": "2026-07-17T04:01:10.892Z"
+    },
+    {
+      "seq": 20,
+      "type": "WorkspaceRestored",
+      "at": "2026-07-17T04:01:11.948Z"
+    },
+    {
+      "seq": 21,
+      "type": "ToolInvocationStarted",
+      "at": "2026-07-17T04:01:11.969Z"
+    },
+    {
+      "seq": 22,
+      "type": "ToolInvocationCommitted",
+      "at": "2026-07-17T04:01:11.998Z"
+    },
+    {
+      "seq": 23,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:01:12.023Z"
+    },
+    {
+      "seq": 24,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:01:14.825Z"
+    },
+    {
+      "seq": 25,
+      "type": "VerificationStarted",
+      "at": "2026-07-17T04:01:14.840Z"
+    },
+    {
+      "seq": 26,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:01:15.122Z"
+    },
+    {
+      "seq": 27,
+      "type": "RunCompleted",
+      "at": "2026-07-17T04:01:15.137Z"
+    },
+    {
+      "seq": 28,
+      "type": "SandboxTerminated",
+      "at": "2026-07-17T04:01:15.335Z"
+    }
+  ],
+  "eventCounts": {
+    "RunCreated": 1,
+    "RunQueued": 1,
+    "AttemptStarted": 4,
+    "SandboxAllocated": 2,
+    "WorkspaceRestored": 2,
+    "ModelInvocationStarted": 4,
+    "ModelInvocationCompleted": 4,
+    "ApprovalRequested": 1,
+    "ApprovalReceived": 1,
+    "WorkspaceCheckpointed": 2,
+    "SandboxTerminated": 2,
+    "ToolInvocationStarted": 1,
+    "ToolInvocationCommitted": 1,
+    "VerificationStarted": 1,
+    "RunCompleted": 1
+  },
+  "attempts": [
+    {
+      "id": "att_01kxq3qdkr9rzaws4svmy5tewn",
+      "run_id": "run_01kxq3qcy9a8tzpdz9x9mcbfa6",
+      "attempt_no": 1,
+      "worker_id": "approval-gated-worker",
+      "state": "EXITED",
+      "lease_expires_at": "2026-07-17T04:01:09.949Z",
+      "heartbeat_at": "2026-07-17T04:00:54.949Z",
+      "sandbox_id": "vefaas-jsdzgnxi-0d9v4raq51-d9cqhoo0d2stlmo028eg-sandbox",
+      "sandbox_domain": "https://s061f54q9u6u9vfjfs4s3.apigateway-ap-southeast-1.apigw-byteplus.com",
+      "started_from_checkpoint_id": null,
+      "exit_reason": "suspended_for_approval",
+      "created_at": "2026-07-17T04:00:34.934Z"
+    },
+    {
+      "id": "att_01kxq3r4x4nknwck879bkfzkb4",
+      "run_id": "run_01kxq3qcy9a8tzpdz9x9mcbfa6",
+      "attempt_no": 2,
+      "worker_id": "approval-gated-worker",
+      "state": "EXITED",
+      "lease_expires_at": "2026-07-17T04:01:28.798Z",
+      "heartbeat_at": "2026-07-17T04:01:13.798Z",
+      "sandbox_id": "vefaas-jsdzgnxi-0d9v4raq51-d9cqhuo0d2stlmo028f0-sandbox",
+      "sandbox_domain": "https://s061f54q9u6u9vfjfs4s3.apigateway-ap-southeast-1.apigw-byteplus.com",
+      "started_from_checkpoint_id": null,
+      "exit_reason": "completed",
+      "created_at": "2026-07-17T04:00:58.785Z"
+    }
+  ],
+  "approvals": [
+    {
+      "id": "apr_01kxq3r3zwkgf0vqenffc5jfcb",
+      "run_id": "run_01kxq3qcy9a8tzpdz9x9mcbfa6",
+      "requested_by_attempt_id": "att_01kxq3qdkr9rzaws4svmy5tewn",
+      "action": {
+        "risk": "external_write",
+        "action": "external.http.request",
+        "resource": "http://127.0.0.1:50734",
+        "arguments": {
+          "url": "http://127.0.0.1:50734/results",
+          "body": {
+            "sum": 110
+          },
+          "method": "POST",
+          "__idemKey": "1fa087ec1686b835619c8135d368b1e8c9fa4b7ed525c82a329816f386d84906"
+        }
+      },
+      "status": "APPROVED",
+      "decision_by": "scenario-runner",
+      "decided_at": "2026-07-17T04:00:58.454Z",
+      "expires_at": null,
+      "created_at": "2026-07-17T04:00:57.852Z"
+    }
+  ],
+  "externalActions": [
+    {
+      "id": "txn_316bef199cd36e62",
+      "idempotencyKey": "1fa087ec1686b835619c8135d368b1e8c9fa4b7ed525c82a329816f386d84906",
+      "method": "POST",
+      "path": "/results",
+      "body": {
+        "sum": 110
+      },
+      "receivedCount": 1,
+      "firstReceivedAt": "2026-07-17T04:01:11.993Z"
+    }
+  ],
+  "toolReceipts": [
+    {
+      "semantic_action": "external.http.request",
+      "status": "COMMITTED",
+      "reversibility": "irreversible"
+    }
+  ],
+  "tokenUsage": {
+    "inputTokens": 5988,
+    "outputTokens": 553,
+    "calls": 4
+  },
+  "artifacts": {}
+}

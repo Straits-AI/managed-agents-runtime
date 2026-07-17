@@ -1,0 +1,154 @@
+{
+  "id": "code-gen",
+  "title": "Coding agent — implement a utility and pass its tests",
+  "teaches": "Objective verification: the agent writes code, and completion is gated on a real test command exiting 0 in the sandbox — not on the model claiming success.",
+  "status": "COMPLETED",
+  "durationMs": 32227,
+  "goal": "Implement a Python module roman.py with a function to_roman(n) that converts an integer 1..3999 to a Roman numeral string. A test file test_roman.py is already in your workspace — make it pass. Run `python3 -m unittest test_roman` yourself to check, then call run_complete with artifacts [\"roman.py\"].",
+  "seedFiles": {
+    "test_roman.py": "import unittest\nfrom roman import to_roman\n\nclass TestRoman(unittest.TestCase):\n    def test_basic(self):\n        cases = {1:'I',4:'IV',9:'IX',40:'XL',90:'XC',400:'CD',1994:'MCMXCIV',3999:'MMMCMXCIX'}\n        for n, expected in cases.items():\n            self.assertEqual(to_roman(n), expected)\n\nif __name__ == '__main__':\n    unittest.main()\n"
+  },
+  "grants": [],
+  "eventTimeline": [
+    {
+      "seq": 1,
+      "type": "RunCreated",
+      "at": "2026-07-17T03:59:48.079Z"
+    },
+    {
+      "seq": 2,
+      "type": "RunQueued",
+      "at": "2026-07-17T03:59:48.079Z"
+    },
+    {
+      "seq": 3,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T03:59:49.691Z"
+    },
+    {
+      "seq": 4,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T03:59:49.713Z"
+    },
+    {
+      "seq": 5,
+      "type": "SandboxAllocated",
+      "at": "2026-07-17T03:59:58.789Z"
+    },
+    {
+      "seq": 6,
+      "type": "WorkspaceRestored",
+      "at": "2026-07-17T03:59:59.248Z"
+    },
+    {
+      "seq": 7,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T03:59:59.267Z"
+    },
+    {
+      "seq": 8,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:00:02.412Z"
+    },
+    {
+      "seq": 9,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:00:02.520Z"
+    },
+    {
+      "seq": 10,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:00:04.439Z"
+    },
+    {
+      "seq": 11,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:00:04.525Z"
+    },
+    {
+      "seq": 12,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:00:10.142Z"
+    },
+    {
+      "seq": 13,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:00:10.289Z"
+    },
+    {
+      "seq": 14,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:00:11.675Z"
+    },
+    {
+      "seq": 15,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:00:12.014Z"
+    },
+    {
+      "seq": 16,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:00:16.616Z"
+    },
+    {
+      "seq": 17,
+      "type": "VerificationStarted",
+      "at": "2026-07-17T04:00:16.630Z"
+    },
+    {
+      "seq": 18,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:00:17.948Z"
+    },
+    {
+      "seq": 19,
+      "type": "RunCompleted",
+      "at": "2026-07-17T04:00:17.966Z"
+    },
+    {
+      "seq": 20,
+      "type": "SandboxTerminated",
+      "at": "2026-07-17T04:00:18.292Z"
+    }
+  ],
+  "eventCounts": {
+    "RunCreated": 1,
+    "RunQueued": 1,
+    "AttemptStarted": 2,
+    "SandboxAllocated": 1,
+    "WorkspaceRestored": 1,
+    "ModelInvocationStarted": 5,
+    "ModelInvocationCompleted": 5,
+    "VerificationStarted": 1,
+    "WorkspaceCheckpointed": 1,
+    "RunCompleted": 1,
+    "SandboxTerminated": 1
+  },
+  "attempts": [
+    {
+      "id": "att_01kxq3p1dz90fmgt5cj64bknaw",
+      "run_id": "run_01kxq3nzvfk6v2ppbtps2n4nhs",
+      "attempt_no": 1,
+      "worker_id": "code-gen-worker",
+      "state": "EXITED",
+      "lease_expires_at": "2026-07-17T04:00:29.721Z",
+      "heartbeat_at": "2026-07-17T04:00:14.721Z",
+      "sandbox_id": "vefaas-jsdzgnxi-0d9v4raq51-d9cqhdg07v3l4ko01dcg-sandbox",
+      "sandbox_domain": "https://s061f54q9u6u9vfjfs4s3.apigateway-ap-southeast-1.apigw-byteplus.com",
+      "started_from_checkpoint_id": null,
+      "exit_reason": "completed",
+      "created_at": "2026-07-17T03:59:49.691Z"
+    }
+  ],
+  "approvals": [],
+  "externalActions": [],
+  "toolReceipts": [],
+  "tokenUsage": {
+    "inputTokens": 8438,
+    "outputTokens": 827,
+    "calls": 5
+  },
+  "artifacts": {
+    "roman.py": "def to_roman(n):\n    roman_numerals = [\n        (1000, 'M'),\n        (900, 'CM'),\n        (500, 'D'),\n        (400, 'CD'),\n        (100, 'C'),\n        (90, 'XC'),\n        (50, 'L'),\n        (40, 'XL'),\n        (10, 'X'),\n        (9, 'IX'),\n        (5, 'V'),\n        (4, 'IV'),\n        (1, 'I')\n    ]\n    result = []\n    for value, symbol in roman_numerals:\n        while n >= value:\n            result.append(symbol)\n            n -= value\n        if n == 0:\n            break\n    return ''.join(result)\n"
+  }
+}
