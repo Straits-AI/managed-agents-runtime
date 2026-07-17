@@ -51,30 +51,36 @@ npm test               # 37 tests: state machine, crash recovery, approvals,
 
 ## Connecting to BytePlus
 
-Copy `.env.example` to `.env` and fill in (console prerequisites: a ModelArk
-API key + model, an IAM keypair with veFaaS/APIG/TOS access, a deployed
-**Code Sandbox Agent** application (its FunctionId), and a TOS bucket):
+Copy `.env.example` to `.env` and fill it in. The live dev stack is provisioned
+and documented in [`infra/resources.md`](./infra/resources.md); provisioning and
+credential helpers live in [`scripts/`](./scripts/):
 
-```
-ARK_API_KEY / ARK_MODEL
-BYTEPLUS_ACCESS_KEY_ID / BYTEPLUS_SECRET_ACCESS_KEY
-VEFAAS_SANDBOX_FUNCTION_ID
-TOS_BUCKET
-```
+| Setting | How to obtain (see `scripts/` + `infra/resources.md`) |
+| --- | --- |
+| `BYTEPLUS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN` | `python3 scripts/refresh-creds.py` syncs STS creds from `bp login` (~15 min TTL; rerun before a cloud batch) |
+| `TOS_BUCKET` | `scripts/provision-tos.ts` (idempotent create + roundtrip verify) |
+| `ARK_API_KEY` / `ARK_MODEL` | activate a model in the console, then `scripts/get-ark-key.py --endpoint-id ep-…` (key + endpoint id → `.env`) |
+| `VEFAAS_SANDBOX_FUNCTION_ID` | sandbox application created in the console (only surface that sets `FunctionType: sandbox`); instances are then fully programmatic |
+| `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | APIG serverless gateway + Key Auth route fronting the sandbox; key registered via `bp apig CreateConsumerCredential` |
+
+> **Provisioning notes learned the hard way** (all in `infra/resources.md`):
+> sandbox applications and the APIG gateway are console-only to create;
+> `CreateSandbox` uses `InstanceImageInfo.{Image,Command}` (not `ImageUrl`) and
+> inherits the released app image when omitted; the AIO sandbox runs as user
+> `gem`, so the workspace lives under `/home/gem/workspace`.
 
 Then verify every surface:
 
 ```bash
-npm run preflight   # PASS/FAIL per provider; also settles whether the
-                    # vefaas sandbox actions are exposed on
-                    # open.byteplusapi.com (fallback: open.volcengineapi.com
-                    # via BYTEPLUS_OPENAPI_HOST/BYTEPLUS_REGION)
+npm run preflight       # control-plane PASS/FAIL per provider
+node --env-file=.env --import tsx scripts/smoke-ark.ts       # ModelArk chat (≤32 tokens)
+node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→exec→file r/w→terminate via gateway
 ```
 
 Run the platform:
 
 ```bash
-npm run api         # public API on :8080
+npm run api         # public API (set API_PORT if 8080 is taken)
 npm run worker      # harness worker (WORKER_EPOCH=scripted for no-model runs)
 ```
 
@@ -96,10 +102,10 @@ artifacts. Exit code 0 = Phase 1 accepted.
 
 | Milestone | State |
 | --- | --- |
-| M0–M3 kernel (schema, transitions, scheduler, API) | ✅ built + tested locally |
-| M4 signer + preflight | ✅ built; awaiting credentials to run |
-| M5–M8 real epoch, receipts, verifier | ✅ built; router logic tested locally |
-| M9 survival benchmark | ⏳ script ready; blocked on credentials |
+| M0–M3 kernel (schema, transitions, scheduler, API) | ✅ built + tested locally (38 tests) |
+| M4 signer + preflight | ✅ built + run against live BytePlus |
+| M5–M8 real epoch, receipts, verifier | ✅ built + exercised end-to-end |
+| M9 survival benchmark | ✅ **PASSED on the live stack** (TOS + ModelArk + Cloud Sandbox via APIG), 2026-07-17 — 57-event gapless history, exactly-once external write |
 
 Phase 1 scope cuts (per memo §22.4): subagents, Kafka/RocketMQ (outbox is
 in-process), AgentKit Memory/Knowledge/Identity, KMS/FileNAS, multi-tenancy,

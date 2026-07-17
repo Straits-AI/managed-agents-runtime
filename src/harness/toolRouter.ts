@@ -39,8 +39,7 @@ export interface ToolContext {
 export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'bash_exec',
-    description:
-      'Run a bash command in the sandbox. The working directory defaults to /workspace.',
+    description: `Run a bash command in the sandbox. The working directory defaults to ${WORKSPACE_DIR}.`,
     parameters: {
       type: 'object',
       properties: {
@@ -53,7 +52,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'file_write',
-    description: 'Write a file in the sandbox (path relative to /workspace).',
+    description: `Write a file in the sandbox (path relative to ${WORKSPACE_DIR}).`,
     parameters: {
       type: 'object',
       properties: {
@@ -65,7 +64,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'file_read',
-    description: 'Read a file from the sandbox (path relative to /workspace).',
+    description: `Read a file from the sandbox (path relative to ${WORKSPACE_DIR}).`,
     parameters: {
       type: 'object',
       properties: { path: { type: 'string' } },
@@ -110,8 +109,7 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'run_complete',
-    description:
-      'Declare the goal achieved. List the artifact file paths (relative to /workspace) that constitute your deliverables. Verification runs before completion is accepted.',
+    description: `Declare the goal achieved. List the artifact file paths (relative to ${WORKSPACE_DIR}) that constitute your deliverables. Verification runs before completion is accepted.`,
     parameters: {
       type: 'object',
       properties: {

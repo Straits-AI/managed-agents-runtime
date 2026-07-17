@@ -3,6 +3,7 @@ import type { ProgressLedger, RunRow } from '../core/types.js';
 import type { AgentVersionRow } from '../store/agents.js';
 import type { ChatMessage } from '../providers/types.js';
 import type { CapabilityGrantRow } from '../store/grants.js';
+import { WORKSPACE_DIR } from './workspace.js';
 
 /** Max transcript messages replayed into context before truncation. */
 const TRANSCRIPT_TAIL = 60;
@@ -28,7 +29,7 @@ export function compileContext(input: {
     '',
     '# Execution environment',
     'You are a durable agent process. Your work happens in a Linux sandbox',
-    'with a persistent /workspace directory that survives sandbox loss.',
+    `with a persistent ${WORKSPACE_DIR} directory that survives sandbox loss.`,
     'Work step by step using the available tools. Keep the progress ledger',
     'up to date with progress.update — it is how your work survives',
     'interruption. When the goal is fully achieved, call run.complete.',

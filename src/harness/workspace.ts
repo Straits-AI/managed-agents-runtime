@@ -4,7 +4,9 @@ import { appendEvent } from '../core/transition.js';
 import { insertRevision, getRevision, headRevision } from '../store/workspaces.js';
 import type { ObjectStore, SandboxHandle, SandboxProvider } from '../providers/types.js';
 
-const WORKSPACE_DIR = '/workspace';
+// Under the AIO sandbox user's home so the unprivileged runtime user (gem)
+// can create and own it; a root-level /workspace is not writable without sudo.
+const WORKSPACE_DIR = '/home/gem/workspace';
 
 /**
  * Durable workspace management (memo §15): the sandbox filesystem is never
@@ -32,7 +34,12 @@ export class WorkspaceManager {
       initCommand?: string;
     },
   ): Promise<{ restoredRevisionId: string | null }> {
-    await this.sandbox.exec(handle, `mkdir -p ${WORKSPACE_DIR}`);
+    const mk = await this.sandbox.exec(handle, `mkdir -p ${WORKSPACE_DIR}`);
+    if (mk.exitCode !== 0) {
+      throw new Error(
+        `could not create workspace dir ${WORKSPACE_DIR}: ${mk.stderr.slice(0, 200)}`,
+      );
+    }
 
     const head = await headRevision(this.pool, input.workspaceId);
     if (head) {

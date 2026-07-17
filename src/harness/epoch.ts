@@ -21,7 +21,7 @@ import { listGrants } from '../store/grants.js';
 import { listEvents } from '../store/events.js';
 import { listApprovals } from '../store/approvals.js';
 import { compileContext } from './contextCompiler.js';
-import { WorkspaceManager } from './workspace.js';
+import { WorkspaceManager, WORKSPACE_DIR } from './workspace.js';
 import { dispatchTool, TOOL_DEFS, TOOL_DOCS, type ToolContext } from './toolRouter.js';
 import { verify, type VerifierPolicy } from './verifier.js';
 import { maybeCrash } from './faults.js';
@@ -369,7 +369,7 @@ async function finishRun(
   // Upload declared artifacts to TOS for durable retrieval.
   const artifactKeys: Record<string, string> = {};
   for (const path of artifacts) {
-    const abs = path.startsWith('/') ? path : `/workspace/${path}`;
+    const abs = path.startsWith('/') ? path : `${WORKSPACE_DIR}/${path}`;
     const content = await ctx.providers.sandbox.readFile(ctx.sandbox, abs);
     const key = `runs/${run.id}/artifacts/${path.replace(/^\//, '')}`;
     await ctx.providers.objectStore.put(key, Buffer.from(content));

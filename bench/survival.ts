@@ -158,7 +158,7 @@ const agent = await api<{ id: string }>('POST', '/v1/agents', {
 });
 const version = await api<{ id: string }>('POST', `/v1/agents/${agent.id}/versions`, {
   instructions:
-    'You are a careful software engineer working in a repository at /workspace.',
+    'You are a careful software engineer working in a repository at /home/gem/workspace.',
   modelPolicy: { model: cfg.ARK_MODEL, maxTokens: 4096 },
   verifierPolicy: {
     requiredArtifacts: ['RESULT.md'],
@@ -192,8 +192,16 @@ ok(`run ${run.id} created`);
 
 step('execute several model and tool steps (worker 1)');
 const worker1 = spawnProc('src/bin/worker.ts', { WORKER_ID: 'bench-worker-1' });
-await waitFor('first tool activity', async () =>
-  (await getEvents(run.id)).some((e) => e.type === 'ToolInvocationStarted' || e.type === 'ProgressUpdated'),
+// "Activity" is any sign the harness loop is turning. ToolInvocationStarted
+// only fires for approval-cleared external calls, and file/bash tools emit no
+// events, so a model round-trip is the earliest reliable progress signal.
+await waitFor('first model/tool activity', async () =>
+  (await getEvents(run.id)).some(
+    (e) =>
+      e.type === 'ModelInvocationCompleted' ||
+      e.type === 'ToolInvocationStarted' ||
+      e.type === 'ProgressUpdated',
+  ),
 );
 ok('model and tool steps running');
 
@@ -243,16 +251,22 @@ await waitFor('WAITING_APPROVAL', async () => (await getRun(run.id)).status === 
 ok('run suspended awaiting approval');
 
 step(`suspend with zero active compute (${APPROVAL_WAIT_MS / 1000}s)`);
-{
-  const r = await getRun(run.id);
-  const active = r.attempts.filter((a) => a.state === 'ACTIVE');
-  if (active.length !== 0) fail(`expected 0 ACTIVE attempts, found ${active.length}`);
-}
+// The run status flips to WAITING_APPROVAL inside the tool-router transaction;
+// the worker releases its attempt (ACTIVE→EXITED) a moment later in settle.
+// Allow that settle to land, then require zero active compute to HOLD for the
+// entire wait below — which is the property that actually matters.
+await waitFor(
+  'attempt released (0 active)',
+  async () => (await getRun(run.id)).attempts.every((a) => a.state !== 'ACTIVE'),
+  30_000,
+);
 console.log(`     waiting ${APPROVAL_WAIT_MS / 1000}s to prove the suspension is durable...`);
 await new Promise((r) => setTimeout(r, APPROVAL_WAIT_MS));
 {
   const r = await getRun(run.id);
   if (r.status !== 'WAITING_APPROVAL') fail(`status drifted to ${r.status} during suspension`);
+  const active = r.attempts.filter((a) => a.state === 'ACTIVE');
+  if (active.length !== 0) fail(`compute reappeared during wait: ${active.length} ACTIVE`);
 }
 ok('suspension held with no active worker');
 
