@@ -11,14 +11,38 @@ import type { MemoryProvider, MemoryRecord, MemoryScope } from './types.js';
  * ListRuntimes, ListTools, ListMemoryCollections, GetMemoryCollection(MemoryId),
  * CreateMemoryCollection(Name). AgentKit Memory is backed by VikingDB.
  *
- * REMAINING TO COMPLETE search()/write(): a VikingDB-backed memory collection
- * must exist (CreateMemoryCollection — a billable VikingDB resource that may
- * require VikingDB activation), and the exact memory-data add/search action
- * names/schemas must be confirmed against that live collection (the guessed
- * AddMemory/SearchMemory names returned InvalidActionOrVersion — the real ones
- * are captured via the console once a collection exists). Run
- * `scripts/probe-agentkit-memory.ts` after provisioning to discover them, then
- * fill in the two calls below.
+ * FULL CONTRACT DISCOVERED (2026-07-17). AgentKit Memory is backed by "Viking
+ * Memory", which has its OWN data-plane API distinct from the AgentKit
+ * top-gateway OpenAPI:
+ *
+ *   - Control plane (manage collections): service `agentkit`, version
+ *     `2025-10-30`, top-gateway (`open.byteplusapi.com`) — our existing signer.
+ *     CreateMemoryCollection needs {Name, Description, ProviderType:
+ *     'VIKINGDB_MEMORY', Strategies:[event+profile extraction rules]}. Easier to
+ *     create via the console/Viking Memory (free; billing starts on data upload).
+ *   - Data plane (read/write memory): host
+ *     `api-knowledgebase.mlp.cn-hongkong.bytepluses.com`, **Volcengine SignerV4,
+ *     service `air`, region `cn-north-1`** (path-based REST — NOT the top-gateway
+ *     Action= style, so it needs a second signer we don't have yet).
+ *       search:  POST /api/memory/get_context
+ *         { collection_name, project_name, conversation_id, query,
+ *           event_search_config:{ filter:{ user_id, memory_type:['event_v1'] },
+ *             limit, time_decay_config:{ weight, no_decay_period } },
+ *           profile_search_config:{ filter:{ user_id, memory_type:['profile_v1'] }, limit } }
+ *       write:   POST /api/memory/... (session/conversation data → AI extracts
+ *         event + profile memories; exact path via the console "Write data" flow)
+ *   - Model is conversation/session-based (not plain key-value): writes are
+ *     messages under a conversation_id/user_id, memories are AI-extracted.
+ *
+ * Live collection provisioned for binding: `mem-3a9e24de` (name
+ * `managed_agents_mem`, cn-hongkong, Standard/shared-compute).
+ *
+ * REMAINING BUILD to make search()/write() live:
+ *   1. Add a path-based SignerV4 signer (service `air`, region `cn-north-1`).
+ *   2. Implement get_context (search) + the session-add call (write), mapping
+ *      our MemoryRecord {content} to a conversation message and back.
+ *   3. Point at collection_name `managed_agents_mem`, scoped by user_id =
+ *      `${tenantId}:${agentId}`.
  */
 export interface AgentKitMemoryConfig {
   accessKeyId: string;
