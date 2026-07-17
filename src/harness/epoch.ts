@@ -24,6 +24,7 @@ import { compileContext } from './contextCompiler.js';
 import { WorkspaceManager, WORKSPACE_DIR } from './workspace.js';
 import { dispatchTool, TOOL_DEFS, TOOL_DOCS, type ToolContext } from './toolRouter.js';
 import { verify, type VerifierPolicy } from './verifier.js';
+import { tokenBudgetExceeded } from './limits.js';
 import { maybeCrash } from './faults.js';
 
 export interface EpochProviders {
@@ -153,6 +154,12 @@ export function createRealEpoch(providers: EpochProviders) {
           await cleanup();
           return 'suspended_for_approval';
         }
+        if (outcome.kind === 'suspend_signal') {
+          // Signal not yet delivered — keep waiting.
+          await saveCheckpoint({ pendingToolCall: pending });
+          await cleanup();
+          return 'suspended_for_signal';
+        }
         const content =
           outcome.kind === 'result'
             ? outcome.content
@@ -170,7 +177,7 @@ export function createRealEpoch(providers: EpochProviders) {
           await cleanup();
           return 'budget_exhausted';
         }
-        const budget = await tokenBudgetExceeded(pool, run);
+        const budget = await tokenBudgetExceeded(pool, run.id);
         if (budget) {
           await saveCheckpoint();
           await cleanup();
@@ -263,6 +270,14 @@ export function createRealEpoch(providers: EpochProviders) {
             await saveCheckpoint({ pendingToolCall: call });
             await cleanup();
             return 'suspended_for_approval';
+          }
+
+          if (outcome.kind === 'suspend_signal') {
+            // Tool router already transitioned to WAITING_SIGNAL; the pending
+            // call replays on resume and returns the delivered signal payload.
+            await saveCheckpoint({ pendingToolCall: call });
+            await cleanup();
+            return 'suspended_for_signal';
           }
 
           if (outcome.kind === 'complete') {
@@ -394,15 +409,6 @@ async function finishRun(
     }),
   );
   return 'completed';
-}
-
-async function tokenBudgetExceeded(pool: Pool, run: RunRow): Promise<boolean> {
-  if (run.token_budget === null) return false;
-  const { rows } = await pool.query<{ tokens_used: string; token_budget: string }>(
-    'SELECT tokens_used, token_budget FROM runs WHERE id = $1',
-    [run.id],
-  );
-  return BigInt(rows[0]!.tokens_used) >= BigInt(rows[0]!.token_budget);
 }
 
 /** All user messages received so far (Phase 1: presented every epoch). */

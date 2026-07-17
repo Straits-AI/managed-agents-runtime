@@ -135,6 +135,7 @@ async function settleAttempt(
     switch (exitReason) {
       case 'completed':
       case 'suspended_for_approval':
+      case 'suspended_for_signal':
       case 'cancelled':
         // Terminal-for-this-attempt transitions were already written by
         // the epoch (or the cancel API) inside their own transactions.

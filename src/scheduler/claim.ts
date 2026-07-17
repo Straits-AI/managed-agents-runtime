@@ -21,7 +21,9 @@ export async function claimRun(
 ): Promise<ClaimedRun | null> {
   return withTransaction(pool, async (tx) => {
     const { rows } = await tx.query<{ id: string }>(
-      `SELECT id FROM runs WHERE status = 'QUEUED'
+      `SELECT id FROM runs
+       WHERE status = 'QUEUED'
+         AND (scheduled_for IS NULL OR scheduled_for <= now())
        ORDER BY updated_at ASC
        FOR UPDATE SKIP LOCKED
        LIMIT 1`,

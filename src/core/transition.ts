@@ -23,7 +23,7 @@ export interface TransitionOptions {
   patch?: Partial<
     Pick<
       RunRow,
-      'workspace_id' | 'current_attempt_id' | 'progress' | 'tokens_used'
+      'workspace_id' | 'current_attempt_id' | 'progress' | 'tokens_used' | 'awaited_signal'
     >
   >;
 }
@@ -111,6 +111,7 @@ export async function transitionRun(
        current_attempt_id = CASE WHEN $8 THEN $6 ELSE current_attempt_id END,
        progress = COALESCE($7, progress),
        tokens_used = COALESCE($9, tokens_used),
+       awaited_signal = CASE WHEN $10 THEN $11 ELSE awaited_signal END,
        updated_at = now()
      WHERE id = $1
      RETURNING *`,
@@ -124,6 +125,8 @@ export async function transitionRun(
       patch.progress !== undefined ? JSON.stringify(patch.progress) : null,
       'current_attempt_id' in patch,
       patch.tokens_used ?? null,
+      'awaited_signal' in patch,
+      patch.awaited_signal ?? null,
     ],
   );
   return rows[0]!;

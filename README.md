@@ -23,7 +23,12 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
 
 - **State machine** (`src/core/`): every transition is one Postgres
   transaction — row lock, gapless event append, run update, outbox insert —
-  through a single choke point (`transitionRun`).
+  through a single choke point (`transitionRun`). Waiting states: approval,
+  **external signal** (`wait_for_signal` tool ⇄ `POST /v1/runs/{id}/signals`),
+  and delayed start (`scheduledFor`).
+- **Observability** (`src/harness/`): every tool call is auditable in the
+  ledger — external writes via receipts (`ToolInvocationStarted/Committed`),
+  workspace tools via `ToolInvoked` events.
 - **Scheduler** (`src/scheduler/`): lease-based claims with
   `FOR UPDATE SKIP LOCKED`; heartbeat fencing; a reaper requeues orphaned
   attempts (bounded by `MAX_ATTEMPTS`).
@@ -140,6 +145,8 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | M4 signer + preflight | ✅ built + run against live BytePlus |
 | M5–M8 real epoch, receipts, verifier | ✅ built + exercised end-to-end |
 | M9 survival benchmark | ✅ **PASSED on the live stack** (TOS + ModelArk + Cloud Sandbox via APIG), 2026-07-17 — 57-event gapless history, exactly-once external write |
+| Phase 2A: harden what we own | ✅ tool-level observability, budget-exhaustion enforcement, denied-approval, external signals + scheduled runs — all tested (45 tests) |
+| Phase 2: AgentKit (Memory/Knowledge/Skills/MCP) | 🚧 in progress |
 
 Phase 1 scope cuts (per memo §22.4): subagents, Kafka/RocketMQ (outbox is
 in-process), AgentKit Memory/Knowledge/Identity, KMS/FileNAS, multi-tenancy,

@@ -4,6 +4,7 @@ import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { insertCheckpoint, latestCheckpoint } from '../store/checkpoints.js';
 import { insertApproval, listApprovals } from '../store/approvals.js';
+import { tokenBudgetExceeded } from './limits.js';
 
 /**
  * Deterministic no-model epoch used by tests and pre-credential milestones.
@@ -16,6 +17,7 @@ export type ScriptOp =
   | { op: 'sleep'; ms: number }
   | { op: 'checkpoint' }
   | { op: 'requestApproval'; action: SemanticAction }
+  | { op: 'waitSignal'; name: string }
   | { op: 'fail'; once?: boolean }
   | { op: 'complete' };
 
@@ -41,6 +43,11 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
 
   while (step < script.length) {
     if (signal.aborted) return 'lease_lost';
+    // Same hard ceilings the real epoch enforces, so budget/step exhaustion is
+    // testable without a live model.
+    if (step >= run.max_steps || (await tokenBudgetExceeded(pool, run.id))) {
+      return 'budget_exhausted';
+    }
     const op = script[step]!;
 
     switch (op.op) {
@@ -121,6 +128,40 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
           });
         });
         return 'suspended_for_approval';
+      }
+
+      case 'waitSignal': {
+        // Resume-safe: if the signal already arrived, continue past the wait.
+        const { rows } = await pool.query(
+          `SELECT 1 FROM run_events
+           WHERE run_id = $1 AND type = 'SignalReceived' AND payload->>'name' = $2 LIMIT 1`,
+          [run.id, op.name],
+        );
+        if (rows.length > 0) break;
+
+        await withTransaction(pool, async (tx) => {
+          const seq = await appendEvent(
+            tx,
+            run.id,
+            { type: 'SignalReceived', payload: { waiting_for: op.name } },
+            { attemptId: attempt.id },
+          );
+          await insertCheckpoint(tx, {
+            runId: run.id,
+            attemptId: attempt.id,
+            eventSeq: seq,
+            progress: {},
+            agentState: { step: step + 1 },
+          });
+          await transitionRun(tx, run.id, {
+            expectFrom: ['RUNNING'],
+            to: 'WAITING_SIGNAL',
+            event: { type: 'SignalReceived', payload: { waiting_for: op.name } },
+            attemptId: attempt.id,
+            patch: { awaited_signal: op.name },
+          });
+        });
+        return 'suspended_for_signal';
       }
 
       case 'fail':

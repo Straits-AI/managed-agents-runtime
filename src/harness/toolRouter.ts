@@ -23,6 +23,7 @@ import { maybeCrash } from './faults.js';
 export type ToolOutcome =
   | { kind: 'result'; content: string }
   | { kind: 'suspend_approval'; approvalId: string }
+  | { kind: 'suspend_signal'; signalName: string }
   | { kind: 'complete'; summary: string; artifacts: string[] };
 
 export interface ToolContext {
@@ -93,6 +94,16 @@ export const TOOL_DEFS: ToolDef[] = [
     },
   },
   {
+    name: 'wait_for_signal',
+    description:
+      'Pause the run until a named external signal arrives (e.g. a webhook, an upstream job finishing). The run suspends with zero active compute and resumes when POST /v1/runs/{id}/signals delivers a matching signal; the signal payload is returned to you on resume.',
+    parameters: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'the signal name to wait for' } },
+      required: ['name'],
+    },
+  },
+  {
     name: 'external_http_request',
     description:
       'Call an external HTTP API. Non-GET requests are external side effects: they are policy-checked, may require human approval (the run suspends until decided), and are executed exactly once per unique request.',
@@ -131,6 +142,27 @@ function resolvePath(path: string): string {
   return path.startsWith('/') ? path : `${WORKSPACE_DIR}/${path}`;
 }
 
+/**
+ * Record a workspace-tool invocation in the run ledger so every step is
+ * auditable. External writes keep their richer receipt events
+ * (ToolInvocationStarted/Committed); this covers the sandbox-mutating tools
+ * that otherwise leave no trace. Payloads carry a bounded, non-secret summary.
+ */
+async function emitToolInvoked(
+  ctx: ToolContext,
+  tool: string,
+  detail: Record<string, unknown>,
+): Promise<void> {
+  await withTransaction(ctx.pool, (tx) =>
+    appendEvent(
+      tx,
+      ctx.run.id,
+      { type: 'ToolInvoked', payload: { tool, step: ctx.step, ...detail } },
+      { attemptId: ctx.attempt.id },
+    ),
+  );
+}
+
 export async function dispatchTool(
   ctx: ToolContext,
   name: string,
@@ -138,9 +170,14 @@ export async function dispatchTool(
 ): Promise<ToolOutcome> {
   switch (name) {
     case 'bash_exec': {
-      const res = await ctx.sandboxProvider.exec(ctx.sandbox, String(args.command ?? ''), {
+      const command = String(args.command ?? '');
+      const res = await ctx.sandboxProvider.exec(ctx.sandbox, command, {
         cwd: args.cwd ? String(args.cwd) : WORKSPACE_DIR,
         timeoutSec: args.timeout_sec ? Number(args.timeout_sec) : 300,
+      });
+      await emitToolInvoked(ctx, 'bash_exec', {
+        command: command.slice(0, 500),
+        exitCode: res.exitCode,
       });
       return {
         kind: 'result',
@@ -153,19 +190,17 @@ export async function dispatchTool(
     }
 
     case 'file_write': {
-      await ctx.sandboxProvider.writeFile(
-        ctx.sandbox,
-        resolvePath(String(args.path ?? '')),
-        String(args.content ?? ''),
-      );
-      return { kind: 'result', content: `wrote ${args.path}` };
+      const path = String(args.path ?? '');
+      const content = String(args.content ?? '');
+      await ctx.sandboxProvider.writeFile(ctx.sandbox, resolvePath(path), content);
+      await emitToolInvoked(ctx, 'file_write', { path, bytes: content.length });
+      return { kind: 'result', content: `wrote ${path}` };
     }
 
     case 'file_read': {
-      const content = await ctx.sandboxProvider.readFile(
-        ctx.sandbox,
-        resolvePath(String(args.path ?? '')),
-      );
+      const path = String(args.path ?? '');
+      const content = await ctx.sandboxProvider.readFile(ctx.sandbox, resolvePath(path));
+      await emitToolInvoked(ctx, 'file_read', { path, bytes: content.length });
       return { kind: 'result', content: content.slice(0, 50_000) };
     }
 
@@ -182,6 +217,9 @@ export async function dispatchTool(
       return { kind: 'result', content: 'progress ledger updated' };
     }
 
+    case 'wait_for_signal':
+      return waitForSignal(ctx, String(args.name ?? ''));
+
     case 'external_http_request':
       return externalHttpRequest(ctx, args);
 
@@ -197,6 +235,40 @@ export async function dispatchTool(
     default:
       return { kind: 'result', content: `error: unknown tool ${name}` };
   }
+}
+
+/**
+ * Suspend the run until a named external signal arrives. Idempotent across
+ * recovery/resume: if the signal was already delivered (a SignalReceived event
+ * exists for this name), return its payload; otherwise record that the run is
+ * waiting and transition RUNNING → WAITING_SIGNAL, releasing compute.
+ */
+async function waitForSignal(ctx: ToolContext, name: string): Promise<ToolOutcome> {
+  if (!name) return { kind: 'result', content: 'error: wait_for_signal requires a signal name' };
+
+  const { rows } = await ctx.pool.query<{ payload: Record<string, unknown> }>(
+    `SELECT payload FROM run_events
+     WHERE run_id = $1 AND type = 'SignalReceived' AND payload->>'name' = $2
+     ORDER BY seq DESC LIMIT 1`,
+    [ctx.run.id, name],
+  );
+  if (rows[0]) {
+    return {
+      kind: 'result',
+      content: JSON.stringify({ signal: name, payload: rows[0].payload.payload ?? null }),
+    };
+  }
+
+  await withTransaction(ctx.pool, (tx) =>
+    transitionRun(tx, ctx.run.id, {
+      expectFrom: ['RUNNING'],
+      to: 'WAITING_SIGNAL',
+      event: { type: 'SignalReceived', payload: { waiting_for: name } },
+      attemptId: ctx.attempt.id,
+      patch: { awaited_signal: name },
+    }),
+  );
+  return { kind: 'suspend_signal', signalName: name };
 }
 
 /**

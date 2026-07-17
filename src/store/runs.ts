@@ -12,6 +12,8 @@ export interface CreateRunInput {
   input?: Record<string, unknown>;
   maxSteps?: number;
   tokenBudget?: number;
+  /** ISO timestamp; the run is not claimable until then (delayed start). */
+  scheduledFor?: string;
   grants?: {
     action: string;
     resource?: string;
@@ -32,8 +34,8 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
 
   await tx.query(
     `INSERT INTO runs (id, agent_version_id, goal, input, status, max_steps,
-                       token_budget, debug_fault_points)
-     VALUES ($1, $2, $3, $4, 'CREATED', $5, $6, $7)`,
+                       token_budget, scheduled_for, debug_fault_points)
+     VALUES ($1, $2, $3, $4, 'CREATED', $5, $6, $7, $8)`,
     [
       runId,
       input.agentVersionId,
@@ -41,6 +43,7 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
       JSON.stringify(input.input ?? {}),
       input.maxSteps ?? 50,
       input.tokenBudget ?? null,
+      input.scheduledFor ?? null,
       JSON.stringify(input.debugFaultPoints ?? []),
     ],
   );

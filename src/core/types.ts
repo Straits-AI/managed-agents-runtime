@@ -24,6 +24,7 @@ export type AttemptState = 'ACTIVE' | 'EXITED' | 'ORPHANED';
 export type EpochExitReason =
   | 'completed'
   | 'suspended_for_approval'
+  | 'suspended_for_signal'
   | 'budget_exhausted'
   | 'error'
   | 'lease_lost'
@@ -47,10 +48,12 @@ export type EventType =
   | 'ActionProposed'
   | 'ActionAuthorized'
   | 'ActionDenied'
+  | 'ToolInvoked'
   | 'ToolInvocationStarted'
   | 'ToolInvocationCommitted'
   | 'ToolInvocationFailed'
   | 'ProgressUpdated'
+  | 'SignalReceived'
   | 'ApprovalRequested'
   | 'ApprovalReceived'
   | 'ApprovalDenied'
@@ -79,6 +82,8 @@ export interface RunRow {
   max_steps: number;
   token_budget: string | null;
   tokens_used: string;
+  awaited_signal: string | null;
+  scheduled_for: Date | null;
   debug_fault_points: string[];
   created_at: Date;
   updated_at: Date;

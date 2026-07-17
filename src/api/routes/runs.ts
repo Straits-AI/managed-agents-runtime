@@ -17,6 +17,7 @@ const createRunBody = z.object({
   input: z.record(z.string(), z.unknown()).optional(),
   maxSteps: z.number().int().positive().optional(),
   tokenBudget: z.number().int().positive().optional(),
+  scheduledFor: z.string().datetime().optional(),
   grants: z
     .array(
       z.object({
@@ -146,6 +147,46 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
 
     if (!updated) return reply.code(409).send({ error: 'approval already decided' });
     return updated;
+  });
+
+  app.post<{
+    Params: { runId: string };
+    Body: { name: string; payload?: unknown };
+  }>('/v1/runs/:runId/signals', async (req, reply) => {
+    const body = z
+      .object({ name: z.string().min(1), payload: z.unknown().optional() })
+      .parse(req.body);
+
+    const result = await withTransaction(pool, async (tx) => {
+      const run = await getRun(tx, req.params.runId);
+      if (!run) return { code: 404 as const };
+      if (isTerminal(run.status)) return { code: 409 as const, status: run.status };
+
+      // Record delivery in the ledger regardless of whether the run is
+      // currently waiting — a signal may legitimately arrive early.
+      await appendEvent(tx, run.id, {
+        type: 'SignalReceived',
+        payload: { name: body.name, payload: body.payload ?? null },
+      });
+
+      // Wake the run only if it is waiting for THIS signal.
+      const woke = run.status === 'WAITING_SIGNAL' && run.awaited_signal === body.name;
+      if (woke) {
+        await transitionRun(tx, run.id, {
+          expectFrom: ['WAITING_SIGNAL'],
+          to: 'QUEUED',
+          event: { type: 'SignalReceived', payload: { name: body.name, woke: true } },
+          patch: { current_attempt_id: null, awaited_signal: null },
+        });
+      }
+      return { code: 200 as const, woke };
+    });
+
+    if (result.code === 404) return reply.code(404).send({ error: 'run not found' });
+    if (result.code === 409) {
+      return reply.code(409).send({ error: `run is ${result.status}` });
+    }
+    return reply.code(202).send({ delivered: true, woke: result.woke });
   });
 
   app.post<{ Params: { runId: string } }>(

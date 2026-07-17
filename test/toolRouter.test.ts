@@ -299,3 +299,53 @@ describe('progress_update', () => {
     });
   });
 });
+
+describe('workspace-tool observability', () => {
+  // A minimal fake sandbox so we can exercise bash/file tools without cloud.
+  const fakeSandbox = {
+    async exec() {
+      return { exitCode: 0, stdout: 'hello\n', stderr: '' };
+    },
+    async writeFile() {},
+    async readFile() {
+      return 'file body';
+    },
+  };
+  function fsCtx(run: RunRow, attempt: RunAttemptRow): ToolContext {
+    return {
+      pool: db.pool,
+      cfg,
+      run,
+      attempt,
+      sandbox: {} as ToolContext['sandbox'],
+      sandboxProvider: fakeSandbox as unknown as ToolContext['sandboxProvider'],
+      objectStore: untouchable as ToolContext['objectStore'],
+      step: 3,
+    };
+  }
+  async function toolEvents(runId: string) {
+    const { rows } = await db.pool.query<{ payload: Record<string, unknown> }>(
+      `SELECT payload FROM run_events WHERE run_id = $1 AND type = 'ToolInvoked' ORDER BY seq`,
+      [runId],
+    );
+    return rows.map((r) => r.payload);
+  }
+
+  it('records a ToolInvoked ledger event for bash_exec', async () => {
+    const { run, attempt } = await runningRun([]);
+    await dispatchTool(fsCtx(run, attempt), 'bash_exec', { command: 'echo hello' });
+    const events = await toolEvents(run.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ tool: 'bash_exec', command: 'echo hello', exitCode: 0, step: 3 });
+  });
+
+  it('records ToolInvoked for file_write and file_read with byte counts', async () => {
+    const { run, attempt } = await runningRun([]);
+    await dispatchTool(fsCtx(run, attempt), 'file_write', { path: 'out.txt', content: 'abcd' });
+    await dispatchTool(fsCtx(run, attempt), 'file_read', { path: 'out.txt' });
+    const events = await toolEvents(run.id);
+    expect(events.map((e) => e.tool)).toEqual(['file_write', 'file_read']);
+    expect(events[0]).toMatchObject({ path: 'out.txt', bytes: 4 });
+    expect(events[1]).toMatchObject({ path: 'out.txt', bytes: 'file body'.length });
+  });
+});

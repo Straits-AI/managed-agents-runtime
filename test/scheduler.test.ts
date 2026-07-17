@@ -4,6 +4,7 @@ import { spawnWorker, waitFor, type SpawnedWorker } from './helpers/worker.js';
 import { withTransaction } from '../src/db/tx.js';
 import { createAgentDefinition, createAgentVersion } from '../src/store/agents.js';
 import { createRun, getRun } from '../src/store/runs.js';
+import { appendEvent, transitionRun } from '../src/core/transition.js';
 import { listEvents } from '../src/store/events.js';
 import { listAttempts } from '../src/store/attempts.js';
 import { latestCheckpoint } from '../src/store/checkpoints.js';
@@ -40,9 +41,9 @@ function newWorker(env: Record<string, string> = {}): SpawnedWorker {
   return w;
 }
 
-async function newRun(script: ScriptOp[]) {
+async function newRun(script: ScriptOp[], extra: { tokenBudget?: number; maxSteps?: number } = {}) {
   return withTransaction(db.pool, (tx) =>
-    createRun(tx, { agentVersionId, goal: 'scripted run', input: { script } }),
+    createRun(tx, { agentVersionId, goal: 'scripted run', input: { script }, ...extra }),
   );
 }
 
@@ -75,6 +76,116 @@ describe('scheduler + worker', () => {
     expect(attempts).toHaveLength(1);
     expect(attempts[0]!.state).toBe('EXITED');
     expect(attempts[0]!.exit_reason).toBe('completed');
+  });
+
+  it('fails gracefully with budget_exhausted instead of running when over token budget', async () => {
+    // A script that WOULD complete, but the run is already over its token
+    // budget — so the epoch must stop before doing any work.
+    const run = await newRun(
+      [
+        { op: 'progress', note: 'should never run' },
+        { op: 'complete' },
+      ],
+      { tokenBudget: 1000 },
+    );
+    await db.pool.query('UPDATE runs SET tokens_used = 5000 WHERE id = $1', [run.id]);
+    newWorker();
+
+    const failed = await waitFor(
+      async () => {
+        const r = await getRun(db.pool, run.id);
+        return r?.status === 'FAILED' ? r : null;
+      },
+      { label: 'run FAILED (budget)' },
+    );
+    expect(failed.status).toBe('FAILED');
+    expect(failed.status_reason).toBe('budget_exhausted');
+
+    // It must have stopped before executing the script.
+    const types = (await listEvents(db.pool, run.id)).map((e) => e.type);
+    expect(types).not.toContain('ProgressUpdated');
+    expect(types).not.toContain('RunCompleted');
+
+    const attempts = await listAttempts(db.pool, run.id);
+    expect(attempts[attempts.length - 1]!.exit_reason).toBe('budget_exhausted');
+  });
+
+  it('suspends on wait_for_signal and resumes when the signal is delivered', async () => {
+    const run = await newRun([
+      { op: 'progress', note: 'before wait' },
+      { op: 'waitSignal', name: 'payment_settled' },
+      { op: 'progress', note: 'after signal' },
+      { op: 'complete' },
+    ]);
+    newWorker();
+
+    // It parks in WAITING_SIGNAL with zero active compute.
+    const waiting = await waitFor(
+      async () => {
+        const r = await getRun(db.pool, run.id);
+        return r?.status === 'WAITING_SIGNAL' ? r : null;
+      },
+      { label: 'WAITING_SIGNAL' },
+    );
+    expect(waiting.awaited_signal).toBe('payment_settled');
+    const active = (await listAttempts(db.pool, run.id)).filter((a) => a.state === 'ACTIVE');
+    expect(active).toHaveLength(0);
+
+    // Deliver the signal exactly as the API endpoint does: record + wake.
+    await withTransaction(db.pool, async (tx) => {
+      await appendEvent(tx, run.id, {
+        type: 'SignalReceived',
+        payload: { name: 'payment_settled', payload: { txn: 'T-9' } },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['WAITING_SIGNAL'],
+        to: 'QUEUED',
+        event: { type: 'SignalReceived', payload: { name: 'payment_settled', woke: true } },
+        patch: { current_attempt_id: null, awaited_signal: null },
+      });
+    });
+
+    const done = await waitFor(
+      async () => {
+        const r = await getRun(db.pool, run.id);
+        return r?.status === 'COMPLETED' ? r : null;
+      },
+      { label: 'COMPLETED after signal' },
+    );
+    expect(done.status).toBe('COMPLETED');
+    const types = (await listEvents(db.pool, run.id)).map((e) => e.type);
+    expect(types).toContain('SignalReceived');
+    expect(types[types.length - 1]).toBe('RunCompleted');
+  });
+
+  it('does not claim a scheduled run until its start time', async () => {
+    const future = new Date(Date.now() + 3600_000).toISOString();
+    const run = await withTransaction(db.pool, (tx) =>
+      createRun(tx, {
+        agentVersionId,
+        goal: 'scheduled',
+        input: { script: [{ op: 'complete' }] as ScriptOp[] },
+        scheduledFor: future,
+      }),
+    );
+    newWorker();
+
+    // Give the worker time to poll a few times; it must stay QUEUED.
+    await new Promise((r) => setTimeout(r, 3000));
+    const stillQueued = await getRun(db.pool, run.id);
+    expect(stillQueued!.status).toBe('QUEUED');
+    expect(await listAttempts(db.pool, run.id)).toHaveLength(0);
+
+    // Move the schedule into the past; now it becomes claimable.
+    await db.pool.query(`UPDATE runs SET scheduled_for = now() - interval '1 minute' WHERE id = $1`, [run.id]);
+    const done = await waitFor(
+      async () => {
+        const r = await getRun(db.pool, run.id);
+        return r?.status === 'COMPLETED' ? r : null;
+      },
+      { label: 'scheduled run COMPLETED' },
+    );
+    expect(done.status).toBe('COMPLETED');
   });
 
   it('recovers when the worker is SIGKILLed mid-run (benchmark steps 4-5)', async () => {

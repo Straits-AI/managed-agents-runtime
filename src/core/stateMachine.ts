@@ -12,6 +12,7 @@ const TRANSITIONS: Record<RunStatus, RunStatus[]> = {
   STARTING: ['RUNNING', 'QUEUED', 'RETRY_PENDING', 'FAILED', 'CANCELLED'],
   RUNNING: [
     'WAITING_APPROVAL',
+    'WAITING_SIGNAL',
     'RETRY_PENDING',
     'VERIFYING',
     'QUEUED', // clean epoch exit that should immediately reschedule

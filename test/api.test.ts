@@ -127,6 +127,46 @@ describe('API', () => {
     expect(events.at(-1).type).toBe('UserMessageReceived');
   });
 
+  it('delivers a signal and reports whether it woke the run', async () => {
+    const versionId = await createAgentVersionViaApi();
+    const runId = await createRunViaApi(versionId, [{ op: 'complete' }]);
+    // Run is QUEUED (not waiting) — signal is recorded but wakes nothing.
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${runId}/signals`,
+      headers: AUTH,
+      payload: { name: 'webhook.received', payload: { id: 42 } },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toMatchObject({ delivered: true, woke: false });
+
+    const events = (
+      await app.inject({ method: 'GET', url: `/v1/runs/${runId}/events`, headers: AUTH })
+    ).json().events;
+    const sig = events.find((e: { type: string }) => e.type === 'SignalReceived');
+    expect(sig.payload).toMatchObject({ name: 'webhook.received', payload: { id: 42 } });
+  });
+
+  it('accepts a scheduledFor future run and leaves it QUEUED (not started)', async () => {
+    const versionId = await createAgentVersionViaApi();
+    const future = new Date(Date.now() + 3600_000).toISOString();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/runs',
+      headers: AUTH,
+      payload: {
+        agentVersionId: versionId,
+        goal: 'scheduled',
+        input: { script: [{ op: 'complete' }] },
+        scheduledFor: future,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const run = res.json();
+    expect(run.status).toBe('QUEUED');
+    expect(run.scheduled_for).toBeTruthy();
+  });
+
   it('cancels a queued run and conflicts on double-cancel', async () => {
     const versionId = await createAgentVersionViaApi();
     const runId = await createRunViaApi(versionId, [{ op: 'complete' }]);
