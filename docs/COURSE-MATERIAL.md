@@ -6,8 +6,12 @@ Cloud Sandbox via an APIG gateway, TOS workspace storage). Every run in this
 document actually executed end-to-end — the event timelines, artifacts, and
 token counts are captured, not illustrative.
 
-Raw per-scenario captures live in [`scenarios/results/`](../scenarios/results/)
-(`<id>.md` human-readable, `<id>.json` machine-readable). Re-run any of them:
+Standalone, ready-to-publish tutorial articles — each with the real input
+prompt, the agent’s message-by-message execution, and the verified output — are
+in **[`articles/`](./articles/)**. This document is the consolidated course that
+ties them together. Raw per-scenario captures live in
+[`scenarios/results/`](../scenarios/results/) (`<id>.md` human-readable,
+`<id>.json` machine-readable). Re-run any of them:
 
 ```bash
 python3 scripts/refresh-creds.py           # 15-min STS creds into .env

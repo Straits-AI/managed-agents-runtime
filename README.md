@@ -105,9 +105,16 @@ node --env-file=.env --import tsx scenarios/run.ts doc-processing
 ```
 
 Each writes a structured result (event timeline, artifacts, receipts, token
-usage) to `scenarios/results/`. The consolidated tutorial write-up — production
-use cases plus cross-cutting teaching on durability, governance, and objective
-verification — is in **[`docs/COURSE-MATERIAL.md`](./docs/COURSE-MATERIAL.md)**.
+usage) to `scenarios/results/`. Two write-ups are generated from these live runs:
+
+- **[`docs/articles/`](./docs/articles/)** — standalone tutorial articles, one
+  per production use case, each with the real input prompt, the agent’s
+  message-by-message execution (from the TOS-persisted transcript), and the
+  verified output.
+- **[`docs/COURSE-MATERIAL.md`](./docs/COURSE-MATERIAL.md)** — the consolidated
+  course, with cross-cutting teaching on durability, governance, and objective
+  verification.
+
 All nine scenarios completed correctly on the live BytePlus stack (Seed-2.0-lite,
 ~30–60 s each); the two governed writes each hit the external system exactly once.
 

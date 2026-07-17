@@ -1,0 +1,55 @@
+[
+  {
+    "role": "assistant",
+    "content": "",
+    "toolCalls": [
+      {
+        "id": "call_w1a2rqjxfxkuic16gg9qx1uh",
+        "name": "bash_exec",
+        "arguments": {
+          "command": "ls /home/gem/workspace"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "content": "{\"exit_code\":0,\"stdout\":\"numbers.txt\\n\",\"stderr\":\"\"}",
+    "toolCallId": "call_w1a2rqjxfxkuic16gg9qx1uh"
+  },
+  {
+    "role": "assistant",
+    "content": "",
+    "toolCalls": [
+      {
+        "id": "call_ze408c7hwoxa2mo2j8sv6qtf",
+        "name": "bash_exec",
+        "arguments": {
+          "command": "awk '{sum += $1} END {print sum}' /home/gem/workspace/numbers.txt"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "content": "{\"exit_code\":0,\"stdout\":\"110\\n\",\"stderr\":\"\"}",
+    "toolCallId": "call_ze408c7hwoxa2mo2j8sv6qtf"
+  },
+  {
+    "role": "assistant",
+    "content": "",
+    "toolCalls": [
+      {
+        "id": "call_yk33ut38miybpog1g6mfsvsh",
+        "name": "external_http_request",
+        "arguments": {
+          "method": "POST",
+          "url": "http://127.0.0.1:50734/results",
+          "body": {
+            "sum": 110
+          }
+        }
+      }
+    ]
+  }
+]
