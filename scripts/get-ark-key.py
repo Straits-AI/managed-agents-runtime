@@ -56,15 +56,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", default="dev")
     parser.add_argument("--region", default="ap-southeast-1")
-    parser.add_argument("--model", default="seed-2-0-lite-260228")
+    parser.add_argument(
+        "--endpoint-id",
+        required=True,
+        help="Ark inference endpoint ID (ep-...); the key is scoped to it and "
+        "OpenAI-compatible calls use it as the model parameter",
+    )
     parser.add_argument("--days", type=int, default=7)
     parser.add_argument("--env-file", default=".env")
     args = parser.parse_args()
 
+    # Official contract (volcengine-go-sdk ark GetApiKeyInput):
+    # ResourceType in {endpoint, bot, action}; ResourceIds are ep-... IDs.
     body = {
         "DurationSeconds": args.days * 86400,
-        "ResourceType": "preset_endpoint",
-        "ResourceIds": [args.model],
+        "ResourceType": "endpoint",
+        "ResourceIds": [args.endpoint_id],
     }
     result = subprocess.run(
         [
@@ -102,10 +109,10 @@ def main() -> None:
         )
 
     upsert_env(args.env_file, "ARK_API_KEY", api_key)
-    upsert_env(args.env_file, "ARK_MODEL", args.model)
+    upsert_env(args.env_file, "ARK_MODEL", args.endpoint_id)
     expiry = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=args.days)
-    print(f"ARK_API_KEY ({api_key[:4]}…) and ARK_MODEL={args.model} written to {args.env_file} (0600)")
-    print(f"scope: preset endpoint {args.model}; expires ~{expiry.date()} (request {request_id})")
+    print(f"ARK_API_KEY ({api_key[:4]}…) and ARK_MODEL={args.endpoint_id} written to {args.env_file} (0600)")
+    print(f"scope: endpoint {args.endpoint_id}; expires ~{expiry.date()} (request {request_id})")
 
 
 if __name__ == "__main__":
