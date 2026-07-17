@@ -7,6 +7,15 @@ workers and sandboxes: it survives worker death, sandbox loss, redeployment,
 and long approval waits without losing progress or duplicating irreversible
 actions.
 
+> **Built with the [byteplus-cloud skill](https://github.com/Straits-AI/byteplus-cloud-skill).**
+> Every BytePlus resource here — ModelArk, veFaaS Cloud Sandbox, TOS, APIG, RDS
+> PostgreSQL, VikingDB/Viking Memory, Message Queue for Kafka, and KMS — was
+> provisioned and verified live through that skill.
+
+📘 **New here? Start with the [Usage Guide](./docs/GUIDE.md)** — how to run it,
+drive agents through the API, multi-tenancy, credentials, streaming/Kafka, and
+best practices. Cost is in [docs/COST.md](./docs/COST.md).
+
 ## Architecture
 
 ```
