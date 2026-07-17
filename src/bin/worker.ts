@@ -57,6 +57,10 @@ if (epochMode === 'scripted') {
   // Skills Spaces in a real deployment).
   const { RegistrySkillProvider } = await import('../providers/registrySkills.js');
   const skills = new RegistrySkillProvider();
+  // MCP: in-process toolset registry by default (register toolsets or use an
+  // AgentKit MCP gateway adapter in a real deployment).
+  const { RegistryMcpProvider } = await import('../providers/registryMcp.js');
+  const mcp = new RegistryMcpProvider();
   epoch = createRealEpoch({
     model: new ModelArkProvider(cfg),
     sandbox,
@@ -64,6 +68,7 @@ if (epochMode === 'scripted') {
     memory,
     knowledge,
     skills,
+    mcp,
   });
   onSandboxOrphaned = (id) => sandbox.terminateById(id);
 }

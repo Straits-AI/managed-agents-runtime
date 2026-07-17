@@ -17,8 +17,11 @@ import type {
   SandboxProvider,
   SkillProvider,
   SkillRef,
+  McpToolProvider,
+  ToolDef,
 } from '../providers/types.js';
 import { materializeSkills, type MaterializedSkill } from './skills.js';
+import { resolveMcpTools } from './mcp.js';
 import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { getAgentVersion } from '../store/agents.js';
@@ -43,6 +46,8 @@ export interface EpochProviders {
   knowledge?: KnowledgeProvider;
   /** Resolves version-pinned skills materialized into the workspace (optional). */
   skills?: SkillProvider;
+  /** MCP toolsets surfaced to the model and routed through policy (optional). */
+  mcp?: McpToolProvider;
 }
 
 /** How many memories to recall into context at the start of an epoch. */
@@ -129,6 +134,14 @@ export function createRealEpoch(providers: EpochProviders) {
         (version.skill_refs as SkillRef[]) ?? [],
       );
 
+      // Resolve MCP toolsets (memo §9.2): their tools join the model tool list
+      // and route back through the capability layer.
+      const mcp = await resolveMcpTools(
+        providers.mcp,
+        (version.mcp_toolset_refs as string[]) ?? [],
+      );
+      const allTools: ToolDef[] = [...TOOL_DEFS, ...mcp.defs];
+
       const memoryScope = { tenantId: run.tenant_id, agentId: version.agent_id };
       const toolCtx: ToolContext = {
         pool,
@@ -144,6 +157,8 @@ export function createRealEpoch(providers: EpochProviders) {
         knowledge: providers.knowledge,
         knowledgeBaseId: (version.knowledge_config as { knowledgeBaseId?: string })
           ?.knowledgeBaseId,
+        mcp: providers.mcp,
+        mcpRoute: mcp.route,
       };
 
       // Recall long-term memory once per epoch (stable within a run): the most
@@ -258,7 +273,7 @@ export function createRealEpoch(providers: EpochProviders) {
         const completion = await providers.model.chat({
           model: version.model_policy.model ?? cfg.ARK_MODEL ?? '',
           messages,
-          tools: TOOL_DEFS,
+          tools: allTools,
           maxTokens: version.model_policy.maxTokens,
           temperature: version.model_policy.temperature,
         });

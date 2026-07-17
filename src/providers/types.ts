@@ -150,3 +150,18 @@ export interface ResolvedSkill {
 export interface SkillProvider {
   resolve(ref: SkillRef): Promise<ResolvedSkill>;
 }
+
+/**
+ * MCP toolsets (memo §9.2): external tools reached through an MCP gateway. The
+ * kernel discovers a toolset's tools and routes calls — but the model never
+ * invokes them directly; calls flow through the capability/audit layer. Local
+ * and AgentKit MCP gateways are interchangeable adapters.
+ */
+export interface McpToolProvider {
+  listTools(toolsetRef: string): Promise<ToolDef[]>;
+  callTool(
+    toolsetRef: string,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<{ content: string }>;
+}

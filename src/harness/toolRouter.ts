@@ -3,6 +3,7 @@ import type { Config } from '../config.js';
 import type { RunAttemptRow, RunRow, ProgressLedger } from '../core/types.js';
 import type {
   KnowledgeProvider,
+  McpToolProvider,
   MemoryProvider,
   MemoryScope,
   ObjectStore,
@@ -10,6 +11,7 @@ import type {
   SandboxProvider,
   ToolDef,
 } from '../providers/types.js';
+import type { McpRouteEntry } from './mcp.js';
 import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import {
@@ -47,6 +49,9 @@ export interface ToolContext {
   /** Knowledge retrieval + the knowledge base to search (optional). */
   knowledge?: KnowledgeProvider;
   knowledgeBaseId?: string;
+  /** MCP toolsets: provider + name→toolset route for resolved MCP tools. */
+  mcp?: McpToolProvider;
+  mcpRoute?: Map<string, McpRouteEntry>;
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -330,9 +335,44 @@ export async function dispatchTool(
       };
     }
 
-    default:
+    default: {
+      const mcpEntry = ctx.mcpRoute?.get(name);
+      if (mcpEntry && ctx.mcp) return dispatchMcp(ctx, name, mcpEntry, args);
       return { kind: 'result', content: `error: unknown tool ${name}` };
+    }
   }
+}
+
+/**
+ * Route an MCP tool call through the capability/audit layer (memo §9.2): the
+ * call needs a grant matching `mcp.<toolset>.<tool>`; approval-gated grants
+ * suspend the run; every call is recorded as a ToolInvoked event. The model
+ * never reaches an MCP tool without passing this gate.
+ */
+async function dispatchMcp(
+  ctx: ToolContext,
+  toolName: string,
+  entry: McpRouteEntry,
+  args: Record<string, unknown>,
+): Promise<ToolOutcome> {
+  const action = `mcp.${entry.toolsetRef}.${entry.originalName}`;
+  const grants = await listGrants(ctx.pool, ctx.run.id);
+  const grant = grants.find(
+    (g) =>
+      patternMatches(g.action_pattern, action) &&
+      (g.max_calls === null || g.calls_used < g.max_calls),
+  );
+  if (!grant) {
+    await withTransaction(ctx.pool, (tx) =>
+      appendEvent(tx, ctx.run.id, { type: 'ActionDenied', payload: { action } }, {
+        attemptId: ctx.attempt.id,
+      }),
+    );
+    return { kind: 'result', content: `error: no capability grant allows ${action}` };
+  }
+  const res = await ctx.mcp!.callTool(entry.toolsetRef, entry.originalName, args);
+  await emitToolInvoked(ctx, 'mcp', { action });
+  return { kind: 'result', content: res.content };
 }
 
 /**
