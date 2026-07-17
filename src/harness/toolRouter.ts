@@ -344,34 +344,83 @@ export async function dispatchTool(
 }
 
 /**
- * Route an MCP tool call through the capability/audit layer (memo §9.2): the
- * call needs a grant matching `mcp.<toolset>.<tool>`; approval-gated grants
- * suspend the run; every call is recorded as a ToolInvoked event. The model
- * never reaches an MCP tool without passing this gate.
+ * Route an MCP tool call through the capability/audit layer (memo §9.2), with
+ * the SAME governance as external writes: the call needs a grant matching BOTH
+ * `mcp.<toolset>.<tool>` (action) and the toolset (resource); an approval-gated
+ * grant suspends the run until a human decides; the grant is consumed
+ * (enforcing `max_calls` and expiry); every call is recorded. The model never
+ * reaches an MCP tool unpoliced.
  */
 async function dispatchMcp(
   ctx: ToolContext,
-  toolName: string,
+  _toolName: string,
   entry: McpRouteEntry,
   args: Record<string, unknown>,
 ): Promise<ToolOutcome> {
   const action = `mcp.${entry.toolsetRef}.${entry.originalName}`;
+  const resource = entry.toolsetRef;
+  const key = idempotencyKey({ runId: ctx.run.id, action, args });
+
+  // Grant match (no consumption yet — consumption happens at execution).
   const grants = await listGrants(ctx.pool, ctx.run.id);
   const grant = grants.find(
     (g) =>
       patternMatches(g.action_pattern, action) &&
+      patternMatches(g.resource_pattern, resource) &&
       (g.max_calls === null || g.calls_used < g.max_calls),
   );
   if (!grant) {
     await withTransaction(ctx.pool, (tx) =>
-      appendEvent(tx, ctx.run.id, { type: 'ActionDenied', payload: { action } }, {
+      appendEvent(tx, ctx.run.id, { type: 'ActionDenied', payload: { action, resource } }, {
         attemptId: ctx.attempt.id,
       }),
     );
-    return { kind: 'result', content: `error: no capability grant allows ${action}` };
+    return { kind: 'result', content: `error: no capability grant allows ${action} on ${resource}` };
+  }
+
+  // Approval gate: suspend until a human decides, then replay on resume.
+  if (grant.requires_approval) {
+    const approvals = await listApprovals(ctx.pool, ctx.run.id);
+    const match = approvals.find(
+      (a) => (a.action.arguments as { __idemKey?: string }).__idemKey === key,
+    );
+    if (!match) {
+      const approvalId = await withTransaction(ctx.pool, async (tx) => {
+        const approval = await insertApproval(tx, {
+          runId: ctx.run.id,
+          attemptId: ctx.attempt.id,
+          action: { action, resource, arguments: { ...args, __idemKey: key }, risk: 'external_write' },
+        });
+        await transitionRun(tx, ctx.run.id, {
+          expectFrom: ['RUNNING'],
+          to: 'WAITING_APPROVAL',
+          event: { type: 'ApprovalRequested', payload: { approvalId: approval.id, action, resource } },
+          attemptId: ctx.attempt.id,
+        });
+        return approval.id;
+      });
+      return { kind: 'suspend_approval', approvalId };
+    }
+    if (match.status === 'DENIED') {
+      return {
+        kind: 'result',
+        content: `error: ${action} was denied by ${match.decision_by ?? 'a human'} — do not retry it`,
+      };
+    }
+    if (match.status !== 'APPROVED') {
+      return { kind: 'result', content: 'error: approval still pending' };
+    }
+  }
+
+  // Consume the grant (enforces resource, expiry, max_calls) then execute.
+  const auth = await withTransaction(ctx.pool, (tx) =>
+    authorizeAndConsume(tx, ctx.run.id, action, resource),
+  );
+  if (!auth.allowed) {
+    return { kind: 'result', content: `error: ${(auth as { reason: string }).reason}` };
   }
   const res = await ctx.mcp!.callTool(entry.toolsetRef, entry.originalName, args);
-  await emitToolInvoked(ctx, 'mcp', { action });
+  await emitToolInvoked(ctx, 'mcp', { action, resource });
   return { kind: 'result', content: res.content };
 }
 

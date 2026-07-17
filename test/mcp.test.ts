@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestDb, type TestDb } from './helpers/db.js';
 import { withTransaction } from '../src/db/tx.js';
 import { createAgentDefinition, createAgentVersion } from '../src/store/agents.js';
-import { createRun } from '../src/store/runs.js';
+import { createRun, getRun } from '../src/store/runs.js';
+import { listApprovals, decideApproval } from '../src/store/approvals.js';
 import { transitionRun } from '../src/core/transition.js';
 import { dispatchTool, type ToolContext } from '../src/harness/toolRouter.js';
 import { RegistryMcpProvider } from '../src/providers/registryMcp.js';
@@ -37,7 +38,9 @@ afterAll(async () => {
   await db.drop();
 });
 
-async function runningRun(grants: { action: string; resource?: string }[]) {
+async function runningRun(
+  grants: { action: string; resource?: string; requiresApproval?: boolean; maxCalls?: number }[],
+) {
   const run = await withTransaction(db.pool, (tx) => createRun(tx, { agentVersionId, goal: 'g', grants }));
   const attemptId = newId('att');
   const { rows } = await db.pool.query<RunAttemptRow>(
@@ -91,5 +94,38 @@ describe('MCP toolsets', () => {
       [run.id],
     );
     expect(rows).toHaveLength(1);
+  });
+
+  it('enforces max_calls by consuming the grant', async () => {
+    const { route } = await resolveMcpTools(mcp, ['crm']);
+    const { run, attempt } = await runningRun([{ action: 'mcp.crm.*', maxCalls: 1 }]);
+    const first = await dispatchTool(ctx(run, attempt, route), 'mcp__crm__lookup_customer', { id: 'A' });
+    expect((first as { content: string }).content).toContain('Acme Corp');
+    // Second call exhausts the grant → denied (grant was consumed).
+    const second = await dispatchTool(ctx(run, attempt, route), 'mcp__crm__lookup_customer', { id: 'B' });
+    expect((second as { content: string }).content).toMatch(/no capability grant|reason/i);
+  });
+
+  it('suspends for approval on an approval-gated MCP grant, then runs once approved', async () => {
+    const { route } = await resolveMcpTools(mcp, ['crm']);
+    const { run, attempt } = await runningRun([{ action: 'mcp.crm.*', requiresApproval: true }]);
+    const args = { id: 'C-approve' };
+
+    const suspended = await dispatchTool(ctx(run, attempt, route), 'mcp__crm__lookup_customer', args);
+    expect(suspended.kind).toBe('suspend_approval');
+    expect((await getRun(db.pool, run.id))!.status).toBe('WAITING_APPROVAL');
+
+    // Approve + requeue → back to RUNNING (as the API does).
+    const [pending] = await listApprovals(db.pool, run.id, 'PENDING');
+    await withTransaction(db.pool, async (tx) => {
+      await decideApproval(tx, pending!.id, 'APPROVED', 'tester');
+      await transitionRun(tx, run.id, { expectFrom: ['WAITING_APPROVAL'], to: 'QUEUED', event: { type: 'ApprovalReceived' } });
+      await transitionRun(tx, run.id, { expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' } });
+      await transitionRun(tx, run.id, { expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' } });
+    });
+
+    const resumed = (await getRun(db.pool, run.id))!;
+    const outcome = await dispatchTool(ctx(resumed, attempt, route), 'mcp__crm__lookup_customer', args);
+    expect((outcome as { content: string }).content).toContain('Acme Corp');
   });
 });
