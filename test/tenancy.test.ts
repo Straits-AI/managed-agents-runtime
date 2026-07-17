@@ -4,6 +4,7 @@ import { createTestDb, type TestDb } from './helpers/db.js';
 import { buildServer } from '../src/api/server.js';
 import { loadConfig } from '../src/config.js';
 import { createTenant, createApiKey } from '../src/store/tenants.js';
+import { pgRateLimiter } from '../src/api/rateLimit.js';
 import { appendEvent } from '../src/core/transition.js';
 import { withTransaction } from '../src/db/tx.js';
 import { FsObjectStore } from '../src/providers/local/fsObjectStore.js';
@@ -213,5 +214,24 @@ describe('rate limiting', () => {
     } finally {
       await limited.close();
     }
+  });
+
+  it('the Postgres-backed limiter enforces one bucket across instances', async () => {
+    const cfg = loadConfig({
+      ...process.env,
+      DATABASE_URL: db.url,
+      RATE_LIMIT_SCOPE: 'global',
+      RATE_LIMIT_PER_SEC: '1',
+      RATE_LIMIT_BURST: '1',
+    });
+    // Two separate limiter objects simulate two API nodes sharing the DB.
+    const nodeA = pgRateLimiter(cfg, db.pool);
+    const nodeB = pgRateLimiter(cfg, db.pool);
+    const tenant = `t-${Math.random().toString(36).slice(2)}`;
+
+    expect((await nodeA.check(tenant)).ok).toBe(true); // burst of 1 spent on node A
+    const denied = await nodeB.check(tenant); // node B sees the shared empty bucket
+    expect(denied.ok).toBe(false);
+    expect(denied.retryAfterSec).toBeGreaterThanOrEqual(1);
   });
 });

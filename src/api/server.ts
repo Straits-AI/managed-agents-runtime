@@ -37,7 +37,7 @@ export function buildServer(deps: ApiDeps): FastifyInstance {
     genReqId: (req) => (req.headers['x-request-id'] as string) ?? undefined,
   });
 
-  const limiter = rateLimiter(deps.cfg);
+  const limiter = rateLimiter(deps.cfg, deps.pool);
 
   // --- Authentication + tenant resolution (memo §19 layer 1) ---
   app.addHook('onRequest', async (req, reply) => {
@@ -52,8 +52,8 @@ export function buildServer(deps: ApiDeps): FastifyInstance {
     }
     req.tenantId = tenant.id;
 
-    // Per-tenant rate limiting (best-effort, in-process).
-    const verdict = limiter.check(tenant.id);
+    // Per-tenant rate limiting (in-process or Postgres-backed per config).
+    const verdict = await limiter.check(tenant.id);
     if (!verdict.ok) {
       reply.header('retry-after', String(verdict.retryAfterSec));
       return reply.code(429).send({ error: 'rate limit exceeded' });

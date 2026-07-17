@@ -19,6 +19,9 @@ const configSchema = z.object({
   // RATE_LIMIT_BURST bucket. Set RATE_LIMIT_PER_SEC=0 to disable.
   RATE_LIMIT_PER_SEC: z.coerce.number().min(0).default(20),
   RATE_LIMIT_BURST: intFromEnv(40),
+  // 'instance' (default) = in-process bucket per API node; 'global' = a shared
+  // Postgres bucket enforced across all API instances.
+  RATE_LIMIT_SCOPE: z.enum(['instance', 'global']).default('instance'),
   // Max time to drain in-flight work on SIGTERM/SIGINT before forcing exit.
   SHUTDOWN_TIMEOUT_MS: intFromEnv(15_000),
 
