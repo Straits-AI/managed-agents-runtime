@@ -8,6 +8,8 @@ import { listEvents } from '../../store/events.js';
 import { listAttempts } from '../../store/attempts.js';
 import { listApprovals, decideApproval, getApproval } from '../../store/approvals.js';
 import { listRevisions } from '../../store/workspaces.js';
+import { listGrants } from '../../store/grants.js';
+import { latestCheckpoint } from '../../store/checkpoints.js';
 import { getTenant } from '../../store/tenants.js';
 import { runUsage, tenantUsage, countActiveRuns, tenantTokensToday } from '../../store/usage.js';
 import { appendEvent, transitionRun } from '../../core/transition.js';
@@ -32,6 +34,13 @@ const createRunBody = z.object({
     )
     .optional(),
   debugFaultPoints: z.array(z.string()).optional(),
+});
+
+const forkBody = z.object({
+  goal: z.string().min(1).optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  maxSteps: z.number().int().positive().optional(),
+  tokenBudget: z.number().int().positive().optional(),
 });
 
 export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
@@ -339,6 +348,61 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
       return result.run;
     },
   );
+
+  // Fork a run: create a new run branched from the source's latest checkpoint +
+  // workspace (memo §20). The fork inherits the source's progress ledger and
+  // capability grants (with a fresh call budget), lazily copy-on-write seeds its
+  // workspace from the source's head, and resumes from the source's checkpoint
+  // step. Body may override goal/input/maxSteps/tokenBudget.
+  app.post<{
+    Params: { runId: string };
+    Body: {
+      goal?: string;
+      input?: Record<string, unknown>;
+      maxSteps?: number;
+      tokenBudget?: number;
+    };
+  }>('/v1/runs/:runId/fork', async (req, reply) => {
+    const source = await getRun(pool, req.params.runId, req.tenantId);
+    if (!source) return reply.code(404).send({ error: 'run not found' });
+    const body = forkBody.parse(req.body ?? {});
+
+    const ckpt = await latestCheckpoint(pool, source.id);
+    const grants = (await listGrants(pool, source.id)).map((g) => ({
+      action: g.action_pattern,
+      resource: g.resource_pattern,
+      requiresApproval: g.requires_approval,
+      maxCalls: g.max_calls ?? undefined,
+    }));
+    // Execution-state seed: the epoch reads this on the fork's first attempt
+    // (which has no checkpoint of its own) to resume from the source's step.
+    const forkFrom = ckpt
+      ? {
+          step: ckpt.agent_state.step,
+          supervisor: ckpt.agent_state.supervisor,
+          transcriptTosKey: ckpt.agent_state.transcriptTosKey,
+        }
+      : undefined;
+
+    const fork = await withTransaction(pool, (tx) =>
+      createRun(tx, {
+        tenantId: req.tenantId,
+        agentVersionId: source.agent_version_id,
+        goal: body.goal ?? source.goal,
+        input: {
+          ...(body.input ?? source.input),
+          parentWorkspaceId: source.workspace_id, // copy-on-write seed (as delegate does)
+          ...(forkFrom ? { forkFrom } : {}),
+        },
+        progress: source.progress as Record<string, unknown>,
+        maxSteps: body.maxSteps ?? source.max_steps,
+        tokenBudget: body.tokenBudget ?? (source.token_budget ? Number(source.token_budget) : undefined),
+        forkedFromRunId: source.id,
+        grants,
+      }),
+    );
+    return reply.code(201).send(fork);
+  });
 
   app.get<{ Params: { runId: string } }>(
     '/v1/runs/:runId/export',

@@ -22,6 +22,10 @@ export interface CreateRunInput {
   replacesRunId?: string;
   /** Generation of this child in its replacement lineage (0 = original). */
   replacementGeneration?: number;
+  /** The source run this run was forked from (memo §20 fork). */
+  forkedFromRunId?: string;
+  /** Seed the progress ledger (used by fork to carry the source's progress). */
+  progress?: Record<string, unknown>;
   grants?: {
     action: string;
     resource?: string;
@@ -41,16 +45,17 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
   const wsId = newId('ws');
 
   await tx.query(
-    `INSERT INTO runs (id, tenant_id, agent_version_id, goal, input, status, max_steps,
+    `INSERT INTO runs (id, tenant_id, agent_version_id, goal, input, status, progress, max_steps,
                        token_budget, scheduled_for, parent_run_id, debug_fault_points,
-                       replaces_run_id, replacement_generation)
-     VALUES ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11, $12)`,
+                       replaces_run_id, replacement_generation, forked_from_run_id)
+     VALUES ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       runId,
       input.tenantId ?? 'default',
       input.agentVersionId,
       input.goal,
       JSON.stringify(input.input ?? {}),
+      JSON.stringify(input.progress ?? {}),
       input.maxSteps ?? 50,
       input.tokenBudget ?? null,
       input.scheduledFor ?? null,
@@ -58,6 +63,7 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
       JSON.stringify(input.debugFaultPoints ?? []),
       input.replacesRunId ?? null,
       input.replacementGeneration ?? 0,
+      input.forkedFromRunId ?? null,
     ],
   );
   await tx.query(`INSERT INTO workspaces (id, run_id) VALUES ($1, $2)`, [wsId, runId]);

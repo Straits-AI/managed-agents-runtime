@@ -85,8 +85,19 @@ export function createRealEpoch(providers: EpochProviders) {
     if (!version) throw new Error(`agent version missing: ${run.agent_version_id}`);
 
     // --- Restore durable state ---
+    // A forked run has no checkpoint of its own on its first attempt; it seeds
+    // execution state (step, supervisor, transcript) from the source run's
+    // checkpoint, carried in input.forkFrom (memo §20). The transcript object in
+    // TOS is immutable, so referencing the source's key is safe.
+    const forkFrom = run.input.forkFrom as
+      | { step?: number; supervisor?: unknown; transcriptTosKey?: string }
+      | undefined;
     const ckpt = await latestCheckpoint(pool, run.id);
-    const agentState: CheckpointAgentState = ckpt?.agent_state ?? { step: 0 };
+    const agentState: CheckpointAgentState =
+      ckpt?.agent_state ??
+      (forkFrom
+        ? { step: forkFrom.step ?? 0, supervisor: forkFrom.supervisor, transcriptTosKey: forkFrom.transcriptTosKey }
+        : { step: 0 });
     let transcript: ChatMessage[] = [];
     if (agentState.transcriptTosKey) {
       transcript = JSON.parse(

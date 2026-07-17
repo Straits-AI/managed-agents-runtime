@@ -124,6 +124,60 @@ describe('multi-tenancy & auth', () => {
   });
 });
 
+describe('fork', () => {
+  it('forks within a tenant (copying grants) and 404s across tenants', async () => {
+    // Tenant A creates an agent+version+run with a capability grant.
+    const agent = (
+      await app.inject({ method: 'POST', url: '/v1/agents', headers: bearer(keyA), payload: { name: agentName() } })
+    ).json();
+    const ver = (
+      await app.inject({
+        method: 'POST',
+        url: `/v1/agents/${agent.id}/versions`,
+        headers: bearer(keyA),
+        payload: { instructions: 'x', modelPolicy: {} },
+      })
+    ).json();
+    const src = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/runs',
+        headers: bearer(keyA),
+        payload: {
+          agentVersionId: ver.id,
+          goal: 'original',
+          input: {},
+          grants: [{ action: 'external.http.request', resource: 'https://api.example.com', maxCalls: 5 }],
+        },
+      })
+    ).json();
+
+    // Another tenant cannot fork it.
+    const cross = await app.inject({ method: 'POST', url: `/v1/runs/${src.id}/fork`, headers: bearer(keyB), payload: {} });
+    expect(cross.statusCode).toBe(404);
+
+    // Owner forks it, overriding the goal; the fork inherits the grant.
+    const forkRes = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${src.id}/fork`,
+      headers: bearer(keyA),
+      payload: { goal: 'forked variant' },
+    });
+    expect(forkRes.statusCode).toBe(201);
+    const fork = forkRes.json();
+    expect(fork.forked_from_run_id).toBe(src.id);
+    expect(fork.goal).toBe('forked variant');
+
+    const { rows } = await db.pool.query<{ action_pattern: string; max_calls: number }>(
+      `SELECT action_pattern, max_calls FROM capability_grants WHERE run_id = $1`,
+      [fork.id],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.action_pattern).toBe('external.http.request');
+    expect(rows[0]!.max_calls).toBe(5);
+  });
+});
+
 describe('tenant quotas', () => {
   it('enforces the concurrent-run quota with 429', async () => {
     const t = await createTenant(db.pool, { name: 'Capped', quota: { maxConcurrentRuns: 1 } });

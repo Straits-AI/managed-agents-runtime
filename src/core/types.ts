@@ -88,6 +88,8 @@ export interface RunRow {
   replaces_run_id: string | null;
   /** 0 for an original child; N for its Nth replacement. */
   replacement_generation: number;
+  /** The source run this run was forked from (memo §20 fork). */
+  forked_from_run_id: string | null;
   goal: string;
   input: Record<string, unknown>;
   status: RunStatus;

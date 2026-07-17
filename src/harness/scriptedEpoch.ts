@@ -42,7 +42,10 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
   const script = (run.input.script ?? []) as ScriptOp[];
 
   const ckpt = await latestCheckpoint(pool, run.id);
-  let step = ckpt?.agent_state.step ?? 0;
+  // A forked run resumes from the source's checkpoint step (memo §20), carried
+  // in input.forkFrom, when it has no checkpoint of its own yet.
+  const forkFrom = run.input.forkFrom as { step?: number } | undefined;
+  let step = ckpt?.agent_state.step ?? forkFrom?.step ?? 0;
 
   while (step < script.length) {
     if (signal.aborted) return 'lease_lost';

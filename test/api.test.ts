@@ -292,4 +292,46 @@ describe('API', () => {
     expect(Number(events[0].seq)).toBe(3);
     expect(Date.now() - start).toBeLessThan(10_000);
   }, 30_000);
+
+  it('forks a run and resumes it from the source checkpoint step', async () => {
+    const versionId = await createAgentVersionViaApi();
+    const sourceId = await createRunViaApi(versionId, [
+      { op: 'progress', note: 's0' }, // step 0 — before the checkpoint
+      { op: 'checkpoint' }, // step 1 — checkpoint captures step=2
+      { op: 'progress', note: 's1' }, // step 2 — after the checkpoint
+      { op: 'complete' },
+    ]);
+    workers.push(spawnWorker(db.url));
+    await waitFor(
+      async () => ((await getRunViaApi(sourceId)).status === 'COMPLETED' ? true : null),
+      { label: 'source COMPLETED' },
+    );
+
+    const forkRes = await app.inject({
+      method: 'POST',
+      url: `/v1/runs/${sourceId}/fork`,
+      headers: AUTH,
+      payload: {},
+    });
+    expect(forkRes.statusCode).toBe(201);
+    const fork = forkRes.json();
+    expect(fork.forked_from_run_id).toBe(sourceId);
+    expect(fork.status).toBe('QUEUED');
+    expect(fork.input.parentWorkspaceId).toBeTruthy(); // copy-on-write seed
+    expect(fork.input.forkFrom.step).toBe(2);
+
+    await waitFor(
+      async () => ((await getRunViaApi(fork.id)).status === 'COMPLETED' ? true : null),
+      { label: 'fork COMPLETED', timeoutMs: 30_000 },
+    );
+    const events = (
+      await app.inject({ method: 'GET', url: `/v1/runs/${fork.id}/events`, headers: AUTH })
+    ).json().events;
+    const notes = events
+      .filter((e: { type: string }) => e.type === 'ProgressUpdated')
+      .map((e: { payload: { note: string } }) => e.payload.note);
+    // Resumed from step 2: ran 's1' but NOT the pre-checkpoint 's0'.
+    expect(notes).toContain('s1');
+    expect(notes).not.toContain('s0');
+  }, 60_000);
 });
