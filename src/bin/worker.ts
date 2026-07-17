@@ -17,11 +17,27 @@ if (epochMode === 'scripted') {
   const { ModelArkProvider } = await import('../providers/modelark.js');
   const { VefaasSandboxProvider } = await import('../providers/vefaasSandbox.js');
   const { TosObjectStore } = await import('../providers/tosObjectStore.js');
-  const { PgMemoryProvider } = await import('../providers/pgMemory.js');
   const sandbox = new VefaasSandboxProvider(cfg);
-  // Memory provider is pluggable; Postgres is the default, AgentKit is a seam.
-  const memory =
-    cfg.MEMORY_PROVIDER === 'none' ? undefined : new PgMemoryProvider(pool);
+  // Memory provider is pluggable: Postgres (default), AgentKit/Viking Memory, or off.
+  let memory;
+  if (cfg.MEMORY_PROVIDER === 'agentkit') {
+    const { AgentKitMemoryProvider } = await import('../providers/agentkitMemory.js');
+    const { requireConfig } = await import('../config.js');
+    const req = requireConfig(cfg, [
+      'BYTEPLUS_ACCESS_KEY_ID',
+      'BYTEPLUS_SECRET_ACCESS_KEY',
+      'AGENTKIT_MEMORY_COLLECTION',
+    ]);
+    memory = new AgentKitMemoryProvider({
+      accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
+      secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
+      sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
+      collectionName: req.AGENTKIT_MEMORY_COLLECTION,
+    });
+  } else if (cfg.MEMORY_PROVIDER !== 'none') {
+    const { PgMemoryProvider } = await import('../providers/pgMemory.js');
+    memory = new PgMemoryProvider(pool);
+  }
   epoch = createRealEpoch({
     model: new ModelArkProvider(cfg),
     sandbox,

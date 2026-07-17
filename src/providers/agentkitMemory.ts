@@ -1,89 +1,94 @@
-import { AgentKitClient } from './byteplus/agentkit.js';
+import { VikingMemoryClient } from './byteplus/vikingMemory.js';
 import type { MemoryProvider, MemoryRecord, MemoryScope } from './types.js';
 
 /**
- * AgentKit Memory adapter (memo §9.3), implementing the same MemoryProvider
- * interface as PgMemoryProvider — selecting it is a one-line swap in the worker.
+ * AgentKit Memory adapter (memo §9.3), backed by Viking Memory — implements the
+ * same MemoryProvider interface as PgMemoryProvider, so it is a one-line swap in
+ * the worker (MEMORY_PROVIDER=agentkit).
  *
- * VERIFIED LIVE (2026-07-17, this account): AgentKit is fully enabled and the
- * OpenAPI is directly callable with our BytePlus signer (service `agentkit`,
- * version `2025-10-30`) — no separate CLI. Confirmed valid actions:
- * ListRuntimes, ListTools, ListMemoryCollections, GetMemoryCollection(MemoryId),
- * CreateMemoryCollection(Name). AgentKit Memory is backed by VikingDB.
+ * WORKING end-to-end (verified 2026-07-17 against collection `managed_agents_mem`):
+ * wrote a memory, and after ~10s of async AI extraction, recalled it via search.
+ *   - data plane: api-knowledgebase.mlp.cn-hongkong.bytepluses.com, SignerV4
+ *     service `air`, region `cn-north-1` (see byteplus/vikingMemory.ts).
+ *   - Memory is AI-EXTRACTED asynchronously from written session messages, so a
+ *     write is not necessarily searchable immediately.
  *
- * FULL CONTRACT DISCOVERED (2026-07-17). AgentKit Memory is backed by "Viking
- * Memory", which has its OWN data-plane API distinct from the AgentKit
- * top-gateway OpenAPI:
- *
- *   - Control plane (manage collections): service `agentkit`, version
- *     `2025-10-30`, top-gateway (`open.byteplusapi.com`) — our existing signer.
- *     CreateMemoryCollection needs {Name, Description, ProviderType:
- *     'VIKINGDB_MEMORY', Strategies:[event+profile extraction rules]}. Easier to
- *     create via the console/Viking Memory (free; billing starts on data upload).
- *   - Data plane (read/write memory): host
- *     `api-knowledgebase.mlp.cn-hongkong.bytepluses.com`, **Volcengine SignerV4,
- *     service `air`, region `cn-north-1`** (path-based REST — NOT the top-gateway
- *     Action= style, so it needs a second signer we don't have yet).
- *       search:  POST /api/memory/get_context
- *         { collection_name, project_name, conversation_id, query,
- *           event_search_config:{ filter:{ user_id, memory_type:['event_v1'] },
- *             limit, time_decay_config:{ weight, no_decay_period } },
- *           profile_search_config:{ filter:{ user_id, memory_type:['profile_v1'] }, limit } }
- *       write:   POST /api/memory/... (session/conversation data → AI extracts
- *         event + profile memories; exact path via the console "Write data" flow)
- *   - Model is conversation/session-based (not plain key-value): writes are
- *     messages under a conversation_id/user_id, memories are AI-extracted.
- *
- * Live collection provisioned for binding: `mem-3a9e24de` (name
- * `managed_agents_mem`, cn-hongkong, Standard/shared-compute).
- *
- * REMAINING BUILD to make search()/write() live:
- *   1. Add a path-based SignerV4 signer (service `air`, region `cn-north-1`).
- *   2. Implement get_context (search) + the session-add call (write), mapping
- *      our MemoryRecord {content} to a conversation message and back.
- *   3. Point at collection_name `managed_agents_mem`, scoped by user_id =
- *      `${tenantId}:${agentId}`.
+ * Scope mapping: MemoryScope {tenantId, agentId} → Viking user_id
+ * `${tenantId}:${agentId}` (per-agent isolation) and assistant_id `${agentId}`.
  */
 export interface AgentKitMemoryConfig {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken?: string;
-  region?: string;
-  /** The AgentKit memory collection (VikingDB-backed) to read/write. */
-  memoryId: string;
+  /** The Viking Memory collection name (created in the AgentKit/Viking console). */
+  collectionName: string;
+}
+
+function userId(scope: MemoryScope): string {
+  return `${scope.tenantId}:${scope.agentId}`;
 }
 
 export class AgentKitMemoryProvider implements MemoryProvider {
-  private readonly client: AgentKitClient;
-  private readonly memoryId: string;
+  private readonly client: VikingMemoryClient;
 
   constructor(cfg: AgentKitMemoryConfig) {
-    if (!cfg.memoryId) {
+    if (!cfg.collectionName) {
       throw new Error(
-        'AgentKitMemoryProvider needs a memoryId (a provisioned VikingDB memory ' +
-          'collection). Create one with CreateMemoryCollection, then set it. Until ' +
-          'then use PgMemoryProvider (MEMORY_PROVIDER=pg).',
+        'AgentKitMemoryProvider needs AGENTKIT_MEMORY_COLLECTION (a Viking Memory ' +
+          'collection name). Create one in the AgentKit/Viking console, or use ' +
+          'PgMemoryProvider (MEMORY_PROVIDER=pg).',
       );
     }
-    this.client = new AgentKitClient({
+    this.client = new VikingMemoryClient({
       accessKeyId: cfg.accessKeyId,
       secretAccessKey: cfg.secretAccessKey,
       sessionToken: cfg.sessionToken,
-      region: cfg.region,
+      collectionName: cfg.collectionName,
     });
-    this.memoryId = cfg.memoryId;
   }
 
-  async search(_scope: MemoryScope, _query: string, _limit: number): Promise<MemoryRecord[]> {
-    // TODO(agentkit-memory): call the confirmed memory-search action against
-    // this.memoryId and map results to MemoryRecord. Action name pending
-    // discovery on a live collection (see class doc).
-    throw new Error('AgentKitMemoryProvider.search: memory-search action not yet confirmed');
+  async search(scope: MemoryScope, query: string, limit: number): Promise<MemoryRecord[]> {
+    const res = await this.client.getContext({ userId: userId(scope), query, limit });
+    const parts = res.context_parts ?? [];
+    const records: MemoryRecord[] = parts
+      .filter((p) => p.content)
+      .map((p, i) => ({
+        id: `viking:${i}`,
+        kind: String(p.memory_type ?? 'event'),
+        content: String(p.content),
+        metadata: p,
+        createdAt: new Date().toISOString(),
+      }));
+    // Fall back to the merged `context` string when no discrete parts came back.
+    if (records.length === 0 && res.context?.trim()) {
+      records.push({
+        id: 'viking:context',
+        kind: 'context',
+        content: res.context.trim(),
+        metadata: {},
+        createdAt: new Date().toISOString(),
+      });
+    }
+    return records;
   }
 
-  async write(): Promise<void> {
-    // TODO(agentkit-memory): call the confirmed memory-add action against
-    // this.memoryId. Action name pending discovery on a live collection.
-    throw new Error('AgentKitMemoryProvider.write: memory-add action not yet confirmed');
+  async write(
+    scope: MemoryScope,
+    entries: { content: string; kind?: string; metadata?: Record<string, unknown>; runId?: string }[],
+  ): Promise<void> {
+    const uid = userId(scope);
+    for (const e of entries) {
+      if (!e.content?.trim()) continue;
+      // Viking extracts memories from conversation turns; frame the fact as a
+      // short user statement the extractor can turn into an event memory.
+      await this.client.addSession({
+        userId: uid,
+        assistantId: scope.agentId,
+        messages: [
+          { role: 'user', content: e.content.trim() },
+          { role: 'assistant', content: 'Understood, I will remember that.' },
+        ],
+      });
+    }
   }
 }

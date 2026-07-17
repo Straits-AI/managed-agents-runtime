@@ -151,7 +151,8 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | M9 survival benchmark | ✅ **PASSED on the live stack** (TOS + ModelArk + Cloud Sandbox via APIG), 2026-07-17 — 57-event gapless history, exactly-once external write |
 | Phase 2A: harden what we own | ✅ tool-level observability, budget-exhaustion enforcement, denied-approval, external signals + scheduled runs — all tested |
 | Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres adapter (default) behind a provider-neutral `MemoryProvider`; AgentKit adapter is a documented seam (`src/providers/agentkitMemory.ts`). 48 tests. |
-| Phase 2 — Knowledge / Skills / MCP | ⏸ blocked on the AgentKit CLI + create-entitlement (not reachable via `bp`); will follow the same provider-adapter pattern as memory |
+| Phase 2 — AgentKit Memory binding | ✅ **live**: `MEMORY_PROVIDER=agentkit` writes/recalls via Viking Memory (AgentKit's memory backend) through a path-based SignerV4 client. Confirmed end-to-end (write → async AI extraction → recall). |
+| Phase 2 — Knowledge / Skills / MCP | ◻ next: same provider-adapter pattern; AgentKit is confirmed enabled + directly callable (`agentkit`/`2025-10-30`) |
 
 Phase 1 scope cuts (per memo §22.4): subagents, Kafka/RocketMQ (outbox is
 in-process), AgentKit Memory/Knowledge/Identity, KMS/FileNAS, multi-tenancy,
