@@ -468,7 +468,9 @@ async function delegate(ctx: ToolContext, args: Record<string, unknown>): Promis
         agentVersionId: ctx.run.agent_version_id, // same agent, focused subgoal
         goal,
         tokenBudget: childBudget,
-        input: { parentWorkspaceId: ctx.run.workspace_id },
+        // No parentWorkspaceId in input: the epoch derives the copy-on-write seed
+        // from the child's server-set parent_run_id (tenant-checked), so client
+        // input can't point a run at another tenant's workspace.
       })),
     }),
   );

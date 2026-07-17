@@ -27,6 +27,7 @@ import { resolveMcpTools } from './mcp.js';
 import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { getAgentVersion } from '../store/agents.js';
+import { getRun } from '../store/runs.js';
 import { insertCheckpoint, latestCheckpoint } from '../store/checkpoints.js';
 import { listGrants } from '../store/grants.js';
 import { listEvents } from '../store/events.js';
@@ -88,19 +89,26 @@ export function createRealEpoch(providers: EpochProviders) {
     if (!version) throw new Error(`agent version missing: ${run.agent_version_id}`);
 
     // --- Restore durable state ---
-    // A forked run has no checkpoint of its own on its first attempt; it seeds
-    // execution state (step, supervisor, transcript) from the source run's
-    // checkpoint, carried in input.forkFrom (memo §20). The transcript object in
-    // TOS is immutable, so referencing the source's key is safe.
-    const forkFrom = run.input.forkFrom as
-      | { step?: number; supervisor?: unknown; transcriptTosKey?: string }
-      | undefined;
+    // Fork/child seeds are derived from the run's SERVER-SET lineage columns
+    // (forked_from_run_id / parent_run_id), never from client-controllable
+    // run.input: a caller could otherwise point at another tenant's workspace or
+    // transcript in TOS (IDOR). The source is used only after confirming it
+    // belongs to the same tenant.
     const ckpt = await latestCheckpoint(pool, run.id);
-    const agentState: CheckpointAgentState =
-      ckpt?.agent_state ??
-      (forkFrom
-        ? { step: forkFrom.step ?? 0, supervisor: forkFrom.supervisor, transcriptTosKey: forkFrom.transcriptTosKey }
-        : { step: 0 });
+    let seedWorkspaceId: string | undefined;
+    let forkAgentState: CheckpointAgentState | undefined;
+    const lineageId = run.forked_from_run_id ?? run.parent_run_id;
+    if (lineageId) {
+      const source = await getRun(pool, lineageId);
+      if (source && source.tenant_id === run.tenant_id) {
+        seedWorkspaceId = source.workspace_id ?? undefined; // copy-on-write seed
+        // A fork additionally resumes execution state from the source checkpoint.
+        if (!ckpt && run.forked_from_run_id) {
+          forkAgentState = (await latestCheckpoint(pool, source.id))?.agent_state;
+        }
+      }
+    }
+    const agentState: CheckpointAgentState = ckpt?.agent_state ?? forkAgentState ?? { step: 0 };
     let transcript: ChatMessage[] = [];
     if (agentState.transcriptTosKey) {
       transcript = JSON.parse(
@@ -162,7 +170,7 @@ export function createRealEpoch(providers: EpochProviders) {
         workspaceId: run.workspace_id!,
         seedFiles: run.input.files as Record<string, string> | undefined,
         initCommand: run.input.initCommand as string | undefined,
-        parentWorkspaceId: run.input.parentWorkspaceId as string | undefined,
+        parentWorkspaceId: seedWorkspaceId, // server-derived from lineage, tenant-checked
       });
 
       // Materialize version-pinned skills into the workspace (memo §9.1).

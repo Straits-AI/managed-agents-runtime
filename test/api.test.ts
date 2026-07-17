@@ -315,10 +315,13 @@ describe('API', () => {
     });
     expect(forkRes.statusCode).toBe(201);
     const fork = forkRes.json();
-    expect(fork.forked_from_run_id).toBe(sourceId);
+    expect(fork.forked_from_run_id).toBe(sourceId); // server-set lineage
     expect(fork.status).toBe('QUEUED');
-    expect(fork.input.parentWorkspaceId).toBeTruthy(); // copy-on-write seed
-    expect(fork.input.forkFrom.step).toBe(2);
+    // Seeds are NOT carried in client-visible input — derived server-side from
+    // forked_from_run_id (prevents cross-tenant IDOR). The resume behavior below
+    // proves the derivation works.
+    expect(fork.input.forkFrom).toBeUndefined();
+    expect(fork.input.parentWorkspaceId).toBeUndefined();
 
     await waitFor(
       async () => ((await getRunViaApi(fork.id)).status === 'COMPLETED' ? true : null),

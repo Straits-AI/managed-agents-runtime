@@ -176,6 +176,34 @@ describe('fork', () => {
     expect(rows[0]!.action_pattern).toBe('external.http.request');
     expect(rows[0]!.max_calls).toBe(5);
   });
+
+  it('rejects client-supplied server-reserved input keys (IDOR guard)', async () => {
+    const agent = (
+      await app.inject({ method: 'POST', url: '/v1/agents', headers: bearer(keyA), payload: { name: agentName() } })
+    ).json();
+    const ver = (
+      await app.inject({
+        method: 'POST',
+        url: `/v1/agents/${agent.id}/versions`,
+        headers: bearer(keyA),
+        payload: { instructions: 'x', modelPolicy: {} },
+      })
+    ).json();
+    // A caller must not be able to smuggle a workspace/transcript seed pointing
+    // at another tenant's data via `input`.
+    for (const bad of [
+      { parentWorkspaceId: 'ws_victim' },
+      { forkFrom: { transcriptTosKey: 'runs/victim/transcripts/1-0.json' } },
+    ]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/runs',
+        headers: bearer(keyA),
+        payload: { agentVersionId: ver.id, goal: 'g', input: bad },
+      });
+      expect(res.statusCode, JSON.stringify(bad)).toBe(400);
+    }
+  });
 });
 
 describe('tenant quotas', () => {

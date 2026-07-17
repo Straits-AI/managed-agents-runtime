@@ -9,17 +9,33 @@ import { listAttempts } from '../../store/attempts.js';
 import { listApprovals, decideApproval, getApproval } from '../../store/approvals.js';
 import { listRevisions } from '../../store/workspaces.js';
 import { listGrants } from '../../store/grants.js';
-import { latestCheckpoint } from '../../store/checkpoints.js';
 import { getTenant } from '../../store/tenants.js';
 import { runUsage, tenantUsage, countActiveRuns, tenantTokensToday } from '../../store/usage.js';
 import { appendEvent, transitionRun } from '../../core/transition.js';
 import { isTerminal } from '../../core/stateMachine.js';
 import type { ModelPrice } from '../../core/costs.js';
 
+// Keys the server owns inside a run's `input`; a client must never set them —
+// they drive workspace/transcript seeding from other runs and would otherwise
+// allow pointing a run at another tenant's data (IDOR).
+const RESERVED_INPUT_KEYS = ['forkFrom', 'parentWorkspaceId'] as const;
+
+function stripReservedInput(input: Record<string, unknown>): Record<string, unknown> {
+  const clean = { ...input };
+  for (const k of RESERVED_INPUT_KEYS) delete clean[k];
+  return clean;
+}
+
+const runInput = z
+  .record(z.string(), z.unknown())
+  .refine((o) => RESERVED_INPUT_KEYS.every((k) => !(k in o)), {
+    message: `input may not contain server-reserved keys: ${RESERVED_INPUT_KEYS.join(', ')}`,
+  });
+
 const createRunBody = z.object({
   agentVersionId: z.string(),
   goal: z.string().min(1),
-  input: z.record(z.string(), z.unknown()).optional(),
+  input: runInput.optional(),
   maxSteps: z.number().int().positive().optional(),
   tokenBudget: z.number().int().positive().optional(),
   scheduledFor: z.string().datetime().optional(),
@@ -38,7 +54,7 @@ const createRunBody = z.object({
 
 const forkBody = z.object({
   goal: z.string().min(1).optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
+  input: runInput.optional(),
   maxSteps: z.number().int().positive().optional(),
   tokenBudget: z.number().int().positive().optional(),
 });
@@ -349,11 +365,12 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
     },
   );
 
-  // Fork a run: create a new run branched from the source's latest checkpoint +
-  // workspace (memo §20). The fork inherits the source's progress ledger and
-  // capability grants (with a fresh call budget), lazily copy-on-write seeds its
-  // workspace from the source's head, and resumes from the source's checkpoint
-  // step. Body may override goal/input/maxSteps/tokenBudget.
+  // Fork a run: create a new run branched from the source (memo §20). Lineage is
+  // recorded in forked_from_run_id (server-set); the epoch derives the workspace
+  // copy-on-write seed and the resume step from that source run — never from
+  // client input — after a same-tenant check. The fork inherits the source's
+  // progress ledger and capability grants (with a fresh call budget). Body may
+  // override goal/input/maxSteps/tokenBudget.
   app.post<{
     Params: { runId: string };
     Body: {
@@ -367,33 +384,21 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
     if (!source) return reply.code(404).send({ error: 'run not found' });
     const body = forkBody.parse(req.body ?? {});
 
-    const ckpt = await latestCheckpoint(pool, source.id);
     const grants = (await listGrants(pool, source.id)).map((g) => ({
       action: g.action_pattern,
       resource: g.resource_pattern,
       requiresApproval: g.requires_approval,
       maxCalls: g.max_calls ?? undefined,
     }));
-    // Execution-state seed: the epoch reads this on the fork's first attempt
-    // (which has no checkpoint of its own) to resume from the source's step.
-    const forkFrom = ckpt
-      ? {
-          step: ckpt.agent_state.step,
-          supervisor: ckpt.agent_state.supervisor,
-          transcriptTosKey: ckpt.agent_state.transcriptTosKey,
-        }
-      : undefined;
 
     const fork = await withTransaction(pool, (tx) =>
       createRun(tx, {
         tenantId: req.tenantId,
         agentVersionId: source.agent_version_id,
         goal: body.goal ?? source.goal,
-        input: {
-          ...(body.input ?? source.input),
-          parentWorkspaceId: source.workspace_id, // copy-on-write seed (as delegate does)
-          ...(forkFrom ? { forkFrom } : {}),
-        },
+        // Strip any server-reserved keys the source's input may carry; the epoch
+        // sets the real seeds from forked_from_run_id.
+        input: stripReservedInput(body.input ?? source.input),
         progress: source.progress as Record<string, unknown>,
         maxSteps: body.maxSteps ?? source.max_steps,
         tokenBudget: body.tokenBudget ?? (source.token_budget ? Number(source.token_budget) : undefined),

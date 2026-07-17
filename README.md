@@ -215,7 +215,7 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. |
 | Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. |
 | Productionization | ✅ multi-tenant auth (per-tenant API keys, tenant-scoped everything), per-tenant quotas, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Cost reference in [`docs/COST.md`](./docs/COST.md). |
-| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, an outbox relay + `EventPublisher` seam (Kafka/RocketMQ adapter documented, in-process default), and a credential broker (encrypted per-tenant secrets injected into tool calls, never the model; KMS seam). 103 tests. |
+| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, an outbox relay + `EventPublisher` seam (Kafka/RocketMQ adapter documented, in-process default), and a credential broker (encrypted per-tenant secrets injected into tool calls, never the model; KMS seam). 104 tests. |
 
 Built well beyond the original Phase 1 cut: subagents (Phase 3), signals +
 scheduling, AgentKit Memory/Knowledge/Skills/MCP (Phase 2), the semantic

@@ -5,6 +5,7 @@ import { appendEvent, transitionRun } from '../core/transition.js';
 import { insertCheckpoint, latestCheckpoint } from '../store/checkpoints.js';
 import { insertApproval, listApprovals } from '../store/approvals.js';
 import { listEvents } from '../store/events.js';
+import { getRun } from '../store/runs.js';
 import { spawnChildren } from '../scheduler/children.js';
 import { tokenBudgetExceeded } from './limits.js';
 
@@ -42,10 +43,16 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
   const script = (run.input.script ?? []) as ScriptOp[];
 
   const ckpt = await latestCheckpoint(pool, run.id);
-  // A forked run resumes from the source's checkpoint step (memo §20), carried
-  // in input.forkFrom, when it has no checkpoint of its own yet.
-  const forkFrom = run.input.forkFrom as { step?: number } | undefined;
-  let step = ckpt?.agent_state.step ?? forkFrom?.step ?? 0;
+  // A forked run resumes from the SOURCE run's checkpoint step (memo §20),
+  // derived from the server-set forked_from_run_id (never client input) and only
+  // when the source is the same tenant.
+  let step = ckpt?.agent_state.step ?? 0;
+  if (!ckpt && run.forked_from_run_id) {
+    const source = await getRun(pool, run.forked_from_run_id);
+    if (source && source.tenant_id === run.tenant_id) {
+      step = (await latestCheckpoint(pool, source.id))?.agent_state.step ?? 0;
+    }
+  }
 
   while (step < script.length) {
     if (signal.aborted) return 'lease_lost';
