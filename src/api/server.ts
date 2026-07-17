@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import type { Config } from '../config.js';
+import type { ObjectStore } from '../providers/types.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerRunRoutes } from './routes/runs.js';
 
@@ -10,6 +11,8 @@ export interface ApiDeps {
   cfg: Config;
   /** Presigner for artifact downloads; wired to TOS when configured. */
   presignGet?: (tosKey: string, ttlSec: number) => Promise<string>;
+  /** Object store for run-bundle export (workspace snapshots). */
+  objectStore?: ObjectStore;
 }
 
 export function buildServer(deps: ApiDeps): FastifyInstance {

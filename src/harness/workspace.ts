@@ -105,12 +105,14 @@ export class WorkspaceManager {
     const tosKey = `runs/${input.runId}/workspace/${Date.now()}-${handle.sandboxId}.tgz`;
     const putUrl = await this.store.presignPut(tosKey, 900);
 
+    // Portable across GNU (Linux sandbox) and BSD (local macOS host): prefer
+    // sha256sum/shasum whichever exists, and wc -c for size.
     const res = await this.sandbox.exec(
       handle,
       `cd ${WORKSPACE_DIR} && tar -czf /tmp/ws-snapshot.tgz . && ` +
         `curl -fsS -X PUT --upload-file /tmp/ws-snapshot.tgz '${putUrl}' && ` +
-        `sha256sum /tmp/ws-snapshot.tgz | cut -d' ' -f1 && ` +
-        `stat -c %s /tmp/ws-snapshot.tgz`,
+        `{ command -v sha256sum >/dev/null 2>&1 && sha256sum /tmp/ws-snapshot.tgz | cut -d' ' -f1 || shasum -a 256 /tmp/ws-snapshot.tgz | cut -d' ' -f1; } && ` +
+        `wc -c < /tmp/ws-snapshot.tgz | tr -d ' '`,
       { timeoutSec: 300 },
     );
     if (res.exitCode !== 0) {

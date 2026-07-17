@@ -6,13 +6,14 @@ const cfg = loadConfig();
 const pool = createPool(cfg.DATABASE_URL);
 
 let presignGet;
+let objectStore;
 if (cfg.TOS_BUCKET && cfg.BYTEPLUS_ACCESS_KEY_ID) {
   const { TosObjectStore } = await import('../providers/tosObjectStore.js');
-  const store = new TosObjectStore(cfg);
-  presignGet = (key: string, ttl: number) => store.presignGet(key, ttl);
+  objectStore = new TosObjectStore(cfg);
+  presignGet = (key: string, ttl: number) => objectStore!.presignGet(key, ttl);
 }
 
-const app = buildServer({ pool, cfg, presignGet });
+const app = buildServer({ pool, cfg, presignGet, objectStore });
 
 await app.listen({ port: cfg.API_PORT, host: '0.0.0.0' });
 console.log(`[api] listening on :${cfg.API_PORT}`);

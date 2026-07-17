@@ -224,6 +224,25 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
   );
 
   app.get<{ Params: { runId: string } }>(
+    '/v1/runs/:runId/export',
+    async (req, reply) => {
+      if (!deps.objectStore) {
+        return reply.code(501).send({ error: 'export requires an object store' });
+      }
+      const { exportRunBundle } = await import('../../export/runBundle.js');
+      try {
+        const bundle = await exportRunBundle(pool, deps.objectStore, req.params.runId);
+        return bundle;
+      } catch (err) {
+        if ((err as Error).message.includes('not found')) {
+          return reply.code(404).send({ error: 'run not found' });
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.get<{ Params: { runId: string } }>(
     '/v1/runs/:runId/artifacts',
     async (req, reply) => {
       const run = await getRun(pool, req.params.runId);

@@ -18,7 +18,14 @@ import { WORKSPACE_DIR } from '../../harness/workspace.js';
 export class LocalSandboxProvider implements SandboxProvider {
   private readonly roots = new Map<string, string>();
 
-  async create(req: { runId: string }): Promise<SandboxHandle> {
+  async create(req: {
+    runId: string;
+    timeoutMinutes?: number;
+    image?: string;
+    envs?: Record<string, string>;
+    cpuMilli?: number;
+    memoryMB?: number;
+  }): Promise<SandboxHandle> {
     const root = mkdtempSync(join(tmpdir(), `ma-local-${req.runId}-`));
     mkdirSync(join(root, 'workspace'), { recursive: true });
     mkdirSync(join(root, 'tmp'), { recursive: true });

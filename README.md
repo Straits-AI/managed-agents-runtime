@@ -47,7 +47,14 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
   never re-executes a committed action.
 - **Providers** (`src/providers/`): the kernel sees only provider
   interfaces; BytePlus implementations (ModelArk via the `openai` package,
-  veFaaS sandbox with our own HMAC signer, TOS) are adapters.
+  veFaaS sandbox with our own HMAC signer, TOS) are adapters — and so are the
+  **local, no-BytePlus** ones (`src/providers/local/`): a child-process
+  `LocalSandbox` + filesystem `ObjectStore` let the whole runtime execute
+  without any cloud dependency (memo §21 portability).
+- **Portability** (`src/export/runBundle.ts`): a run exports as a
+  self-contained bundle — gapless events, receipts, grants, and the workspace
+  snapshot — so customer execution state is owned and movable across
+  deployments (`GET /v1/runs/{id}/export`).
 - **Memory** (`src/providers/pgMemory.ts`): cross-run `MemoryProvider` —
   an agent recalls what it learned in earlier runs and writes new memories
   with the `remember` tool. Postgres (full-text ranked) by default; the
@@ -158,7 +165,8 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres adapter (default) behind a provider-neutral `MemoryProvider`; AgentKit adapter is a documented seam (`src/providers/agentkitMemory.ts`). 48 tests. |
 | Phase 2 — AgentKit Memory binding | ✅ **live**: `MEMORY_PROVIDER=agentkit` writes/recalls via Viking Memory (AgentKit's memory backend) through a path-based SignerV4 client. Confirmed end-to-end (write → async AI extraction → recall). |
 | Phase 2 — Knowledge / Skills / MCP | ✅ Knowledge (RAG `knowledge_search`), Skills (version-pinned, materialized into the workspace), MCP (namespaced toolsets routed through the capability layer). Postgres/registry defaults + AgentKit adapter seams. |
-| Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. 51 tests. |
+| Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. |
+| Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). 68 tests. |
 
 Phase 1 scope cuts (per memo §22.4): subagents, Kafka/RocketMQ (outbox is
 in-process), AgentKit Memory/Knowledge/Identity, KMS/FileNAS, multi-tenancy,
