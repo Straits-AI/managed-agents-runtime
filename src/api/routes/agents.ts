@@ -31,6 +31,7 @@ const createVersionBody = z.object({
   }).optional(),
   contextStrategy: z.record(z.string(), z.unknown()).optional(),
   verifierPolicy: z.record(z.string(), z.unknown()).optional(),
+  knowledgeConfig: z.record(z.string(), z.unknown()).optional(),
 });
 
 export function registerAgentRoutes(app: FastifyInstance, deps: ApiDeps): void {

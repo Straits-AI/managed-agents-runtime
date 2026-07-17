@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { Config } from '../config.js';
 import type { RunAttemptRow, RunRow, ProgressLedger } from '../core/types.js';
 import type {
+  KnowledgeProvider,
   MemoryProvider,
   MemoryScope,
   ObjectStore,
@@ -43,6 +44,9 @@ export interface ToolContext {
   /** Long-term memory + the scope to write it under (optional). */
   memory?: MemoryProvider;
   memoryScope?: MemoryScope;
+  /** Knowledge retrieval + the knowledge base to search (optional). */
+  knowledge?: KnowledgeProvider;
+  knowledgeBaseId?: string;
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -119,6 +123,19 @@ export const TOOL_DEFS: ToolDef[] = [
         },
       },
       required: ['subtasks'],
+    },
+  },
+  {
+    name: 'knowledge_search',
+    description:
+      'Search the agent’s configured knowledge base (enterprise docs, policies, manuals) and get back the most relevant passages with citations. Use to ground your work in authoritative sources rather than guessing.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        limit: { type: 'number', description: 'max passages (default 5)' },
+      },
+      required: ['query'],
     },
   },
   {
@@ -273,6 +290,26 @@ export async function dispatchTool(
       ]);
       await emitToolInvoked(ctx, 'remember', { kind: args.kind ?? 'fact' });
       return { kind: 'result', content: 'saved to long-term memory' };
+    }
+
+    case 'knowledge_search': {
+      if (!ctx.knowledge || !ctx.knowledgeBaseId) {
+        return { kind: 'result', content: 'error: no knowledge base is configured for this run' };
+      }
+      const limit = args.limit ? Math.min(20, Number(args.limit)) : 5;
+      const evidence = await ctx.knowledge.retrieve(
+        ctx.knowledgeBaseId,
+        String(args.query ?? ''),
+        limit,
+        ctx.run.tenant_id,
+      );
+      await emitToolInvoked(ctx, 'knowledge_search', { query: String(args.query ?? '').slice(0, 200), hits: evidence.length });
+      return {
+        kind: 'result',
+        content: JSON.stringify({
+          passages: evidence.map((e) => ({ title: e.title, content: e.content, score: e.score })),
+        }),
+      };
     }
 
     case 'delegate':

@@ -11,7 +11,8 @@ export type IdPrefix =
   | 'rcpt' // tool receipt
   | 'apr'  // approval
   | 'cap'  // capability grant
-  | 'mem'; // agent memory
+  | 'mem'  // agent memory
+  | 'kdoc'; // knowledge document
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${ulid().toLowerCase()}`;

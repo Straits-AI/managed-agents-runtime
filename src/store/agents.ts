@@ -29,6 +29,7 @@ export interface AgentVersionRow {
   };
   context_strategy: Record<string, unknown>;
   verifier_policy: Record<string, unknown>;
+  knowledge_config: { knowledgeBaseId?: string } & Record<string, unknown>;
   created_at: Date;
 }
 
@@ -67,6 +68,7 @@ export async function createAgentVersion(
     sandboxSpec?: AgentVersionRow['sandbox_spec'];
     contextStrategy?: Record<string, unknown>;
     verifierPolicy?: Record<string, unknown>;
+    knowledgeConfig?: Record<string, unknown>;
   },
 ): Promise<AgentVersionRow> {
   // Serialize version allocation per agent.
@@ -80,8 +82,9 @@ export async function createAgentVersion(
   const { rows } = await tx.query<AgentVersionRow>(
     `INSERT INTO agent_versions
        (id, agent_id, version, instructions, model_policy, tool_policy,
-        skill_refs, mcp_toolset_refs, sandbox_spec, context_strategy, verifier_policy)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        skill_refs, mcp_toolset_refs, sandbox_spec, context_strategy, verifier_policy,
+        knowledge_config)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING *`,
     [
       newId('av'),
@@ -95,6 +98,7 @@ export async function createAgentVersion(
       JSON.stringify(input.sandboxSpec ?? {}),
       JSON.stringify(input.contextStrategy ?? {}),
       JSON.stringify(input.verifierPolicy ?? {}),
+      JSON.stringify(input.knowledgeConfig ?? {}),
     ],
   );
   return rows[0]!;

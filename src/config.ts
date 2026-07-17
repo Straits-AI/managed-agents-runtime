@@ -42,6 +42,9 @@ const configSchema = z.object({
   MEMORY_PROVIDER: z.enum(['pg', 'agentkit', 'none']).default('pg'),
   // Viking Memory collection name, required when MEMORY_PROVIDER=agentkit.
   AGENTKIT_MEMORY_COLLECTION: z.string().optional(),
+  // Knowledge backend: 'pg' (Postgres, default), 'agentkit' (Knowledge Base),
+  // or 'none'.
+  KNOWLEDGE_PROVIDER: z.enum(['pg', 'agentkit', 'none']).default('pg'),
 
   WORKER_ID: z.string().default(`worker-${process.pid}`),
   LEASE_TTL_MS: intFromEnv(30_000),

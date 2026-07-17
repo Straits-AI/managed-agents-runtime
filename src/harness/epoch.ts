@@ -8,6 +8,7 @@ import type {
 } from '../core/types.js';
 import type {
   ChatMessage,
+  KnowledgeProvider,
   MemoryProvider,
   MemoryRecord,
   ModelProvider,
@@ -35,6 +36,8 @@ export interface EpochProviders {
   objectStore: ObjectStore;
   /** Long-term cross-run memory (optional; recall into context + `remember`). */
   memory?: MemoryProvider;
+  /** Knowledge-base retrieval (optional; enables the `knowledge_search` tool). */
+  knowledge?: KnowledgeProvider;
 }
 
 /** How many memories to recall into context at the start of an epoch. */
@@ -125,6 +128,9 @@ export function createRealEpoch(providers: EpochProviders) {
         step,
         memory: providers.memory,
         memoryScope,
+        knowledge: providers.knowledge,
+        knowledgeBaseId: (version.knowledge_config as { knowledgeBaseId?: string })
+          ?.knowledgeBaseId,
       };
 
       // Recall long-term memory once per epoch (stable within a run): the most

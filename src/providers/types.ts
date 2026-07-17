@@ -103,3 +103,25 @@ export interface MemoryProvider {
     entries: { content: string; kind?: string; metadata?: Record<string, unknown>; runId?: string }[],
   ): Promise<void>;
 }
+
+/**
+ * Enterprise knowledge retrieval / RAG (memo §9.4, §21): the kernel retrieves
+ * evidence from a knowledge base; Postgres and AgentKit Knowledge Base are
+ * interchangeable adapters.
+ */
+export interface Evidence {
+  id: string;
+  title: string;
+  content: string;
+  score: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface KnowledgeProvider {
+  retrieve(
+    knowledgeBaseId: string,
+    query: string,
+    limit: number,
+    tenantId?: string,
+  ): Promise<Evidence[]>;
+}

@@ -38,11 +38,27 @@ if (epochMode === 'scripted') {
     const { PgMemoryProvider } = await import('../providers/pgMemory.js');
     memory = new PgMemoryProvider(pool);
   }
+  // Knowledge: Postgres (default) or AgentKit Knowledge Base.
+  let knowledge;
+  if (cfg.KNOWLEDGE_PROVIDER === 'agentkit') {
+    const { AgentKitKnowledgeProvider } = await import('../providers/agentkitKnowledge.js');
+    const { requireConfig } = await import('../config.js');
+    const req = requireConfig(cfg, ['BYTEPLUS_ACCESS_KEY_ID', 'BYTEPLUS_SECRET_ACCESS_KEY']);
+    knowledge = new AgentKitKnowledgeProvider({
+      accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
+      secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
+      sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
+    });
+  } else if (cfg.KNOWLEDGE_PROVIDER !== 'none') {
+    const { PgKnowledgeProvider } = await import('../providers/pgKnowledge.js');
+    knowledge = new PgKnowledgeProvider(pool);
+  }
   epoch = createRealEpoch({
     model: new ModelArkProvider(cfg),
     sandbox,
     objectStore: new TosObjectStore(cfg),
     memory,
+    knowledge,
   });
   onSandboxOrphaned = (id) => sandbox.terminateById(id);
 }
