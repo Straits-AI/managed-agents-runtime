@@ -11,6 +11,10 @@ const configSchema = z.object({
   API_PORT: intFromEnv(8080),
   // Max request body size (bytes). Bounds memory per request.
   API_BODY_LIMIT_BYTES: intFromEnv(1_048_576),
+  // SSE event stream (GET /v1/runs/:id/events/stream): keep-alive heartbeat
+  // interval and a hard cap on how long one stream stays open.
+  SSE_HEARTBEAT_MS: intFromEnv(15_000),
+  SSE_MAX_STREAM_MS: intFromEnv(1_800_000),
   // Per-tenant token-bucket rate limit: RATE_LIMIT_PER_SEC sustained, with a
   // RATE_LIMIT_BURST bucket. Set RATE_LIMIT_PER_SEC=0 to disable.
   RATE_LIMIT_PER_SEC: z.coerce.number().min(0).default(20),

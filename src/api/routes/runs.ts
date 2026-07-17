@@ -115,6 +115,78 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
     return { events };
   });
 
+  // Real-time event stream (Server-Sent Events). Same data as the long-poll
+  // endpoint, pushed as it lands. We hijack the socket so Fastify's buffered
+  // response machinery (onResponse access log, JSON error handler) doesn't
+  // interfere with the long-lived text/event-stream response.
+  app.get<{ Params: { runId: string }; Querystring: { afterSeq?: string } }>(
+    '/v1/runs/:runId/events/stream',
+    async (req, reply) => {
+      const run = await getRun(pool, req.params.runId, req.tenantId);
+      if (!run) return reply.code(404).send({ error: 'run not found' });
+
+      // Resume from Last-Event-ID (set by EventSource on reconnect) or ?afterSeq.
+      const resumeFrom = (req.headers['last-event-id'] as string) ?? req.query.afterSeq ?? '0';
+      let afterSeq = BigInt(resumeFrom);
+
+      reply.raw.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no', // disable proxy buffering (nginx)
+      });
+      reply.hijack();
+
+      let clientGone = false;
+      req.raw.on('close', () => {
+        clientGone = true;
+      });
+
+      const start = Date.now();
+      let lastBeat = Date.now();
+      try {
+        for (;;) {
+          if (clientGone) break;
+
+          const batch = await listEvents(pool, req.params.runId, { afterSeq });
+          for (const e of batch) {
+            reply.raw.write(
+              `id: ${e.seq}\ndata: ${JSON.stringify({
+                seq: e.seq,
+                type: e.type,
+                payload: e.payload,
+                created_at: e.created_at,
+              })}\n\n`,
+            );
+            afterSeq = BigInt(e.seq);
+          }
+
+          // End the stream once the run is terminal and the client has seen the
+          // final event.
+          const cur = await getRun(pool, req.params.runId);
+          if (cur && isTerminal(cur.status) && afterSeq >= BigInt(cur.last_event_seq)) {
+            reply.raw.write(`event: end\ndata: ${JSON.stringify({ status: cur.status })}\n\n`);
+            break;
+          }
+          if (Date.now() - start > deps.cfg.SSE_MAX_STREAM_MS) break;
+
+          if (batch.length === 0) {
+            if (Date.now() - lastBeat > deps.cfg.SSE_HEARTBEAT_MS) {
+              reply.raw.write(': keep-alive\n\n');
+              lastBeat = Date.now();
+            }
+            await new Promise((r) => setTimeout(r, 250));
+          }
+        }
+      } catch {
+        // Mid-stream error (e.g. DB blip): just close; the client reconnects
+        // with Last-Event-ID and resumes from afterSeq.
+      } finally {
+        reply.raw.end();
+      }
+    },
+  );
+
   app.post<{ Params: { runId: string }; Body: { message?: string } }>(
     '/v1/runs/:runId/messages',
     async (req, reply) => {
