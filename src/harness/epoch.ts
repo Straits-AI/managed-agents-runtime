@@ -8,6 +8,8 @@ import type {
 } from '../core/types.js';
 import type {
   ChatMessage,
+  MemoryProvider,
+  MemoryRecord,
   ModelProvider,
   ObjectStore,
   SandboxHandle,
@@ -31,7 +33,12 @@ export interface EpochProviders {
   model: ModelProvider;
   sandbox: SandboxProvider;
   objectStore: ObjectStore;
+  /** Long-term cross-run memory (optional; recall into context + `remember`). */
+  memory?: MemoryProvider;
 }
+
+/** How many memories to recall into context at the start of an epoch. */
+const MEMORY_RECALL_LIMIT = 8;
 
 const MAX_VERIFY_RETRIES = 2;
 const MAX_NO_TOOL_TURNS = 3;
@@ -105,6 +112,7 @@ export function createRealEpoch(providers: EpochProviders) {
         initCommand: run.input.initCommand as string | undefined,
       });
 
+      const memoryScope = { tenantId: run.tenant_id, agentId: version.agent_id };
       const toolCtx: ToolContext = {
         pool,
         cfg,
@@ -114,7 +122,17 @@ export function createRealEpoch(providers: EpochProviders) {
         sandboxProvider: providers.sandbox,
         objectStore: providers.objectStore,
         step,
+        memory: providers.memory,
+        memoryScope,
       };
+
+      // Recall long-term memory once per epoch (stable within a run): the most
+      // relevant facts this agent has remembered across previous runs.
+      const recalledMemories: MemoryRecord[] = providers.memory
+        ? await providers.memory
+            .search(memoryScope, run.goal, MEMORY_RECALL_LIMIT)
+            .catch(() => [])
+        : [];
 
       const saveCheckpoint = async (state: Partial<CheckpointAgentState> = {}) => {
         const transcriptTosKey = `runs/${run.id}/transcripts/${attempt.id}-${step}.json`;
@@ -198,6 +216,7 @@ export function createRealEpoch(providers: EpochProviders) {
           transcript,
           userMessages: await unseenUserMessages(pool, run.id),
           approvalOutcomes: await recentApprovalOutcomes(pool, run.id),
+          memories: recalledMemories,
           toolDocs: TOOL_DOCS,
         });
 

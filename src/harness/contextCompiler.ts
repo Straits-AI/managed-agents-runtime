@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import type { ProgressLedger, RunRow } from '../core/types.js';
 import type { AgentVersionRow } from '../store/agents.js';
-import type { ChatMessage } from '../providers/types.js';
+import type { ChatMessage, MemoryRecord } from '../providers/types.js';
 import type { CapabilityGrantRow } from '../store/grants.js';
 import { WORKSPACE_DIR } from './workspace.js';
 
@@ -20,6 +20,7 @@ export function compileContext(input: {
   transcript: ChatMessage[];
   userMessages: string[];
   approvalOutcomes: { action: string; decision: string }[];
+  memories?: MemoryRecord[];
   toolDocs: string;
 }): ChatMessage[] {
   const { version, run } = input;
@@ -51,7 +52,13 @@ export function compileContext(input: {
   ].join('\n');
 
   const progress = run.progress as ProgressLedger;
+  const memories = input.memories ?? [];
   const userParts = [
+    memories.length > 0
+      ? `# What you remember (long-term memory from past runs)\n${memories
+          .map((m) => `- [${m.kind}] ${m.content}`)
+          .join('\n')}`
+      : null,
     `# Goal\n${run.goal}`,
     Object.keys(progress).length > 0
       ? `# Progress ledger (your durable state)\n${JSON.stringify(progress, null, 2)}`

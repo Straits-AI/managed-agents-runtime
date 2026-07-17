@@ -37,6 +37,9 @@ const configSchema = z.object({
 
   AGENTKIT_MCP_URL: z.string().optional(),
   AGENTKIT_MCP_API_KEY: z.string().optional(),
+  // Long-term memory backend: 'pg' (Postgres, default), 'agentkit' (seam), or
+  // 'none' to disable cross-run memory.
+  MEMORY_PROVIDER: z.enum(['pg', 'agentkit', 'none']).default('pg'),
 
   WORKER_ID: z.string().default(`worker-${process.pid}`),
   LEASE_TTL_MS: intFromEnv(30_000),

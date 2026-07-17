@@ -2,6 +2,8 @@ import type { Pool } from 'pg';
 import type { Config } from '../config.js';
 import type { RunAttemptRow, RunRow, ProgressLedger } from '../core/types.js';
 import type {
+  MemoryProvider,
+  MemoryScope,
   ObjectStore,
   SandboxHandle,
   SandboxProvider,
@@ -35,6 +37,9 @@ export interface ToolContext {
   sandboxProvider: SandboxProvider;
   objectStore: ObjectStore;
   step: number;
+  /** Long-term memory + the scope to write it under (optional). */
+  memory?: MemoryProvider;
+  memoryScope?: MemoryScope;
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -91,6 +96,23 @@ export const TOOL_DEFS: ToolDef[] = [
         },
         remaining: { type: 'array', items: { type: 'string' } },
       },
+    },
+  },
+  {
+    name: 'remember',
+    description:
+      'Save a durable memory that persists across future runs of this agent — a user preference, a decision and its rationale, a convention, or a reusable fact. Use for things worth recalling next time, NOT for step-by-step progress (use progress_update for that).',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: { type: 'string', description: 'the fact to remember, self-contained' },
+        kind: {
+          type: 'string',
+          enum: ['fact', 'preference', 'decision', 'episodic'],
+          description: 'category of memory',
+        },
+      },
+      required: ['content'],
     },
   },
   {
@@ -215,6 +237,19 @@ export async function dispatchTool(
         ),
       );
       return { kind: 'result', content: 'progress ledger updated' };
+    }
+
+    case 'remember': {
+      const content = String(args.content ?? '').trim();
+      if (!content) return { kind: 'result', content: 'error: remember requires content' };
+      if (!ctx.memory || !ctx.memoryScope) {
+        return { kind: 'result', content: 'error: memory is not configured for this run' };
+      }
+      await ctx.memory.write(ctx.memoryScope, [
+        { content, kind: args.kind ? String(args.kind) : 'fact', runId: ctx.run.id },
+      ]);
+      await emitToolInvoked(ctx, 'remember', { kind: args.kind ?? 'fact' });
+      return { kind: 'result', content: 'saved to long-term memory' };
     }
 
     case 'wait_for_signal':

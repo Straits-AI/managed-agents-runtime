@@ -73,3 +73,33 @@ export interface ObjectStore {
   presignPut(key: string, ttlSec: number): Promise<string>;
   presignGet(key: string, ttlSec: number): Promise<string>;
 }
+
+/**
+ * Long-term agent memory (memo §9.3, §21): semantic/episodic facts that persist
+ * across runs — recalled into context and written by the agent. NOT
+ * authoritative execution state (that is the Run Ledger). The kernel depends
+ * only on this interface; the Postgres and AgentKit implementations are
+ * interchangeable adapters.
+ */
+export interface MemoryRecord {
+  id: string;
+  kind: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface MemoryScope {
+  tenantId: string;
+  agentId: string;
+}
+
+export interface MemoryProvider {
+  /** Recall the most relevant memories for a scope, ranked against `query`. */
+  search(scope: MemoryScope, query: string, limit: number): Promise<MemoryRecord[]>;
+  /** Persist new memories for a scope. */
+  write(
+    scope: MemoryScope,
+    entries: { content: string; kind?: string; metadata?: Record<string, unknown>; runId?: string }[],
+  ): Promise<void>;
+}

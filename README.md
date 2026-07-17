@@ -43,6 +43,10 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
 - **Providers** (`src/providers/`): the kernel sees only provider
   interfaces; BytePlus implementations (ModelArk via the `openai` package,
   veFaaS sandbox with our own HMAC signer, TOS) are adapters.
+- **Memory** (`src/providers/pgMemory.ts`): cross-run `MemoryProvider` —
+  an agent recalls what it learned in earlier runs and writes new memories
+  with the `remember` tool. Postgres (full-text ranked) by default; the
+  AgentKit Memory binding is a drop-in adapter (`MEMORY_PROVIDER=agentkit`).
 
 ## Getting started (no BytePlus credentials needed)
 
@@ -145,8 +149,9 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | M4 signer + preflight | ✅ built + run against live BytePlus |
 | M5–M8 real epoch, receipts, verifier | ✅ built + exercised end-to-end |
 | M9 survival benchmark | ✅ **PASSED on the live stack** (TOS + ModelArk + Cloud Sandbox via APIG), 2026-07-17 — 57-event gapless history, exactly-once external write |
-| Phase 2A: harden what we own | ✅ tool-level observability, budget-exhaustion enforcement, denied-approval, external signals + scheduled runs — all tested (45 tests) |
-| Phase 2: AgentKit (Memory/Knowledge/Skills/MCP) | 🚧 in progress |
+| Phase 2A: harden what we own | ✅ tool-level observability, budget-exhaustion enforcement, denied-approval, external signals + scheduled runs — all tested |
+| Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres adapter (default) behind a provider-neutral `MemoryProvider`; AgentKit adapter is a documented seam (`src/providers/agentkitMemory.ts`). 48 tests. |
+| Phase 2 — Knowledge / Skills / MCP | ⏸ blocked on the AgentKit CLI + create-entitlement (not reachable via `bp`); will follow the same provider-adapter pattern as memory |
 
 Phase 1 scope cuts (per memo §22.4): subagents, Kafka/RocketMQ (outbox is
 in-process), AgentKit Memory/Knowledge/Identity, KMS/FileNAS, multi-tenancy,

@@ -10,7 +10,8 @@ export type IdPrefix =
   | 'ckpt' // checkpoint
   | 'rcpt' // tool receipt
   | 'apr'  // approval
-  | 'cap'; // capability grant
+  | 'cap'  // capability grant
+  | 'mem'; // agent memory
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${ulid().toLowerCase()}`;

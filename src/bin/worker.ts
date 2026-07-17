@@ -17,11 +17,16 @@ if (epochMode === 'scripted') {
   const { ModelArkProvider } = await import('../providers/modelark.js');
   const { VefaasSandboxProvider } = await import('../providers/vefaasSandbox.js');
   const { TosObjectStore } = await import('../providers/tosObjectStore.js');
+  const { PgMemoryProvider } = await import('../providers/pgMemory.js');
   const sandbox = new VefaasSandboxProvider(cfg);
+  // Memory provider is pluggable; Postgres is the default, AgentKit is a seam.
+  const memory =
+    cfg.MEMORY_PROVIDER === 'none' ? undefined : new PgMemoryProvider(pool);
   epoch = createRealEpoch({
     model: new ModelArkProvider(cfg),
     sandbox,
     objectStore: new TosObjectStore(cfg),
+    memory,
   });
   onSandboxOrphaned = (id) => sandbox.terminateById(id);
 }
