@@ -93,6 +93,14 @@ const configSchema = z.object({
   // failure. 0 disables replacement (a failed child wakes the parent directly).
   MAX_CHILD_REPLACEMENTS: z.coerce.number().int().min(0).default(1),
 
+  // Event transport (memo §10/§11). The relay (npm run relay) drains the
+  // transactional outbox to this publisher. 'inproc' (default) is a no-op drain
+  // — external consumers read the event ledger via the API; 'kafka' is the
+  // broker seam (needs a client + provisioned queue). Relay loop cadence + batch.
+  PUBLISHER: z.enum(['inproc', 'kafka']).default('inproc'),
+  RELAY_POLL_MS: intFromEnv(1_000),
+  RELAY_BATCH: intFromEnv(100),
+
   HARNESS_ENABLE_FAULTS: z.coerce.number().int().min(0).max(1).default(0),
 });
 

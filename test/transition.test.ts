@@ -94,9 +94,15 @@ describe('transitionRun', () => {
   it('writes an outbox row for every event', async () => {
     const run = await newRun();
     const seen: string[] = [];
-    await drainOutbox(db.pool, (row) => {
-      if (row.key === run.id) seen.push(row.payload.type as string);
-    }, 10_000);
+    await drainOutbox(
+      db.pool,
+      {
+        publish: async (rows) => {
+          for (const row of rows) if (row.key === run.id) seen.push(row.payload.type as string);
+        },
+      },
+      10_000,
+    );
     expect(seen).toContain('RunCreated');
     expect(seen).toContain('RunQueued');
   });

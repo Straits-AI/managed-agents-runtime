@@ -1,4 +1,6 @@
 import type { Pool } from 'pg';
+import { withTransaction } from '../db/tx.js';
+import type { EventPublisher } from '../providers/types.js';
 
 export interface OutboxRow {
   id: string;
@@ -10,22 +12,29 @@ export interface OutboxRow {
 }
 
 /**
- * Phase 1 in-process publisher stub: drains unpublished outbox rows and
- * marks them published. The seam where Kafka/RocketMQ plugs in later
- * (memo §11) — consumers in Phase 1 read run_events directly.
+ * Drain one batch of unpublished outbox rows and hand them to the publisher
+ * (memo §11). Rows are locked `FOR UPDATE SKIP LOCKED`, so multiple relay
+ * processes never publish the same event. Publishing happens inside the
+ * transaction: if `publisher.publish` throws, the batch stays unpublished and is
+ * retried on the next drain (at-least-once delivery). Returns the batch size.
  */
 export async function drainOutbox(
   pool: Pool,
-  handler: (row: OutboxRow) => Promise<void> | void,
+  publisher: EventPublisher,
   limit = 100,
 ): Promise<number> {
-  const { rows } = await pool.query<OutboxRow>(
-    `SELECT * FROM outbox WHERE published_at IS NULL ORDER BY id ASC LIMIT $1`,
-    [limit],
-  );
-  for (const row of rows) {
-    await handler(row);
-    await pool.query('UPDATE outbox SET published_at = now() WHERE id = $1', [row.id]);
-  }
-  return rows.length;
+  return withTransaction(pool, async (tx) => {
+    const { rows } = await tx.query<OutboxRow>(
+      `SELECT * FROM outbox WHERE published_at IS NULL
+       ORDER BY id ASC LIMIT $1
+       FOR UPDATE SKIP LOCKED`,
+      [limit],
+    );
+    if (rows.length === 0) return 0;
+    await publisher.publish(rows);
+    await tx.query(`UPDATE outbox SET published_at = now() WHERE id = ANY($1::bigint[])`, [
+      rows.map((r) => r.id),
+    ]);
+    return rows.length;
+  });
 }

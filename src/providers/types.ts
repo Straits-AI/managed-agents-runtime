@@ -165,3 +165,20 @@ export interface McpToolProvider {
     args: Record<string, unknown>,
   ): Promise<{ content: string }>;
 }
+
+/**
+ * Event transport (memo §10/§11). The transactional outbox records every run
+ * event; a relay drains it and hands batches to an EventPublisher. The default
+ * in-process publisher is a no-op drain (consumers read the event ledger via the
+ * API); a Kafka/RocketMQ adapter is the seam for fanning events out to external
+ * subscribers. `OutboxRow` is structurally assignable to `PublishableEvent`.
+ */
+export interface PublishableEvent {
+  id: string;
+  topic: string;
+  key: string;
+  payload: Record<string, unknown>;
+}
+export interface EventPublisher {
+  publish(events: PublishableEvent[]): Promise<void>;
+}

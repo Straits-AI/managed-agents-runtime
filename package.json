@@ -10,6 +10,7 @@
     "preflight": "tsx src/bin/preflight.ts",
     "api": "tsx src/bin/api.ts",
     "worker": "tsx src/bin/worker.ts",
+    "relay": "tsx src/bin/relay.ts",
     "admin": "tsx src/bin/admin.ts",
     "bench:survival": "tsx bench/survival.ts"
   },
