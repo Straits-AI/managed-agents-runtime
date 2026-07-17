@@ -21,6 +21,7 @@ export function compileContext(input: {
   userMessages: string[];
   approvalOutcomes: { action: string; decision: string }[];
   memories?: MemoryRecord[];
+  skills?: { name: string; version: string; description?: string; path: string }[];
   toolDocs: string;
 }): ChatMessage[] {
   const { version, run } = input;
@@ -37,6 +38,16 @@ export function compileContext(input: {
     '',
     '# Tools',
     input.toolDocs,
+    '',
+    ...(input.skills && input.skills.length > 0
+      ? [
+          '',
+          '# Skills available (materialized into your workspace)',
+          ...input.skills.map(
+            (s) => `- ${s.name} v${s.version}${s.description ? ` — ${s.description}` : ''} (at ${s.path})`,
+          ),
+        ]
+      : []),
     '',
     '# Capabilities granted to this run',
     input.grants.length > 0

@@ -53,12 +53,17 @@ if (epochMode === 'scripted') {
     const { PgKnowledgeProvider } = await import('../providers/pgKnowledge.js');
     knowledge = new PgKnowledgeProvider(pool);
   }
+  // Skills: in-process registry by default (register skills or use AgentKit
+  // Skills Spaces in a real deployment).
+  const { RegistrySkillProvider } = await import('../providers/registrySkills.js');
+  const skills = new RegistrySkillProvider();
   epoch = createRealEpoch({
     model: new ModelArkProvider(cfg),
     sandbox,
     objectStore: new TosObjectStore(cfg),
     memory,
     knowledge,
+    skills,
   });
   onSandboxOrphaned = (id) => sandbox.terminateById(id);
 }

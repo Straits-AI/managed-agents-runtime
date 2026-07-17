@@ -125,3 +125,28 @@ export interface KnowledgeProvider {
     tenantId?: string,
   ): Promise<Evidence[]>;
 }
+
+/**
+ * Reusable, filesystem-based Skills (memo §9.1, §21): procedural know-how
+ * (how to review a repo, prepare a memo, run a deploy) materialized into the
+ * run's workspace. A version-pinned ref resolves to an immutable set of files —
+ * a run must never silently receive a different skill version after resuming.
+ */
+export interface SkillRef {
+  provider: string; // e.g. 'registry' | 'agentkit'
+  skillSpace?: string;
+  skill: string;
+  version: string; // pinned; never 'latest'
+}
+
+export interface ResolvedSkill {
+  name: string;
+  version: string;
+  description?: string;
+  /** workspace-relative path -> file content */
+  files: Record<string, string>;
+}
+
+export interface SkillProvider {
+  resolve(ref: SkillRef): Promise<ResolvedSkill>;
+}

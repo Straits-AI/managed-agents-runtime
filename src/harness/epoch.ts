@@ -15,7 +15,10 @@ import type {
   ObjectStore,
   SandboxHandle,
   SandboxProvider,
+  SkillProvider,
+  SkillRef,
 } from '../providers/types.js';
+import { materializeSkills, type MaterializedSkill } from './skills.js';
 import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { getAgentVersion } from '../store/agents.js';
@@ -38,6 +41,8 @@ export interface EpochProviders {
   memory?: MemoryProvider;
   /** Knowledge-base retrieval (optional; enables the `knowledge_search` tool). */
   knowledge?: KnowledgeProvider;
+  /** Resolves version-pinned skills materialized into the workspace (optional). */
+  skills?: SkillProvider;
 }
 
 /** How many memories to recall into context at the start of an epoch. */
@@ -115,6 +120,14 @@ export function createRealEpoch(providers: EpochProviders) {
         initCommand: run.input.initCommand as string | undefined,
         parentWorkspaceId: run.input.parentWorkspaceId as string | undefined,
       });
+
+      // Materialize version-pinned skills into the workspace (memo §9.1).
+      const skills: MaterializedSkill[] = await materializeSkills(
+        sandbox,
+        providers.sandbox,
+        providers.skills,
+        (version.skill_refs as SkillRef[]) ?? [],
+      );
 
       const memoryScope = { tenantId: run.tenant_id, agentId: version.agent_id };
       const toolCtx: ToolContext = {
@@ -230,6 +243,7 @@ export function createRealEpoch(providers: EpochProviders) {
           userMessages: await unseenUserMessages(pool, run.id),
           approvalOutcomes: await recentApprovalOutcomes(pool, run.id),
           memories: recalledMemories,
+          skills,
           toolDocs: TOOL_DOCS,
         });
 
