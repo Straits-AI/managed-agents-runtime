@@ -1,0 +1,180 @@
+{
+  "id": "etl-clean",
+  "title": "Data-engineering agent — messy CSV cleaning with schema gate",
+  "teaches": "Real ETL: the agent normalises a dirty real-world dataset (dupes, missing fields, inconsistent casing/dates) and emits a clean dataset plus a quality report, with a schema validation script as the objective completion gate.",
+  "status": "COMPLETED",
+  "durationMs": 49664,
+  "goal": "raw_customers.csv is in your workspace (columns: id,name,email,signup_date). Clean it: (a) drop rows missing id, name, or email; (b) lowercase all emails; (c) remove duplicate rows by email (keep the first); (d) normalise signup_date to YYYY-MM-DD (input may be D/M/YYYY or YYYY-MM-DD). Write clean_customers.csv (same columns) and quality_report.json {\"rows_in\":..,\"rows_out\":..,\"dropped_missing\":..,\"duplicates_removed\":..}. Then call run_complete with artifacts [\"clean_customers.csv\",\"quality_report.json\"].",
+  "seedFiles": {
+    "raw_customers.csv": "id,name,email,signup_date\n1,Alice Tan,Alice.Tan@Example.com,2026-01-15\n2,Bob Lee,bob@example.com,3/2/2026\n3,,noname@example.com,2026-02-10\n1,Alice Tan,alice.tan@example.com,2026-01-15\n4,Carol Ng,,2026-02-20\n5,Dan Ong,DAN@example.com,15/3/2026\n2,Bob Lee,BOB@example.com,3/2/2026\n"
+  },
+  "grants": [],
+  "eventTimeline": [
+    {
+      "seq": 1,
+      "type": "RunCreated",
+      "at": "2026-07-17T04:13:19.553Z"
+    },
+    {
+      "seq": 2,
+      "type": "RunQueued",
+      "at": "2026-07-17T04:13:19.553Z"
+    },
+    {
+      "seq": 3,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:13:20.243Z"
+    },
+    {
+      "seq": 4,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:13:20.261Z"
+    },
+    {
+      "seq": 5,
+      "type": "SandboxAllocated",
+      "at": "2026-07-17T04:13:32.303Z"
+    },
+    {
+      "seq": 6,
+      "type": "WorkspaceRestored",
+      "at": "2026-07-17T04:13:32.798Z"
+    },
+    {
+      "seq": 7,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:13:32.840Z"
+    },
+    {
+      "seq": 8,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:13:35.966Z"
+    },
+    {
+      "seq": 9,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:13:36.051Z"
+    },
+    {
+      "seq": 10,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:13:37.577Z"
+    },
+    {
+      "seq": 11,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:13:37.655Z"
+    },
+    {
+      "seq": 12,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:13:49.883Z"
+    },
+    {
+      "seq": 13,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:13:50.229Z"
+    },
+    {
+      "seq": 14,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:13:51.719Z"
+    },
+    {
+      "seq": 15,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:13:51.832Z"
+    },
+    {
+      "seq": 16,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:13:53.548Z"
+    },
+    {
+      "seq": 17,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:13:54.401Z"
+    },
+    {
+      "seq": 18,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:13:54.447Z"
+    },
+    {
+      "seq": 19,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:13:56.065Z"
+    },
+    {
+      "seq": 20,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:13:56.142Z"
+    },
+    {
+      "seq": 21,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:14:04.061Z"
+    },
+    {
+      "seq": 22,
+      "type": "VerificationStarted",
+      "at": "2026-07-17T04:14:04.079Z"
+    },
+    {
+      "seq": 23,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:14:05.127Z"
+    },
+    {
+      "seq": 24,
+      "type": "RunCompleted",
+      "at": "2026-07-17T04:14:05.149Z"
+    },
+    {
+      "seq": 25,
+      "type": "SandboxTerminated",
+      "at": "2026-07-17T04:14:05.402Z"
+    }
+  ],
+  "eventCounts": {
+    "RunCreated": 1,
+    "RunQueued": 1,
+    "AttemptStarted": 2,
+    "SandboxAllocated": 1,
+    "WorkspaceRestored": 1,
+    "ModelInvocationStarted": 7,
+    "ModelInvocationCompleted": 7,
+    "WorkspaceCheckpointed": 2,
+    "VerificationStarted": 1,
+    "RunCompleted": 1,
+    "SandboxTerminated": 1
+  },
+  "attempts": [
+    {
+      "id": "att_01kxq4erzqft3aem60ek060et2",
+      "run_id": "run_01kxq4era2v40mk5e6y6jfrmwr",
+      "attempt_no": 1,
+      "worker_id": "etl-clean-worker",
+      "state": "EXITED",
+      "lease_expires_at": "2026-07-17T04:14:20.275Z",
+      "heartbeat_at": "2026-07-17T04:14:05.275Z",
+      "sandbox_id": "vefaas-jsdzgnxi-0d9v4raq51-d9cqno80d2stlmo028gg-sandbox",
+      "sandbox_domain": "https://s061f54q9u6u9vfjfs4s3.apigateway-ap-southeast-1.apigw-byteplus.com",
+      "started_from_checkpoint_id": null,
+      "exit_reason": "completed",
+      "created_at": "2026-07-17T04:13:20.243Z"
+    }
+  ],
+  "approvals": [],
+  "externalActions": [],
+  "toolReceipts": [],
+  "tokenUsage": {
+    "inputTokens": 15336,
+    "outputTokens": 1893,
+    "calls": 7
+  },
+  "artifacts": {
+    "clean_customers.csv": "id,name,email,signup_date\n1,Alice Tan,alice.tan@example.com,2026-01-15\n2,Bob Lee,bob@example.com,2026-02-03\n5,Dan Ong,dan@example.com,2026-03-15\n",
+    "quality_report.json": "{\n  \"rows_in\": 7,\n  \"rows_out\": 3,\n  \"dropped_missing\": 2,\n  \"duplicates_removed\": 2\n}"
+  }
+}

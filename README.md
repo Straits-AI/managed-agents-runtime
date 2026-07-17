@@ -86,11 +86,18 @@ npm run worker      # harness worker (WORKER_EPOCH=scripted for no-model runs)
 
 ## Real-world scenarios & course material
 
-Beyond the acceptance benchmark, the runtime is exercised across diverse
-workloads — data analysis, code generation, governed operations, document
-processing — with every run captured for teaching:
+Beyond the acceptance benchmark, the runtime is exercised across **production
+use cases** and capability fundamentals, with every run captured for teaching:
 
 ```bash
+# Production use cases (industry workflows)
+node --env-file=.env --import tsx scenarios/run.ts sre-incident       # SRE: RCA + gated remediation
+node --env-file=.env --import tsx scenarios/run.ts support-refund     # Fintech: policy refund, money-movement approval
+node --env-file=.env --import tsx scenarios/run.ts invoice-reconcile  # AP: invoice↔PO 3-way match
+node --env-file=.env --import tsx scenarios/run.ts dep-audit          # DevSecOps: vuln audit + security gate
+node --env-file=.env --import tsx scenarios/run.ts etl-clean          # Data eng: messy-CSV cleaning + schema gate
+
+# Capability fundamentals
 node --env-file=.env --import tsx scenarios/run.ts data-analysis
 node --env-file=.env --import tsx scenarios/run.ts code-gen
 node --env-file=.env --import tsx scenarios/run.ts approval-gated
@@ -98,11 +105,11 @@ node --env-file=.env --import tsx scenarios/run.ts doc-processing
 ```
 
 Each writes a structured result (event timeline, artifacts, receipts, token
-usage) to `scenarios/results/`. The consolidated tutorial write-up —
-per-scenario lessons plus cross-cutting teaching points on durability,
-governance, and objective verification — is in
-**[`docs/COURSE-MATERIAL.md`](./docs/COURSE-MATERIAL.md)**. All four scenarios
-completed correctly on the live BytePlus stack (Seed-2.0-lite, ~30–45 s each).
+usage) to `scenarios/results/`. The consolidated tutorial write-up — production
+use cases plus cross-cutting teaching on durability, governance, and objective
+verification — is in **[`docs/COURSE-MATERIAL.md`](./docs/COURSE-MATERIAL.md)**.
+All nine scenarios completed correctly on the live BytePlus stack (Seed-2.0-lite,
+~30–60 s each); the two governed writes each hit the external system exactly once.
 
 ## The acceptance benchmark (memo §24)
 

@@ -21,17 +21,30 @@ cheap model, to show the *runtime* carries the reliability, not the model.
 
 ## What was tested, at a glance
 
-| Scenario | Domain | Result | Wall-clock | Model calls | Tokens (in/out) | Teaches |
-| --- | --- | --- | --- | --- | --- | --- |
-| `data-analysis` | Data → report | ✅ COMPLETED | 41 s | 5 | 8329 / 1263 | The core run loop + artifact verification |
-| `code-gen` | Software eng | ✅ COMPLETED | 32 s | 5 | 8438 / 827 | Objective, command-based verification |
-| `approval-gated` | Governed ops | ✅ COMPLETED | 44 s | 4 | 5988 / 553 | Human-in-the-loop + exactly-once side effects |
-| `doc-processing` | Knowledge work | ✅ COMPLETED | 38 s | 4 | 6163 / 865 | Workload-agnostic structured extraction |
-| **survival benchmark** | Coding + chaos | ✅ PASSED (57 events) | ~6 min | — | Durability: crash / sandbox loss / approval / exactly-once recovery |
+**Production use cases** (Part B — the main event):
 
-Every workload completed correctly on the first *properly-configured* attempt.
-The one failure encountered (`code-gen` with `pytest`) was a **verifier
-integrity success**, not a runtime fault — see Lesson 5.
+| Scenario | Industry | Result | Wall-clock | Governed write? | Teaches |
+| --- | --- | --- | --- | --- | --- |
+| `sre-incident` | SRE / AIOps | ✅ COMPLETED | 58 s | ✅ approved, once | Autonomous on-call: RCA + gated remediation |
+| `support-refund` | Support / Fintech | ✅ COMPLETED | 49 s | ✅ approved, once | Money movement with policy + approval |
+| `invoice-reconcile` | Finance / AP | ✅ COMPLETED | 53 s | — | 3-way invoice↔PO match with discrepancy flags |
+| `dep-audit` | DevSecOps | ✅ COMPLETED | 43 s | — | Vuln audit + **security gate** certifies the fix |
+| `etl-clean` | Data engineering | ✅ COMPLETED | 50 s | — | Messy-CSV cleaning behind a schema gate |
+
+**Capability fundamentals** (Part A — isolate one feature each):
+
+| Scenario | Domain | Result | Wall-clock | Teaches |
+| --- | --- | --- | --- | --- |
+| `data-analysis` | Data → report | ✅ COMPLETED | 41 s | The core run loop + artifact verification |
+| `code-gen` | Software eng | ✅ COMPLETED | 32 s | Objective, command-based verification |
+| `approval-gated` | Governed ops | ✅ COMPLETED | 44 s | Human-in-the-loop + exactly-once side effects |
+| `doc-processing` | Knowledge work | ✅ COMPLETED | 38 s | Workload-agnostic structured extraction |
+| **survival benchmark** | Coding + chaos | ✅ PASSED (57 events) | ~6 min | Durability under crash / sandbox loss / recovery |
+
+All nine scenarios completed correctly and produced verified outputs. The two
+governed writes (SRE remediation, refund payout) each hit the external system
+**exactly once**. The one failure encountered along the way (`code-gen` with
+`pytest`) was a **verifier integrity success**, not a runtime fault — Lesson 5.
 
 ---
 
@@ -59,6 +72,125 @@ Two properties make it a *platform* rather than a script:
    idempotency key. A crash after the write never repeats it.
 
 ---
+
+# Part B — Production use cases
+
+These map to workflows enterprises actually pay to automate. The pattern that
+recurs — and that justifies a *durable* runtime over a plain agent framework —
+is a **risky, irreversible side effect gated by human approval and guaranteed
+exactly-once**. Lead your course here; the fundamentals in Part A are the
+mechanics that make these safe.
+
+## Use case 1 — Autonomous on-call / AIOps (`sre-incident`)
+
+**Business context:** an SRE agent that triages production incidents and
+executes remediation — the dream of AIOps, but only safe if the remediation is
+governed.
+
+**Goal given:** diagnose the incident from `app-errors.log`, write an RCA, and
+execute the runbook's remediation via an approval-gated webhook.
+
+**What happened (30 events, 58 s):** the agent correctly identified DB
+connection-pool exhaustion from the log, wrote a professional RCA (Summary /
+Root Cause / Impact / Remediation citing the runbook), and — after approval —
+POSTed the **exact** runbook action:
+
+```json
+POST /remediate  { "action": "scale_pool", "service": "api", "target_pool_size": 40 }
+receivedCount: 1     receipt: external.http.request | COMMITTED | irreversible
+```
+
+**Teaching points:** the agent acts on *evidence in the logs*, the remediation
+is a real production side effect held behind human approval, and the exactly-once
+receipt means a worker crash right after the POST never scales the pool twice.
+Full capture: [`sre-incident.md`](../scenarios/results/sre-incident.md).
+
+## Use case 2 — Support automation with a money guardrail (`support-refund`)
+
+**Business context:** support agents that resolve tickets end-to-end, including
+issuing refunds — where a double-refund is real money lost and a compliance
+incident.
+
+**Goal given:** decide refund eligibility strictly per `refund-policy.md`, draft
+the customer reply, and issue the payout only if eligible (approval-gated).
+
+**What happened (31 events, 49 s):** the agent checked all three policy
+conditions (delivered ✓, within 30 days ✓, unused ✓), wrote a customer reply
+that explains each, and issued the refund exactly once:
+
+```json
+POST /refunds  { "order_id": "K-4471", "amount": 129 }
+receivedCount: 1     receipt: COMMITTED | irreversible
+```
+
+**Teaching points:** this is *the* canonical argument for the platform — policy
+applied by the agent, decision approved by a human, money moved exactly once,
+and the whole thing survives a crash. Contrast with a naive agent that could
+retry the payout after a timeout and double-charge. Full capture:
+[`support-refund.md`](../scenarios/results/support-refund.md).
+
+## Use case 3 — Accounts-payable reconciliation (`invoice-reconcile`)
+
+**Business context:** AP teams matching supplier invoices against purchase
+orders before payment — high volume, error-prone, audit-sensitive.
+
+**Goal given:** match `invoice.json` against `purchase-order.json` by SKU and
+emit a structured reconciliation.
+
+**What happened (24 events, 53 s):** correct 3-way match with real arithmetic —
+
+```json
+{ "overall_match": false, "invoice_total": 1080.0, "po_total": 940.0,
+  "lines": [ {"sku":"A-1","status":"match"},
+             {"sku":"B-2","status":"qty_mismatch","detail":"Invoice qty 60, PO qty 50"},
+             {"sku":"C-3","status":"price_mismatch","detail":"Invoice unit price 1.45, PO unit price 1.2"} ],
+  "discrepancies": 2 }
+```
+
+Both discrepancies were caught and totals were exact. **Teaching point:** a
+machine-readable artifact (not prose) lets a downstream system act — approve for
+payment, or route the two flagged lines to a human. Full capture:
+[`invoice-reconcile.md`](../scenarios/results/invoice-reconcile.md).
+
+## Use case 4 — Dependency vulnerability management (`dep-audit`)
+
+**Business context:** DevSecOps automation that audits dependencies and opens
+remediation — where "the agent says it's fixed" is not good enough for security.
+
+**Goal given:** audit `requirements.txt` against `advisories.json`, write an
+audit report, and produce a patched manifest.
+
+**What happened (27 events, 43 s):** the agent bumped exactly the three
+vulnerable packages (flask 2.0.1→2.3.2, pyyaml 5.3.1→5.4, urllib3 1.26.4→1.26.5),
+left the two unaffected ones untouched, and wrote an `AUDIT.md` table with CVE
+IDs. **The completion gate is itself a security control:** a script that fails if
+*any* advisory-listed version still appears in the fixed manifest. Completion
+means that script passed — the runtime certified the remediation, not the model.
+Full capture: [`dep-audit.md`](../scenarios/results/dep-audit.md).
+
+## Use case 5 — Data-quality ETL (`etl-clean`)
+
+**Business context:** data-engineering pipelines that clean messy inbound data
+before it reaches the warehouse.
+
+**Goal given:** clean `raw_customers.csv` (dedupe by email, drop rows missing
+required fields, lowercase emails, normalise dates) and emit a quality report.
+
+**What happened (25 events, 50 s):** 7 rows in → 3 out; the 2 rows missing
+name/email dropped, 2 email-duplicates removed, dates normalised
+(`3/2/2026`→`2026-02-03`, `15/3/2026`→`2026-03-15`), with an accurate report
+`{"rows_in":7,"rows_out":3,"dropped_missing":2,"duplicates_removed":2}`. It
+passed a schema-validation gate that asserts the header, non-empty required
+fields, and lowercase emails. **Teaching point:** the objective gate encodes the
+data contract, so a malformed clean is rejected automatically. Full capture:
+[`etl-clean.md`](../scenarios/results/etl-clean.md).
+
+---
+
+# Part A — Capability fundamentals
+
+Smaller scenarios that isolate one platform mechanism each. Use them to explain
+*how* the production use cases above are made safe.
 
 ## Lesson 1 — The core loop (`data-analysis`)
 
@@ -227,12 +359,28 @@ executes a side effect.
 
 ---
 
+## Observations across all nine runs
+
+- **The runtime, not the model, carries reliability.** Every correct outcome
+  came from a small, cheap model (Seed-2.0-lite) because the platform supplies
+  the durability, the approval gates, and the objective verification. Swapping in
+  a stronger model would improve task *quality*, not these guarantees.
+- **Governed writes are the differentiator.** The two use cases with real side
+  effects (SRE remediation, refund) are exactly where a plain agent framework is
+  dangerous and this runtime is safe: approval + exactly-once + crash-survival.
+- **Objective gates encode the contract.** `dep-audit` (security), `etl-clean`
+  (schema), `code-gen` (tests), `invoice-reconcile` (valid JSON) all push the
+  definition of "done" out of the model's self-report and into a command.
+- **Cost is lecture-friendly.** Production use cases ran in 43–58 s and
+  ~10–16 k input tokens each — cheap enough to demo live.
+
 ## Ideas for further scenarios (not yet run)
 
-- **Multi-file refactor** with a build+test gate (larger `code-gen`).
-- **Long-horizon research** using the sandbox browser + retrieval (the AIO
-  image ships a browser and MCP servers).
 - **Denied approval** — show the agent adapting its plan when a human *rejects*
   an action (`decision: "deny"`), not just approves.
 - **Budget exhaustion** — set a low `tokenBudget` and show graceful `FAILED
   (budget_exhausted)` rather than an unbounded loop.
+- **Long-horizon research** using the sandbox browser + retrieval (the AIO image
+  ships a browser and MCP servers).
+- **Ineligible refund** — a variant of `support-refund` where the policy fails,
+  proving the agent withholds the payout (no external write at all).

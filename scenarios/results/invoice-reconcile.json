@@ -1,0 +1,174 @@
+{
+  "id": "invoice-reconcile",
+  "title": "Accounts-payable agent — invoice ↔ purchase-order reconciliation",
+  "teaches": "Structured financial control work: the agent matches an invoice against its purchase order line by line, flags quantity and price discrepancies, and emits a machine-readable reconciliation that a downstream system can act on — verified to be valid JSON.",
+  "status": "COMPLETED",
+  "durationMs": 53309,
+  "goal": "invoice.json and purchase-order.json are in your workspace. Reconcile the invoice against the PO by SKU and write reconciliation.json with this shape: {\"overall_match\": <bool>, \"invoice_total\": <num>, \"po_total\": <num>, \"lines\": [{\"sku\":..., \"status\":\"match\"|\"qty_mismatch\"|\"price_mismatch\"|\"missing_in_po\", \"detail\":...}], \"discrepancies\": <count>}. Validate it parses, then call run_complete with artifacts [\"reconciliation.json\"].",
+  "seedFiles": {
+    "purchase-order.json": "{\n  \"po_number\": \"PO-9007\",\n  \"lines\": [\n    {\"sku\": \"A-1\", \"desc\": \"Widget\",   \"qty\": 100, \"unit_price\": 2.50},\n    {\"sku\": \"B-2\", \"desc\": \"Gadget\",   \"qty\": 50,  \"unit_price\": 9.00},\n    {\"sku\": \"C-3\", \"desc\": \"Cable\",    \"qty\": 200, \"unit_price\": 1.20}\n  ]\n}\n",
+    "invoice.json": "{\n  \"invoice_number\": \"INV-5521\",\n  \"po_number\": \"PO-9007\",\n  \"lines\": [\n    {\"sku\": \"A-1\", \"qty\": 100, \"unit_price\": 2.50},\n    {\"sku\": \"B-2\", \"qty\": 60,  \"unit_price\": 9.00},\n    {\"sku\": \"C-3\", \"qty\": 200, \"unit_price\": 1.45}\n  ]\n}\n"
+  },
+  "grants": [],
+  "eventTimeline": [
+    {
+      "seq": 1,
+      "type": "RunCreated",
+      "at": "2026-07-17T04:10:41.845Z"
+    },
+    {
+      "seq": 2,
+      "type": "RunQueued",
+      "at": "2026-07-17T04:10:41.845Z"
+    },
+    {
+      "seq": 3,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:10:42.540Z"
+    },
+    {
+      "seq": 4,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:10:42.554Z"
+    },
+    {
+      "seq": 5,
+      "type": "SandboxAllocated",
+      "at": "2026-07-17T04:10:54.758Z"
+    },
+    {
+      "seq": 6,
+      "type": "WorkspaceRestored",
+      "at": "2026-07-17T04:10:55.362Z"
+    },
+    {
+      "seq": 7,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:10:55.396Z"
+    },
+    {
+      "seq": 8,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:10:58.232Z"
+    },
+    {
+      "seq": 9,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:10:58.322Z"
+    },
+    {
+      "seq": 10,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:11:00.970Z"
+    },
+    {
+      "seq": 11,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:11:01.050Z"
+    },
+    {
+      "seq": 12,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:11:03.226Z"
+    },
+    {
+      "seq": 13,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:11:03.290Z"
+    },
+    {
+      "seq": 14,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:11:23.415Z"
+    },
+    {
+      "seq": 15,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:11:23.704Z"
+    },
+    {
+      "seq": 16,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:11:25.452Z"
+    },
+    {
+      "seq": 17,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:11:26.571Z"
+    },
+    {
+      "seq": 18,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:11:26.608Z"
+    },
+    {
+      "seq": 19,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:11:28.547Z"
+    },
+    {
+      "seq": 20,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:11:28.613Z"
+    },
+    {
+      "seq": 21,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:11:32.171Z"
+    },
+    {
+      "seq": 22,
+      "type": "VerificationStarted",
+      "at": "2026-07-17T04:11:32.186Z"
+    },
+    {
+      "seq": 23,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:11:32.879Z"
+    },
+    {
+      "seq": 24,
+      "type": "RunCompleted",
+      "at": "2026-07-17T04:11:32.896Z"
+    }
+  ],
+  "eventCounts": {
+    "RunCreated": 1,
+    "RunQueued": 1,
+    "AttemptStarted": 2,
+    "SandboxAllocated": 1,
+    "WorkspaceRestored": 1,
+    "ModelInvocationStarted": 7,
+    "ModelInvocationCompleted": 7,
+    "WorkspaceCheckpointed": 2,
+    "VerificationStarted": 1,
+    "RunCompleted": 1
+  },
+  "attempts": [
+    {
+      "id": "att_01kxq49yzeqzdr5vp7qdv6gamx",
+      "run_id": "run_01kxq49y9p0bjx58b0zszc92s5",
+      "attempt_no": 1,
+      "worker_id": "invoice-reconcile-worker",
+      "state": "ACTIVE",
+      "lease_expires_at": "2026-07-17T04:11:47.574Z",
+      "heartbeat_at": "2026-07-17T04:11:32.574Z",
+      "sandbox_id": "vefaas-jsdzgnxi-0d9v4raq51-d9cqmgo0lmcclio05iug-sandbox",
+      "sandbox_domain": "https://s061f54q9u6u9vfjfs4s3.apigateway-ap-southeast-1.apigw-byteplus.com",
+      "started_from_checkpoint_id": null,
+      "exit_reason": null,
+      "created_at": "2026-07-17T04:10:42.540Z"
+    }
+  ],
+  "approvals": [],
+  "externalActions": [],
+  "toolReceipts": [],
+  "tokenUsage": {
+    "inputTokens": 16193,
+    "outputTokens": 1937,
+    "calls": 7
+  },
+  "artifacts": {
+    "reconciliation.json": "{\n  \"overall_match\": false,\n  \"invoice_total\": 1080.0,\n  \"po_total\": 940.0,\n  \"lines\": [\n    {\n      \"sku\": \"A-1\",\n      \"status\": \"match\",\n      \"detail\": \"All values match\"\n    },\n    {\n      \"sku\": \"B-2\",\n      \"status\": \"qty_mismatch\",\n      \"detail\": \"Invoice qty 60, PO qty 50\"\n    },\n    {\n      \"sku\": \"C-3\",\n      \"status\": \"price_mismatch\",\n      \"detail\": \"Invoice unit price 1.45, PO unit price 1.2\"\n    }\n  ],\n  \"discrepancies\": 2\n}"
+  }
+}

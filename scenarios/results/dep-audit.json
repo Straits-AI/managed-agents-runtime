@@ -1,0 +1,191 @@
+{
+  "id": "dep-audit",
+  "title": "DevSecOps agent — dependency vulnerability audit with objective gate",
+  "teaches": "A security workflow with a verifier that is itself a security control: the agent audits dependencies against advisories and produces a patched manifest, and completion is gated by a script that FAILS if any known-vulnerable version remains. The gate, not the model, certifies the fix.",
+  "status": "COMPLETED",
+  "durationMs": 42827,
+  "goal": "requirements.txt and advisories.json are in your workspace. 1) Cross-check each pinned dependency against advisories.json. 2) Write AUDIT.md listing each vulnerable package, its current version, the advisory id, and the safe version. 3) Write requirements.fixed.txt identical to requirements.txt but with every vulnerable package bumped to its safe_version. 4) Call run_complete with artifacts [\"AUDIT.md\", \"requirements.fixed.txt\"].",
+  "seedFiles": {
+    "requirements.txt": "flask==2.0.1\nrequests==2.25.0\npyyaml==5.3.1\nurllib3==1.26.4\nclick==8.1.3\n",
+    "advisories.json": "{\n  \"advisories\": [\n    {\"package\": \"flask\",   \"vulnerable\": \"2.0.1\",  \"id\": \"CVE-2023-30861\", \"safe_version\": \"2.3.2\"},\n    {\"package\": \"pyyaml\",  \"vulnerable\": \"5.3.1\",  \"id\": \"CVE-2020-14343\", \"safe_version\": \"5.4\"},\n    {\"package\": \"urllib3\", \"vulnerable\": \"1.26.4\", \"id\": \"CVE-2021-33503\", \"safe_version\": \"1.26.5\"}\n  ]\n}\n"
+  },
+  "grants": [],
+  "eventTimeline": [
+    {
+      "seq": 1,
+      "type": "RunCreated",
+      "at": "2026-07-17T04:12:10.601Z"
+    },
+    {
+      "seq": 2,
+      "type": "RunQueued",
+      "at": "2026-07-17T04:12:10.601Z"
+    },
+    {
+      "seq": 3,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:12:11.270Z"
+    },
+    {
+      "seq": 4,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:12:11.287Z"
+    },
+    {
+      "seq": 5,
+      "type": "SandboxAllocated",
+      "at": "2026-07-17T04:12:23.830Z"
+    },
+    {
+      "seq": 6,
+      "type": "WorkspaceRestored",
+      "at": "2026-07-17T04:12:24.478Z"
+    },
+    {
+      "seq": 7,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:12:24.508Z"
+    },
+    {
+      "seq": 8,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:12:27.575Z"
+    },
+    {
+      "seq": 9,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:12:27.684Z"
+    },
+    {
+      "seq": 10,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:12:29.552Z"
+    },
+    {
+      "seq": 11,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:12:29.668Z"
+    },
+    {
+      "seq": 12,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:12:33.189Z"
+    },
+    {
+      "seq": 13,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:12:33.256Z"
+    },
+    {
+      "seq": 14,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:12:39.145Z"
+    },
+    {
+      "seq": 15,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:12:39.439Z"
+    },
+    {
+      "seq": 16,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:12:42.038Z"
+    },
+    {
+      "seq": 17,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:12:43.108Z"
+    },
+    {
+      "seq": 18,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:12:43.148Z"
+    },
+    {
+      "seq": 19,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:12:44.596Z"
+    },
+    {
+      "seq": 20,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:12:44.679Z"
+    },
+    {
+      "seq": 21,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:12:45.882Z"
+    },
+    {
+      "seq": 22,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:12:45.964Z"
+    },
+    {
+      "seq": 23,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:12:49.507Z"
+    },
+    {
+      "seq": 24,
+      "type": "VerificationStarted",
+      "at": "2026-07-17T04:12:49.522Z"
+    },
+    {
+      "seq": 25,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:12:50.572Z"
+    },
+    {
+      "seq": 26,
+      "type": "RunCompleted",
+      "at": "2026-07-17T04:12:50.593Z"
+    },
+    {
+      "seq": 27,
+      "type": "SandboxTerminated",
+      "at": "2026-07-17T04:12:50.884Z"
+    }
+  ],
+  "eventCounts": {
+    "RunCreated": 1,
+    "RunQueued": 1,
+    "AttemptStarted": 2,
+    "SandboxAllocated": 1,
+    "WorkspaceRestored": 1,
+    "ModelInvocationStarted": 8,
+    "ModelInvocationCompleted": 8,
+    "WorkspaceCheckpointed": 2,
+    "VerificationStarted": 1,
+    "RunCompleted": 1,
+    "SandboxTerminated": 1
+  },
+  "attempts": [
+    {
+      "id": "att_01kxq4cnmbmk03xbr0h2x6j9zm",
+      "run_id": "run_01kxq4cmza8vvs9hfc565yhfxj",
+      "attempt_no": 1,
+      "worker_id": "dep-audit-worker",
+      "state": "EXITED",
+      "lease_expires_at": "2026-07-17T04:13:01.297Z",
+      "heartbeat_at": "2026-07-17T04:12:46.297Z",
+      "sandbox_id": "vefaas-jsdzgnxi-0d9v4raq51-d9cqn780lmcclio05ivg-sandbox",
+      "sandbox_domain": "https://s061f54q9u6u9vfjfs4s3.apigateway-ap-southeast-1.apigw-byteplus.com",
+      "started_from_checkpoint_id": null,
+      "exit_reason": "completed",
+      "created_at": "2026-07-17T04:12:11.270Z"
+    }
+  ],
+  "approvals": [],
+  "externalActions": [],
+  "toolReceipts": [],
+  "tokenUsage": {
+    "inputTokens": 15425,
+    "outputTokens": 1025,
+    "calls": 8
+  },
+  "artifacts": {
+    "AUDIT.md": "# Dependency Audit Results\n\nThis document lists vulnerable dependencies found in requirements.txt, along with their recommended fixes.\n\n| Package   | Current Version | Advisory ID       | Safe Version |\n|-----------|-----------------|-------------------|--------------|\n| flask     | 2.0.1           | CVE-2023-30861    | 2.3.2        |\n| pyyaml     | 5.3.1           | CVE-2020-14343    | 5.4          |\n| urllib3    | 1.26.4          | CVE-2021-33503    | 1.26.5       |\n",
+    "requirements.fixed.txt": "flask==2.3.2\nrequests==2.25.0\npyyaml==5.4\nurllib3==1.26.5\nclick==8.1.3\n"
+  }
+}

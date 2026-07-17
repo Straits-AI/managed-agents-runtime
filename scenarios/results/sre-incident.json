@@ -1,0 +1,278 @@
+{
+  "id": "sre-incident",
+  "title": "SRE agent — incident triage with human-approved remediation",
+  "teaches": "Autonomous on-call: the agent reads production logs, diagnoses a root cause against a runbook, writes an RCA, and only executes the remediation (a real ops side effect) after a human approves — the write happening exactly once even if the worker crashes after it.",
+  "status": "COMPLETED",
+  "durationMs": 58017,
+  "goal": "app-errors.log and runbook.md are in your workspace. 1) Identify the root cause of the incident from the log. 2) Write INCIDENT.md with: Summary, Root Cause, Impact, and the Remediation you will take (cite the matching runbook step). 3) Execute that remediation by POSTing the runbook-specified JSON action to http://127.0.0.1:50888/remediate using external_http_request (this affects production and needs human approval — request it and wait). 4) Then call run_complete with artifacts [\"INCIDENT.md\"].",
+  "seedFiles": {
+    "app-errors.log": "2026-07-17T02:14:03Z INFO  api server started, pool size=20\n2026-07-17T02:41:11Z WARN  db pool near capacity: 18/20 active\n2026-07-17T02:41:average latency 210ms\n2026-07-17T02:42:03Z WARN  db pool near capacity: 20/20 active\n2026-07-17T02:42:04Z ERROR could not get connection from pool: timeout after 5000ms\n2026-07-17T02:42:04Z ERROR HTTP 503 GET /orders (pool exhausted)\n2026-07-17T02:42:05Z ERROR could not get connection from pool: timeout after 5000ms\n2026-07-17T02:42:06Z ERROR HTTP 503 POST /checkout (pool exhausted)\n2026-07-17T02:43:00Z ERROR pool exhausted, 142 requests queued\n",
+    "runbook.md": "# Runbook: API service\n\n## DB connection pool exhausted\nSymptom: repeated \"could not get connection from pool: timeout\" and HTTP 503.\nRemediation: scale up the connection pool by POSTing this action to /remediate:\n`{\"action\":\"scale_pool\",\"service\":\"api\",\"target_pool_size\":40}`\n\n## High CPU\nSymptom: cpu>90% sustained. Remediation: `{\"action\":\"scale_out\",\"service\":\"api\"}`.\n"
+  },
+  "grants": [
+    {
+      "action": "external.http.*",
+      "resource": "{{EXTERNAL}}",
+      "requiresApproval": true
+    }
+  ],
+  "eventTimeline": [
+    {
+      "seq": 1,
+      "type": "RunCreated",
+      "at": "2026-07-17T04:07:48.328Z"
+    },
+    {
+      "seq": 2,
+      "type": "RunQueued",
+      "at": "2026-07-17T04:07:48.328Z"
+    },
+    {
+      "seq": 3,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:07:49.025Z"
+    },
+    {
+      "seq": 4,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:07:49.045Z"
+    },
+    {
+      "seq": 5,
+      "type": "SandboxAllocated",
+      "at": "2026-07-17T04:08:01.586Z"
+    },
+    {
+      "seq": 6,
+      "type": "WorkspaceRestored",
+      "at": "2026-07-17T04:08:02.217Z"
+    },
+    {
+      "seq": 7,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:08:02.248Z"
+    },
+    {
+      "seq": 8,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:08:05.131Z"
+    },
+    {
+      "seq": 9,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:08:05.206Z"
+    },
+    {
+      "seq": 10,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:08:07.968Z"
+    },
+    {
+      "seq": 11,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:08:08.049Z"
+    },
+    {
+      "seq": 12,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:08:21.463Z"
+    },
+    {
+      "seq": 13,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:08:21.774Z"
+    },
+    {
+      "seq": 14,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:08:25.198Z"
+    },
+    {
+      "seq": 15,
+      "type": "ApprovalRequested",
+      "at": "2026-07-17T04:08:25.223Z"
+    },
+    {
+      "seq": 16,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:08:26.112Z"
+    },
+    {
+      "seq": 17,
+      "type": "ApprovalReceived",
+      "at": "2026-07-17T04:08:26.129Z"
+    },
+    {
+      "seq": 18,
+      "type": "SandboxTerminated",
+      "at": "2026-07-17T04:08:26.516Z"
+    },
+    {
+      "seq": 19,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:08:26.539Z"
+    },
+    {
+      "seq": 20,
+      "type": "AttemptStarted",
+      "at": "2026-07-17T04:08:26.553Z"
+    },
+    {
+      "seq": 21,
+      "type": "SandboxAllocated",
+      "at": "2026-07-17T04:08:37.772Z"
+    },
+    {
+      "seq": 22,
+      "type": "WorkspaceRestored",
+      "at": "2026-07-17T04:08:38.671Z"
+    },
+    {
+      "seq": 23,
+      "type": "ToolInvocationStarted",
+      "at": "2026-07-17T04:08:38.686Z"
+    },
+    {
+      "seq": 24,
+      "type": "ToolInvocationCommitted",
+      "at": "2026-07-17T04:08:38.710Z"
+    },
+    {
+      "seq": 25,
+      "type": "ModelInvocationStarted",
+      "at": "2026-07-17T04:08:38.737Z"
+    },
+    {
+      "seq": 26,
+      "type": "ModelInvocationCompleted",
+      "at": "2026-07-17T04:08:42.520Z"
+    },
+    {
+      "seq": 27,
+      "type": "VerificationStarted",
+      "at": "2026-07-17T04:08:42.530Z"
+    },
+    {
+      "seq": 28,
+      "type": "WorkspaceCheckpointed",
+      "at": "2026-07-17T04:08:43.113Z"
+    },
+    {
+      "seq": 29,
+      "type": "RunCompleted",
+      "at": "2026-07-17T04:08:43.130Z"
+    },
+    {
+      "seq": 30,
+      "type": "SandboxTerminated",
+      "at": "2026-07-17T04:08:43.408Z"
+    }
+  ],
+  "eventCounts": {
+    "RunCreated": 1,
+    "RunQueued": 1,
+    "AttemptStarted": 4,
+    "SandboxAllocated": 2,
+    "WorkspaceRestored": 2,
+    "ModelInvocationStarted": 5,
+    "ModelInvocationCompleted": 5,
+    "ApprovalRequested": 1,
+    "WorkspaceCheckpointed": 2,
+    "ApprovalReceived": 1,
+    "SandboxTerminated": 2,
+    "ToolInvocationStarted": 1,
+    "ToolInvocationCommitted": 1,
+    "VerificationStarted": 1,
+    "RunCompleted": 1
+  },
+  "attempts": [
+    {
+      "id": "att_01kxq44nh5kg5c6cxbj7bpjs01",
+      "run_id": "run_01kxq44mv84t1swxzn0x3ew2gq",
+      "attempt_no": 1,
+      "worker_id": "sre-incident-worker",
+      "state": "EXITED",
+      "lease_expires_at": "2026-07-17T04:08:39.054Z",
+      "heartbeat_at": "2026-07-17T04:08:24.054Z",
+      "sandbox_id": "vefaas-jsdzgnxi-0d9v4raq51-d9cql5g07v3l4ko01deg-sandbox",
+      "sandbox_domain": "https://s061f54q9u6u9vfjfs4s3.apigateway-ap-southeast-1.apigw-byteplus.com",
+      "started_from_checkpoint_id": null,
+      "exit_reason": "suspended_for_approval",
+      "created_at": "2026-07-17T04:07:49.025Z"
+    },
+    {
+      "id": "att_01kxq45t5dd4y1jn3txwjkyh76",
+      "run_id": "run_01kxq44mv84t1swxzn0x3ew2gq",
+      "attempt_no": 2,
+      "worker_id": "sre-incident-worker",
+      "state": "EXITED",
+      "lease_expires_at": "2026-07-17T04:08:56.557Z",
+      "heartbeat_at": "2026-07-17T04:08:41.557Z",
+      "sandbox_id": "vefaas-jsdzgnxi-0d9v4raq51-d9cqleg07v3l4ko01df0-sandbox",
+      "sandbox_domain": "https://s061f54q9u6u9vfjfs4s3.apigateway-ap-southeast-1.apigw-byteplus.com",
+      "started_from_checkpoint_id": null,
+      "exit_reason": "completed",
+      "created_at": "2026-07-17T04:08:26.539Z"
+    }
+  ],
+  "approvals": [
+    {
+      "id": "apr_01kxq45rw8gf85gfw5nwk6205k",
+      "run_id": "run_01kxq44mv84t1swxzn0x3ew2gq",
+      "requested_by_attempt_id": "att_01kxq44nh5kg5c6cxbj7bpjs01",
+      "action": {
+        "risk": "external_write",
+        "action": "external.http.request",
+        "resource": "http://127.0.0.1:50888",
+        "arguments": {
+          "url": "http://127.0.0.1:50888/remediate",
+          "body": {
+            "action": "scale_pool",
+            "service": "api",
+            "target_pool_size": 40
+          },
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "__idemKey": "bc47c59dca5fdc1766148a3630b8b56d4b529e7e6eb5dceb1a2ca224b2cd6204"
+        }
+      },
+      "status": "APPROVED",
+      "decision_by": "scenario-runner",
+      "decided_at": "2026-07-17T04:08:26.129Z",
+      "expires_at": null,
+      "created_at": "2026-07-17T04:08:25.223Z"
+    }
+  ],
+  "externalActions": [
+    {
+      "id": "txn_c335d54b2ea108bb",
+      "idempotencyKey": "bc47c59dca5fdc1766148a3630b8b56d4b529e7e6eb5dceb1a2ca224b2cd6204",
+      "method": "POST",
+      "path": "/remediate",
+      "body": {
+        "action": "scale_pool",
+        "service": "api",
+        "target_pool_size": 40
+      },
+      "receivedCount": 1,
+      "firstReceivedAt": "2026-07-17T04:08:38.707Z"
+    }
+  ],
+  "toolReceipts": [
+    {
+      "semantic_action": "external.http.request",
+      "status": "COMMITTED",
+      "reversibility": "irreversible"
+    }
+  ],
+  "tokenUsage": {
+    "inputTokens": 9978,
+    "outputTokens": 1471,
+    "calls": 5
+  },
+  "artifacts": {
+    "INCIDENT.md": "# Incident Report\n## Summary\nOn 2026-07-17 starting at 02:42 UTC, the API service began returning HTTP 503 errors to client requests after exhausting its database connection pool. The incident caused service degradation for users accessing the /orders and /checkout endpoints, with a backlog of queued requests building as connections remained unavailable.\n\n## Root Cause\nThe API service's database connection pool, initialized with a size of 20 connections, reached 100% utilization (20/20 active connections). This exhaustion caused all new connection acquisition attempts to time out after 5000ms, leading to immediate request failures. The root cause aligns with the runbook's \"DB connection pool exhausted\" symptom pattern.\n\n## Impact\n- Clients sending requests to the /orders (GET) and /checkout (POST) endpoints received HTTP 503 Service Unavailable errors starting at 02:42 UTC.\n- By 02:43 UTC, 142 requests were queued waiting for database connections, leading to widespread user-facing failures and increased latency for any successful requests.\n\n## Remediation\nPer the runbook step for \"DB connection pool exhausted\" (which lists the observed errors \"could not get connection from pool: timeout\" and HTTP 503 as matching symptoms), the remediation action is to scale the connection pool. We will POST the runbook-specified JSON payload `{\"action\":\"scale_pool\",\"service\":\"api\",\"target_pool_size\":40}` to the /remediate endpoint to increase the pool size to 40, resolving the exhaustion."
+  }
+}
