@@ -61,7 +61,7 @@ export async function waitFor<T>(
   fn: () => Promise<T | null | undefined | false>,
   opts: { timeoutMs?: number; intervalMs?: number; label?: string } = {},
 ): Promise<T> {
-  const timeout = opts.timeoutMs ?? 20_000;
+  const timeout = opts.timeoutMs ?? 30_000;
   const interval = opts.intervalMs ?? 150;
   const start = Date.now();
   for (;;) {

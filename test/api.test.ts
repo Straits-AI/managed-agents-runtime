@@ -244,10 +244,13 @@ describe('API', () => {
     });
     expect(twice.statusCode).toBe(409);
 
+    // The run reaches COMPLETED inside the epoch's transaction; the final
+    // attempt's EXITED/completed bookkeeping lands a moment later in
+    // settleAttempt. Wait for both to settle before asserting on the attempt.
     const done = await waitFor(
       async () => {
         const r = await getRunViaApi(runId);
-        return r.status === 'COMPLETED' ? r : null;
+        return r.status === 'COMPLETED' && r.attempts[1]?.exit_reason === 'completed' ? r : null;
       },
       { timeoutMs: 30_000, label: 'resumed run COMPLETED' },
     );

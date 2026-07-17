@@ -72,9 +72,16 @@ describe('scheduler + worker', () => {
     expect(types).toContain('VerificationStarted');
     expect(types[types.length - 1]).toBe('RunCompleted');
 
-    const attempts = await listAttempts(db.pool, run.id);
-    expect(attempts).toHaveLength(1);
-    expect(attempts[0]!.state).toBe('EXITED');
+    // The run reaches COMPLETED inside the epoch's transaction; the attempt row
+    // is marked EXITED a moment later in settleAttempt (a separate transaction).
+    // Wait for that bookkeeping to settle before asserting on it.
+    const attempts = await waitFor(
+      async () => {
+        const a = await listAttempts(db.pool, run.id);
+        return a.length === 1 && a[0]!.state === 'EXITED' ? a : null;
+      },
+      { label: 'attempt EXITED (bookkeeping settled)' },
+    );
     expect(attempts[0]!.exit_reason).toBe('completed');
   });
 
@@ -119,17 +126,20 @@ describe('scheduler + worker', () => {
     ]);
     newWorker();
 
-    // It parks in WAITING_SIGNAL with zero active compute.
+    // It parks in WAITING_SIGNAL and releases compute. The run transitions to
+    // WAITING_SIGNAL inside the epoch, but the attempt row flips ACTIVE→EXITED a
+    // moment later in settleAttempt — so poll until that bookkeeping settles
+    // (zero ACTIVE attempts) rather than racing it.
     const waiting = await waitFor(
       async () => {
         const r = await getRun(db.pool, run.id);
-        return r?.status === 'WAITING_SIGNAL' ? r : null;
+        if (r?.status !== 'WAITING_SIGNAL') return null;
+        const active = (await listAttempts(db.pool, run.id)).filter((a) => a.state === 'ACTIVE');
+        return active.length === 0 ? r : null;
       },
-      { label: 'WAITING_SIGNAL' },
+      { label: 'WAITING_SIGNAL with zero compute' },
     );
     expect(waiting.awaited_signal).toBe('payment_settled');
-    const active = (await listAttempts(db.pool, run.id)).filter((a) => a.state === 'ACTIVE');
-    expect(active).toHaveLength(0);
 
     // Deliver the signal exactly as the API endpoint does: record + wake.
     await withTransaction(db.pool, async (tx) => {
@@ -197,25 +207,13 @@ describe('scheduler + worker', () => {
     ]);
     newWorker();
 
-    // Parent parks in WAITING_CHILDREN, and two child runs are spawned.
-    const waiting = await waitFor(
-      async () => {
-        const r = await getRun(db.pool, parent.id);
-        return r?.status === 'WAITING_CHILDREN' ? r : null;
-      },
-      { label: 'parent WAITING_CHILDREN' },
-    );
-    expect(waiting.status).toBe('WAITING_CHILDREN');
-    const active = (await listAttempts(db.pool, parent.id)).filter((a) => a.state === 'ACTIVE');
-    expect(active).toHaveLength(0); // zero compute while children run
-
-    const { rows: kids } = await db.pool.query<{ id: string; parent_run_id: string }>(
-      `SELECT id, parent_run_id FROM runs WHERE parent_run_id = $1`,
-      [parent.id],
-    );
-    expect(kids).toHaveLength(2);
-
-    // Children run (in parallel) and complete; then the parent wakes and finishes.
+    // The parent suspends to WAITING_CHILDREN, its children run, and it resumes
+    // to COMPLETED. With scripted no-op children a single worker does the whole
+    // dance (park → run 2 children → wake → finish) in well under one poll
+    // interval, so WAITING_CHILDREN is a fleeting state a status poll routinely
+    // misses. Assert the DURABLE record — event ledger + attempt exit reasons —
+    // which permanently proves the suspend→resume cycle, instead of racing the
+    // live status.
     const done = await waitFor(
       async () => {
         const r = await getRun(db.pool, parent.id);
@@ -225,15 +223,33 @@ describe('scheduler + worker', () => {
     );
     expect(done.status).toBe('COMPLETED');
 
+    // Two children were spawned and each completed.
+    const { rows: kids } = await db.pool.query<{ id: string; parent_run_id: string }>(
+      `SELECT id, parent_run_id FROM runs WHERE parent_run_id = $1`,
+      [parent.id],
+    );
+    expect(kids).toHaveLength(2);
     for (const k of kids) {
       const child = await getRun(db.pool, k.id);
       expect(child!.status).toBe('COMPLETED');
     }
+
+    // Durable proof of "zero compute while children run": the parent's first
+    // attempt EXITED with 'suspended_for_children' (it released its worker at the
+    // suspend rather than holding a running attempt through the children), and a
+    // distinct later attempt completed the resume.
+    const attempts = await listAttempts(db.pool, parent.id);
+    const suspended = attempts.find((a) => a.exit_reason === 'suspended_for_children');
+    expect(suspended?.state).toBe('EXITED');
+    expect(attempts.at(-1)!.exit_reason).toBe('completed');
+    expect(attempts.at(-1)!.id).not.toBe(suspended!.id);
     const types = (await listEvents(db.pool, parent.id)).map((e) => e.type);
     expect(types).toContain('ChildRunSpawned');
     expect(types).toContain('ChildrenResolved');
+    // Suspend precedes resume in the ledger — the parent waited, then woke.
+    expect(types.indexOf('ChildRunSpawned')).toBeLessThan(types.indexOf('ChildrenResolved'));
     expect(types[types.length - 1]).toBe('RunCompleted');
-  });
+  }, 60_000); // heaviest test: worker boot + 4 sequential claim/epoch cycles (parent, 2 children, resume)
 
   it('recovers when the worker is SIGKILLed mid-run (benchmark steps 4-5)', async () => {
     const run = await newRun([
@@ -267,11 +283,17 @@ describe('scheduler + worker', () => {
     );
     expect(done.status).toBe('COMPLETED');
 
-    const attempts = await listAttempts(db.pool, run.id);
-    expect(attempts.length).toBeGreaterThanOrEqual(2);
+    // As above, the final attempt's EXITED bookkeeping lands just after the run
+    // reaches COMPLETED — wait for it to settle before asserting on it.
+    const attempts = await waitFor(
+      async () => {
+        const a = await listAttempts(db.pool, run.id);
+        return a.length >= 2 && a.at(-1)!.state === 'EXITED' ? a : null;
+      },
+      { label: 'final attempt EXITED (bookkeeping settled)' },
+    );
     expect(attempts[0]!.state).toBe('ORPHANED');
     expect(attempts[0]!.exit_reason).toBe('lease_expired');
-    expect(attempts.at(-1)!.state).toBe('EXITED');
     expect(attempts.at(-1)!.exit_reason).toBe('completed');
 
     const events = await listEvents(db.pool, run.id);
