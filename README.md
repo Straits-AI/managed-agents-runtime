@@ -59,6 +59,15 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
   an agent recalls what it learned in earlier runs and writes new memories
   with the `remember` tool. Postgres (full-text ranked) by default; the
   AgentKit Memory binding is a drop-in adapter (`MEMORY_PROVIDER=agentkit`).
+- **Semantic supervisor** (`src/harness/supervisor.ts`): a provider-neutral,
+  pure evaluator that watches each run's own durable signals — the sequence of
+  proposed actions, the progress ledger, and the remaining budget — to detect
+  **loops**, **stagnation**, **context loss**, and **low budget**. It steers a
+  stuck run through a bounded ladder — corrective note → **adaptive model
+  routing** to a stronger model (`src/harness/modelRouter.ts`) → definitive
+  terminate — so a run can never spin forever burning budget. State is
+  checkpointed, so detection survives crashes; every decision is a ledger event
+  (`LoopDetected`, `StagnationDetected`, `ModelEscalated`, …).
 
 ## Getting started (no BytePlus credentials needed)
 
@@ -166,7 +175,8 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | Phase 2 — AgentKit Memory binding | ✅ **live**: `MEMORY_PROVIDER=agentkit` writes/recalls via Viking Memory (AgentKit's memory backend) through a path-based SignerV4 client. Confirmed end-to-end (write → async AI extraction → recall). |
 | Phase 2 — Knowledge / Skills / MCP | ✅ Knowledge (RAG `knowledge_search`), Skills (version-pinned, materialized into the workspace), MCP (namespaced toolsets routed through the capability layer). Postgres/registry defaults + AgentKit adapter seams. |
 | Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. |
-| Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). 68 tests. |
+| Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). |
+| Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. 80 tests. Subagent replacement deferred to Phase 5B. |
 
 Phase 1 scope cuts (per memo §22.4): subagents, Kafka/RocketMQ (outbox is
 in-process), AgentKit Memory/Knowledge/Identity, KMS/FileNAS, multi-tenancy,

@@ -9,13 +9,11 @@ export default defineConfig({
     testTimeout: 45_000,
     hookTimeout: 45_000,
     // The scheduler/worker integration tests spawn real worker *subprocesses*
-    // (one Node process per worker) on top of vitest's own file-level forks.
-    // Left unbounded, 13 file-forks + their spawned workers oversubscribe an
-    // 8-core machine, starving the timing-sensitive lease/heartbeat/poll loops
-    // and causing flaky timeouts. Cap the concurrent file-forks so spawned
-    // workers still get CPU.
-    poolOptions: {
-      forks: { maxForks: 4, minForks: 1 },
-    },
+    // (one Node process per worker) on top of vitest's own file-level workers.
+    // Left unbounded, many file-workers + their spawned workers oversubscribe an
+    // 8-core machine, starving the timing-sensitive lease/heartbeat/poll loops.
+    // Cap concurrent file-workers so spawned workers still get CPU. (Vitest 4
+    // promoted this from the removed test.poolOptions.forks.maxForks.)
+    maxWorkers: 4,
   },
 });

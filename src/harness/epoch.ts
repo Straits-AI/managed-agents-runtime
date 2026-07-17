@@ -18,6 +18,7 @@ import type {
   SkillProvider,
   SkillRef,
   McpToolProvider,
+  ToolCall,
   ToolDef,
 } from '../providers/types.js';
 import { materializeSkills, type MaterializedSkill } from './skills.js';
@@ -35,6 +36,19 @@ import { dispatchTool, TOOL_DEFS, TOOL_DOCS, type ToolContext } from './toolRout
 import { verify, type VerifierPolicy } from './verifier.js';
 import { tokenBudgetExceeded } from './limits.js';
 import { maybeCrash } from './faults.js';
+import { routeModel } from './modelRouter.js';
+import {
+  evaluate as superviseStep,
+  initialSupervisorState,
+  type SupervisorState,
+  type SupervisorThresholds,
+} from './supervisor.js';
+import {
+  actionSignature,
+  ledgerCompleted,
+  ledgerRemaining,
+  recordSupervision,
+} from './supervision.js';
 
 export interface EpochProviders {
   model: ModelProvider;
@@ -82,6 +96,17 @@ export function createRealEpoch(providers: EpochProviders) {
     let step = agentState.step;
     let verifyRetries = 0;
     let noToolTurns = 0;
+    // Semantic supervisor state, restored from the checkpoint so loop/stagnation
+    // detection and the escalation ladder survive worker crashes (memo §25).
+    let supervisorState: SupervisorState =
+      (agentState.supervisor as SupervisorState | undefined) ?? initialSupervisorState();
+    const supThresholds: SupervisorThresholds = {
+      loopThreshold: cfg.SUPERVISOR_LOOP_THRESHOLD,
+      stagnationSteps: cfg.SUPERVISOR_STAGNATION_STEPS,
+      window: cfg.SUPERVISOR_WINDOW,
+      budgetHeadroom: cfg.SUPERVISOR_BUDGET_HEADROOM,
+      maxEscalations: cfg.SUPERVISOR_MAX_ESCALATIONS,
+    };
 
     // --- Allocate sandbox and restore workspace ---
     const sandbox = await providers.sandbox.create({
@@ -191,7 +216,7 @@ export function createRealEpoch(providers: EpochProviders) {
             eventSeq: BigInt(rows[0]!.last_event_seq),
             workspaceRevisionId: revisionId,
             progress: rows[0]!.progress,
-            agentState: { step, transcriptTosKey, ...state },
+            agentState: { step, transcriptTosKey, supervisor: supervisorState, ...state },
           });
         });
         maybeCrash(cfg, run, 'after_checkpoint');
@@ -271,7 +296,9 @@ export function createRealEpoch(providers: EpochProviders) {
           ),
         );
         const completion = await providers.model.chat({
-          model: version.model_policy.model ?? cfg.ARK_MODEL ?? '',
+          // Adaptive model routing: a supervisor escalation bumps to a stronger
+          // model for subsequent steps (memo §25).
+          model: routeModel(version.model_policy, cfg, supervisorState.escalationLevel),
           messages,
           tools: allTools,
           maxTokens: version.model_policy.maxTokens,
@@ -306,6 +333,62 @@ export function createRealEpoch(providers: EpochProviders) {
         transcript.push(completion.message);
 
         const toolCalls = completion.message.toolCalls ?? [];
+
+        // --- Semantic supervisor (memo §25) ---
+        // Watch for loops / stagnation / context loss / low budget and steer the
+        // run: a corrective note, a stronger model, a budget-aware wind-down, or,
+        // if a stuck run can't be recovered, a definitive terminate so it can
+        // never spin forever burning budget.
+        if (cfg.SUPERVISOR_ENABLED) {
+          const { signature, targets } = actionSignature(toolCalls);
+          const sup = superviseStep(
+            {
+              state: supervisorState,
+              proposedSignature: toolCalls.length > 0 ? signature : null,
+              proposedTargets: targets,
+              completedItems: ledgerCompleted(freshRun.progress),
+              remainingItems: ledgerRemaining(freshRun.progress),
+              step,
+              maxSteps: run.max_steps,
+              tokensUsed: BigInt(run.tokens_used),
+              tokenBudget: run.token_budget === null ? null : BigInt(run.token_budget),
+            },
+            supThresholds,
+          );
+          supervisorState = sup.state;
+
+          if (sup.detections.length > 0 || sup.directive.kind !== 'continue') {
+            await recordSupervision(pool, run.id, attempt.id, sup);
+          }
+
+          if (sup.directive.kind === 'terminate') {
+            // The supervisor owns this terminal FAILED transition; settleAttempt
+            // must not retry (the 'failed' exit reason), because retrying would
+            // just reproduce the same stuck loop.
+            const reason = sup.directive.reason;
+            await withTransaction(pool, (tx) =>
+              transitionRun(tx, run.id, {
+                expectFrom: ['RUNNING'],
+                to: 'FAILED',
+                event: { type: 'RunFailed', payload: { reason } },
+                attemptId: attempt.id,
+                reason,
+              }),
+            );
+            await saveCheckpoint();
+            await cleanup();
+            return 'failed';
+          }
+          if (
+            sup.directive.kind === 'recover' ||
+            sup.directive.kind === 'escalate_model' ||
+            sup.directive.kind === 'wind_down'
+          ) {
+            // Inject the steer as a user turn the model sees on its next call.
+            transcript.push({ role: 'user', content: sup.directive.note });
+          }
+        }
+
         if (toolCalls.length === 0) {
           noToolTurns += 1;
           if (noToolTurns >= MAX_NO_TOOL_TURNS) {

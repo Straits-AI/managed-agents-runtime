@@ -11,6 +11,9 @@ const configSchema = z.object({
   ARK_API_KEY: z.string().optional(),
   ARK_BASE_URL: z.string().default('https://ark.ap-southeast.bytepluses.com/api/v3'),
   ARK_MODEL: z.string().optional(),
+  // Stronger model the semantic supervisor routes to when a stuck run is
+  // escalated (memo §25). Per-agent `model_policy.escalationModel` overrides it.
+  ESCALATION_MODEL: z.string().optional(),
 
   BYTEPLUS_ACCESS_KEY_ID: z.string().optional(),
   BYTEPLUS_SECRET_ACCESS_KEY: z.string().optional(),
@@ -52,6 +55,17 @@ const configSchema = z.object({
   POLL_MS: intFromEnv(1_000),
   MAX_ATTEMPTS: intFromEnv(5),
   CHECKPOINT_EVERY_STEPS: intFromEnv(5),
+
+  // Semantic supervisor (memo §25). Watches each run for loops/stagnation and
+  // escalates through corrective note → stronger model → terminate so a run
+  // cannot spin forever burning budget.
+  SUPERVISOR_ENABLED: z.coerce.number().int().min(0).max(1).default(1),
+  SUPERVISOR_LOOP_THRESHOLD: intFromEnv(3),
+  SUPERVISOR_STAGNATION_STEPS: intFromEnv(5),
+  SUPERVISOR_WINDOW: intFromEnv(8),
+  SUPERVISOR_MAX_ESCALATIONS: intFromEnv(2),
+  // Fraction of step/token budget below which budget-aware wind-down kicks in.
+  SUPERVISOR_BUDGET_HEADROOM: z.coerce.number().min(0).max(1).default(0.15),
 
   HARNESS_ENABLE_FAULTS: z.coerce.number().int().min(0).max(1).default(0),
 });

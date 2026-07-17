@@ -17,7 +17,13 @@ export interface AgentVersionRow {
   agent_id: string;
   version: number;
   instructions: string;
-  model_policy: { model?: string; maxTokens?: number; temperature?: number };
+  model_policy: {
+    model?: string;
+    /** Stronger model the supervisor routes to when a stuck run is escalated. */
+    escalationModel?: string;
+    maxTokens?: number;
+    temperature?: number;
+  };
   tool_policy: Record<string, unknown>;
   skill_refs: unknown[];
   mcp_toolset_refs: unknown[];

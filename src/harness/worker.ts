@@ -140,8 +140,11 @@ async function settleAttempt(
       case 'suspended_for_signal':
       case 'suspended_for_children':
       case 'cancelled':
-        // Terminal-for-this-attempt transitions were already written by
-        // the epoch (or the cancel API) inside their own transactions.
+      case 'failed':
+        // Terminal-for-this-attempt transitions were already written by the
+        // epoch (or the cancel API) inside their own transactions. 'failed'
+        // is a definitive FAILED written by the epoch (e.g. the supervisor gave
+        // up on a stuck run) — it must NOT retry, unlike 'error'.
         break;
       case 'budget_exhausted':
         await transitionRun(tx, runId, {

@@ -28,6 +28,9 @@ export type EpochExitReason =
   | 'suspended_for_children'
   | 'budget_exhausted'
   | 'error'
+  // The epoch already wrote a terminal FAILED transition (e.g. the supervisor
+  // gave up on a stuck run). settleAttempt must NOT retry — unlike 'error'.
+  | 'failed'
   | 'lease_lost'
   | 'cancelled';
 
@@ -54,6 +57,12 @@ export type EventType =
   | 'ToolInvocationCommitted'
   | 'ToolInvocationFailed'
   | 'ProgressUpdated'
+  | 'LoopDetected'
+  | 'StagnationDetected'
+  | 'ContextLossDetected'
+  | 'SemanticRecoveryApplied'
+  | 'ModelEscalated'
+  | 'BudgetPlanUpdated'
   | 'SignalReceived'
   | 'ChildRunSpawned'
   | 'ChildrenResolved'
@@ -137,6 +146,13 @@ export interface CheckpointAgentState {
   transcriptTosKey?: string;
   contextSummary?: string;
   step: number;
+  /**
+   * Semantic-supervisor rolling state (memo §25). Persisted so loop/stagnation
+   * detection and the escalation ladder survive worker crashes and resume
+   * exactly where they left off. Typed as unknown here to avoid a harness→core
+   * dependency; the harness reads it as SupervisorState.
+   */
+  supervisor?: unknown;
   /**
    * A tool call that suspended the run (e.g. awaiting approval). On resume
    * the epoch re-dispatches it deterministically instead of relying on the
