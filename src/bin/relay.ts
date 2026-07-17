@@ -11,7 +11,7 @@ const rlog = log.child({ component: 'relay', publisher: cfg.PUBLISHER });
 let publisher: EventPublisher;
 if (cfg.PUBLISHER === 'kafka') {
   const { KafkaPublisher } = await import('../providers/kafkaPublisher.js');
-  publisher = new KafkaPublisher();
+  publisher = new KafkaPublisher(cfg);
 } else {
   const { InProcessPublisher } = await import('../providers/local/inProcessPublisher.js');
   publisher = new InProcessPublisher();

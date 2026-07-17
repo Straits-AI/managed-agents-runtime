@@ -18,6 +18,36 @@ function flag(args: string[], name: string): string | undefined {
   return i >= 0 ? args[i + 1] : undefined;
 }
 
+/** Build the secret cipher matching the deployment's CREDENTIAL_PROVIDER. */
+async function buildCipher(cfg: import('../config.js').Config) {
+  const { requireConfig } = await import('../config.js');
+  if (cfg.CREDENTIAL_PROVIDER === 'kms') {
+    const req = requireConfig(cfg, [
+      'BYTEPLUS_ACCESS_KEY_ID',
+      'BYTEPLUS_SECRET_ACCESS_KEY',
+      'KMS_KEYRING_NAME',
+      'KMS_KEY_NAME',
+    ]);
+    const { KmsClient } = await import('../providers/byteplus/kmsClient.js');
+    const { KmsCipher } = await import('../providers/byteplus/kmsCipher.js');
+    return new KmsCipher(
+      new KmsClient({
+        accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
+        secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
+        sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
+        host: cfg.BYTEPLUS_OPENAPI_HOST,
+        region: cfg.BYTEPLUS_REGION,
+        keyringName: req.KMS_KEYRING_NAME,
+        keyName: req.KMS_KEY_NAME,
+      }),
+    );
+  }
+  const { loadKey } = await import('../crypto.js');
+  const { LocalCipher } = await import('../providers/secretCipher.js');
+  const req = requireConfig(cfg, ['CREDENTIAL_ENCRYPTION_KEY']);
+  return new LocalCipher(loadKey(req.CREDENTIAL_ENCRYPTION_KEY));
+}
+
 async function main(): Promise<void> {
   const [, , resource, action, ...rest] = process.argv;
   const cfg = loadConfig();
@@ -63,10 +93,8 @@ async function main(): Promise<void> {
           'usage: credential create <tenantId> --name X --action <pattern> --header <HeaderName> --value <secret> [--resource <pattern>] [--max-uses N] [--expires <ISO>]',
         );
       }
-      const { loadKey } = await import('../crypto.js');
       const { createCredential } = await import('../store/credentials.js');
-      const { requireConfig } = await import('../config.js');
-      const req = requireConfig(cfg, ['CREDENTIAL_ENCRYPTION_KEY']);
+      const cipher = await buildCipher(cfg);
       const maxUses = flag(rest, 'max-uses');
       const cred = await createCredential(pool, {
         tenantId,
@@ -75,7 +103,7 @@ async function main(): Promise<void> {
         resource: flag(rest, 'resource'),
         headerName: header,
         secret: value,
-        key: loadKey(req.CREDENTIAL_ENCRYPTION_KEY),
+        cipher,
         maxUses: maxUses ? Number(maxUses) : undefined,
         expiresAt: flag(rest, 'expires'),
       });

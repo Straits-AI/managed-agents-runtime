@@ -73,8 +73,11 @@ const configSchema = z.object({
   // Credential broker (memo §9.5): 'local' = encrypted Postgres store (needs
   // CREDENTIAL_ENCRYPTION_KEY, a base64 32-byte AES-256 key); 'none' disables
   // credential injection (default). Injected secrets never reach model context.
-  CREDENTIAL_PROVIDER: z.enum(['local', 'none']).default('none'),
+  CREDENTIAL_PROVIDER: z.enum(['local', 'kms', 'none']).default('none'),
   CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
+  // BytePlus KMS key for CREDENTIAL_PROVIDER=kms (encrypt/decrypt under a CMK).
+  KMS_KEYRING_NAME: z.string().optional(),
+  KMS_KEY_NAME: z.string().optional(),
 
   WORKER_ID: z.string().default(`worker-${process.pid}`),
   LEASE_TTL_MS: intFromEnv(30_000),
@@ -105,6 +108,17 @@ const configSchema = z.object({
   PUBLISHER: z.enum(['inproc', 'kafka']).default('inproc'),
   RELAY_POLL_MS: intFromEnv(1_000),
   RELAY_BATCH: intFromEnv(100),
+  // Kafka publisher (PUBLISHER=kafka). Brokers is comma-separated host:port.
+  // Public BytePlus Kafka endpoints use SASL/PLAIN over SSL.
+  KAFKA_BROKERS: z.string().optional(),
+  KAFKA_TOPIC: z.string().default('run_events'),
+  KAFKA_SASL_USERNAME: z.string().optional(),
+  KAFKA_SASL_PASSWORD: z.string().optional(),
+  KAFKA_SSL: z.coerce.number().int().min(0).max(1).default(1),
+  // Verify the broker TLS cert. Keep 1 in production (connect via the private
+  // hostname endpoint, whose cert matches). Set 0 only for a managed public
+  // endpoint that advertises brokers by IP (cert altname mismatch).
+  KAFKA_SSL_REJECT_UNAUTHORIZED: z.coerce.number().int().min(0).max(1).default(1),
 
   HARNESS_ENABLE_FAULTS: z.coerce.number().int().min(0).max(1).default(0),
 });

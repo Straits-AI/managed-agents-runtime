@@ -1,7 +1,8 @@
 import type { Pool } from 'pg';
 import { withTransaction } from '../db/tx.js';
 import { newId } from '../ids.js';
-import { encryptSecret, type Sealed } from '../crypto.js';
+import type { Sealed } from '../crypto.js';
+import type { SecretCipher } from '../providers/secretCipher.js';
 import { patternMatches } from './grants.js';
 
 export interface CredentialRow {
@@ -30,13 +31,13 @@ export async function createCredential(
     resource?: string;
     headerName: string;
     secret: string;
-    key: Buffer;
+    cipher: SecretCipher;
     expiresAt?: string;
     maxUses?: number;
   },
 ): Promise<{ id: string }> {
   const id = newId('cred');
-  const sealed = encryptSecret(input.secret, input.key);
+  const sealed = await input.cipher.seal(input.secret);
   await pool.query(
     `INSERT INTO credentials
        (id, tenant_id, name, action_pattern, resource_pattern, header_name,

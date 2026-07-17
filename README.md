@@ -95,15 +95,18 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
   checkpoint + workspace — copy-on-write workspace seed + resume from the
   source's step, inheriting its progress ledger and grants (`src/store/runs.ts`).
 - **Event transport** (`src/store/outbox.ts`, `src/bin/relay.ts`): every event
-  writes a transactional outbox row; the `relay` process drains it to a
-  pluggable `EventPublisher` (`FOR UPDATE SKIP LOCKED`, at-least-once). In-process
-  by default; `KafkaPublisher` is the seam for external fan-out (`npm run relay`).
-- **Credential broker** (`src/providers/local/credentialBroker.ts`): per-tenant
-  secrets encrypted at rest (AES-256-GCM), released to a run's outbound tool call
-  only after verifying tenant + action + resource + expiry + call-limit, and
-  injected into the tool adapter — **never** the model context, tool result, or
-  audit ledger (memo §9.5). Local key by default; BytePlus KMS is a documented
-  seam. Manage with `npm run admin credential …`.
+  writes a transactional outbox row; the `relay` process drains it to a pluggable
+  `EventPublisher` (`FOR UPDATE SKIP LOCKED`, at-least-once). In-process by
+  default; `PUBLISHER=kafka` uses the real `KafkaPublisher` (kafkajs) — verified
+  end-to-end against a live BytePlus Message Queue for Kafka cluster
+  (publish→consume roundtrip) (`npm run relay`).
+- **Credential broker** (`src/providers/credentialBroker.ts`): per-tenant secrets
+  encrypted at rest, released to a run's outbound tool call only after verifying
+  tenant + action + resource + expiry + call-limit, and injected into the tool
+  adapter — **never** the model context, tool result, or audit ledger (memo §9.5).
+  Encryption is a pluggable `SecretCipher`: `LocalCipher` (AES-256-GCM key in
+  config) or `KmsCipher` (BytePlus KMS, `CREDENTIAL_PROVIDER=kms`). Manage with
+  `npm run admin credential …`.
 
 ## Getting started (no BytePlus credentials needed)
 
@@ -215,15 +218,15 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. |
 | Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. |
 | Productionization | ✅ multi-tenant auth (per-tenant API keys, tenant-scoped everything), per-tenant quotas, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Cost reference in [`docs/COST.md`](./docs/COST.md). |
-| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, an outbox relay + `EventPublisher` seam (Kafka/RocketMQ adapter documented, in-process default), and a credential broker (encrypted per-tenant secrets injected into tool calls, never the model; KMS seam). 104 tests. |
+| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, outbox relay + `EventPublisher` with a **live-verified** Kafka adapter, and a credential broker (encrypted per-tenant secrets injected into tool calls, never the model) with **local + BytePlus KMS** ciphers. 104 tests. |
 
 Built well beyond the original Phase 1 cut: subagents (Phase 3), signals +
 scheduling, AgentKit Memory/Knowledge/Skills/MCP (Phase 2), the semantic
 supervisor (Phase 5), multi-tenant auth + quotas + cost attribution
-(Productionization), and the deferral sweep above (streaming, forking, global
-rate limiting, the event-publisher relay, and the credential broker) all landed.
-What genuinely remains a stub/seam: the **live** Kafka/RocketMQ binding (the
-publisher seam + relay are built; wiring a real broker needs a provisioned queue)
-and the **KMS** credential adapter (the broker + local encrypted store are built;
-KMS envelope encryption is a documented seam). Also not built: FileNAS, and the
-outbox is still relayed rather than consumed by an external bus.
+(Productionization), and the full deferral sweep — streaming, forking, global
+rate limiting, the event-publisher relay with a **Kafka adapter proven live**
+against a real BytePlus cluster (provisioned, publish→consume verified, torn
+down), and the credential broker with a **BytePlus KMS** cipher. Remaining
+external-infra items: FileNAS, and RocketMQ (the Kafka adapter covers the
+event-bus case). The KMS cipher requires the KMS service enabled on the account
+before use.

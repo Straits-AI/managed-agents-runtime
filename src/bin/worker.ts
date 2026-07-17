@@ -62,14 +62,37 @@ if (epochMode === 'scripted') {
   // AgentKit MCP gateway adapter in a real deployment).
   const { RegistryMcpProvider } = await import('../providers/registryMcp.js');
   const mcp = new RegistryMcpProvider();
-  // Credential broker: local encrypted store (memo §9.5), off by default.
+  // Credential broker (memo §9.5), off by default. LocalCipher (key in config)
+  // or KmsCipher (BytePlus KMS) — same broker, different key custody.
   let credentials;
-  if (cfg.CREDENTIAL_PROVIDER === 'local') {
-    const { LocalCredentialProvider } = await import('../providers/local/credentialBroker.js');
-    const { loadKey } = await import('../crypto.js');
+  if (cfg.CREDENTIAL_PROVIDER !== 'none') {
+    const { CredentialBroker } = await import('../providers/credentialBroker.js');
     const { requireConfig } = await import('../config.js');
-    const req = requireConfig(cfg, ['CREDENTIAL_ENCRYPTION_KEY']);
-    credentials = new LocalCredentialProvider(pool, loadKey(req.CREDENTIAL_ENCRYPTION_KEY));
+    if (cfg.CREDENTIAL_PROVIDER === 'kms') {
+      const req = requireConfig(cfg, [
+        'BYTEPLUS_ACCESS_KEY_ID',
+        'BYTEPLUS_SECRET_ACCESS_KEY',
+        'KMS_KEYRING_NAME',
+        'KMS_KEY_NAME',
+      ]);
+      const { KmsClient } = await import('../providers/byteplus/kmsClient.js');
+      const { KmsCipher } = await import('../providers/byteplus/kmsCipher.js');
+      const kms = new KmsClient({
+        accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
+        secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
+        sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
+        host: cfg.BYTEPLUS_OPENAPI_HOST,
+        region: cfg.BYTEPLUS_REGION,
+        keyringName: req.KMS_KEYRING_NAME,
+        keyName: req.KMS_KEY_NAME,
+      });
+      credentials = new CredentialBroker(pool, new KmsCipher(kms));
+    } else {
+      const { loadKey } = await import('../crypto.js');
+      const { LocalCipher } = await import('../providers/secretCipher.js');
+      const req = requireConfig(cfg, ['CREDENTIAL_ENCRYPTION_KEY']);
+      credentials = new CredentialBroker(pool, new LocalCipher(loadKey(req.CREDENTIAL_ENCRYPTION_KEY)));
+    }
   }
   epoch = createRealEpoch({
     model: new ModelArkProvider(cfg),

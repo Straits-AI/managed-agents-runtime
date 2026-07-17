@@ -8,12 +8,14 @@ import {
   listCredentials,
   revokeCredential,
 } from '../src/store/credentials.js';
-import { LocalCredentialProvider } from '../src/providers/local/credentialBroker.js';
+import { CredentialBroker } from '../src/providers/credentialBroker.js';
+import { LocalCipher } from '../src/providers/secretCipher.js';
 import { encryptSecret, decryptSecret, loadKey } from '../src/crypto.js';
 
 let db: TestDb;
 let tenantId: string;
 const key = randomBytes(32);
+const cipher = new LocalCipher(key);
 
 beforeAll(async () => {
   db = await createTestDb();
@@ -45,7 +47,7 @@ describe('credential broker', () => {
       resource: 'https://api.github.com',
       headerName: 'Authorization',
       secret: 'Bearer ghp_token',
-      key,
+      cipher,
       ...over,
     });
   }
@@ -55,9 +57,9 @@ describe('credential broker', () => {
     await createCredential(db.pool, {
       tenantId: t, name: 'gh', action: 'external.http.request',
       resource: 'https://api.github.com', headerName: 'Authorization',
-      secret: 'Bearer ghp_token', key, maxUses: 2,
+      secret: 'Bearer ghp_token', cipher, maxUses: 2,
     });
-    const broker = new LocalCredentialProvider(db.pool, key);
+    const broker = new CredentialBroker(db.pool, cipher);
     const got = await broker.resolve({
       tenantId: t, runId: 'run_x', action: 'external.http.request', resource: 'https://api.github.com',
     });
@@ -71,9 +73,9 @@ describe('credential broker', () => {
     const t = (await createTenant(db.pool, { name: 'scoped' })).id;
     await createCredential(db.pool, {
       tenantId: t, name: 'gh', action: 'external.http.request',
-      resource: 'https://api.github.com', headerName: 'Authorization', secret: 's', key,
+      resource: 'https://api.github.com', headerName: 'Authorization', secret: 's', cipher,
     });
-    const broker = new LocalCredentialProvider(db.pool, key);
+    const broker = new CredentialBroker(db.pool, cipher);
     // wrong tenant
     expect(await broker.resolve({ tenantId, runId: 'r', action: 'external.http.request', resource: 'https://api.github.com' })).toBeNull();
     // wrong resource
@@ -86,10 +88,10 @@ describe('credential broker', () => {
     const t = (await createTenant(db.pool, { name: 'expired' })).id;
     await createCredential(db.pool, {
       tenantId: t, name: 'gh', action: 'external.http.request', resource: '*',
-      headerName: 'Authorization', secret: 's', key,
+      headerName: 'Authorization', secret: 's', cipher,
       expiresAt: new Date(Date.now() - 60_000).toISOString(),
     });
-    const broker = new LocalCredentialProvider(db.pool, key);
+    const broker = new CredentialBroker(db.pool, cipher);
     expect(await consumeCredential(db.pool, { tenantId: t, action: 'external.http.request', resource: 'https://x.com' })).toBeNull();
     expect(await broker.resolve({ tenantId: t, runId: 'r', action: 'external.http.request', resource: 'https://x.com' })).toBeNull();
   });
@@ -109,9 +111,9 @@ describe('credential broker', () => {
     const t = (await createTenant(db.pool, { name: 'revoke' })).id;
     const { id } = await createCredential(db.pool, {
       tenantId: t, name: 'gh', action: 'external.http.request', resource: '*',
-      headerName: 'Authorization', secret: 's', key,
+      headerName: 'Authorization', secret: 's', cipher,
     });
-    const broker = new LocalCredentialProvider(db.pool, key);
+    const broker = new CredentialBroker(db.pool, cipher);
     expect(await broker.resolve({ tenantId: t, runId: 'r', action: 'external.http.request', resource: 'https://x.com' })).not.toBeNull();
     expect(await revokeCredential(db.pool, id, t)).toBe(true);
     expect(await broker.resolve({ tenantId: t, runId: 'r', action: 'external.http.request', resource: 'https://x.com' })).toBeNull();
