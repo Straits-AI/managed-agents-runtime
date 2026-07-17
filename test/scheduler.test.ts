@@ -188,6 +188,53 @@ describe('scheduler + worker', () => {
     expect(done.status).toBe('COMPLETED');
   });
 
+  it('delegates child runs, waits with zero compute, resumes when children finish', async () => {
+    const parent = await newRun([
+      { op: 'progress', note: 'planning' },
+      { op: 'delegate', goals: ['subtask A', 'subtask B'] },
+      { op: 'progress', note: 'merging child results' },
+      { op: 'complete' },
+    ]);
+    newWorker();
+
+    // Parent parks in WAITING_CHILDREN, and two child runs are spawned.
+    const waiting = await waitFor(
+      async () => {
+        const r = await getRun(db.pool, parent.id);
+        return r?.status === 'WAITING_CHILDREN' ? r : null;
+      },
+      { label: 'parent WAITING_CHILDREN' },
+    );
+    expect(waiting.status).toBe('WAITING_CHILDREN');
+    const active = (await listAttempts(db.pool, parent.id)).filter((a) => a.state === 'ACTIVE');
+    expect(active).toHaveLength(0); // zero compute while children run
+
+    const { rows: kids } = await db.pool.query<{ id: string; parent_run_id: string }>(
+      `SELECT id, parent_run_id FROM runs WHERE parent_run_id = $1`,
+      [parent.id],
+    );
+    expect(kids).toHaveLength(2);
+
+    // Children run (in parallel) and complete; then the parent wakes and finishes.
+    const done = await waitFor(
+      async () => {
+        const r = await getRun(db.pool, parent.id);
+        return r?.status === 'COMPLETED' ? r : null;
+      },
+      { label: 'parent COMPLETED after children', timeoutMs: 30_000 },
+    );
+    expect(done.status).toBe('COMPLETED');
+
+    for (const k of kids) {
+      const child = await getRun(db.pool, k.id);
+      expect(child!.status).toBe('COMPLETED');
+    }
+    const types = (await listEvents(db.pool, parent.id)).map((e) => e.type);
+    expect(types).toContain('ChildRunSpawned');
+    expect(types).toContain('ChildrenResolved');
+    expect(types[types.length - 1]).toBe('RunCompleted');
+  });
+
   it('recovers when the worker is SIGKILLed mid-run (benchmark steps 4-5)', async () => {
     const run = await newRun([
       { op: 'progress', note: 'phase 1 work' },

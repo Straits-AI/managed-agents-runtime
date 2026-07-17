@@ -5,6 +5,7 @@ import { withTransaction } from '../db/tx.js';
 import { transitionRun } from '../core/transition.js';
 import { claimRun } from '../scheduler/claim.js';
 import { reapExpiredLeases } from '../scheduler/reaper.js';
+import { wakeReadyParents } from '../scheduler/children.js';
 import { exitAttempt, heartbeatAttempt } from '../store/attempts.js';
 
 export interface EpochContext {
@@ -93,6 +94,7 @@ export function startWorker(
     while (!shutdown.signal.aborted) {
       try {
         await reap();
+        await wakeReadyParents(pool).catch(() => []); // subagent parents
         const claimed = await claimRun(pool, cfg.WORKER_ID, cfg.LEASE_TTL_MS);
         if (claimed) {
           await executeClaimed(claimed.run, claimed.attempt);
@@ -136,6 +138,7 @@ async function settleAttempt(
       case 'completed':
       case 'suspended_for_approval':
       case 'suspended_for_signal':
+      case 'suspended_for_children':
       case 'cancelled':
         // Terminal-for-this-attempt transitions were already written by
         // the epoch (or the cancel API) inside their own transactions.

@@ -19,6 +19,8 @@ import {
 } from '../store/receipts.js';
 import { authorizeAndConsume, listGrants, patternMatches } from '../store/grants.js';
 import { insertApproval, listApprovals } from '../store/approvals.js';
+import { listEvents } from '../store/events.js';
+import { spawnChildren } from '../scheduler/children.js';
 import { WORKSPACE_DIR } from './workspace.js';
 import { maybeCrash } from './faults.js';
 
@@ -26,6 +28,7 @@ export type ToolOutcome =
   | { kind: 'result'; content: string }
   | { kind: 'suspend_approval'; approvalId: string }
   | { kind: 'suspend_signal'; signalName: string }
+  | { kind: 'suspend_children'; childRunIds: string[] }
   | { kind: 'complete'; summary: string; artifacts: string[] };
 
 export interface ToolContext {
@@ -96,6 +99,26 @@ export const TOOL_DEFS: ToolDef[] = [
         },
         remaining: { type: 'array', items: { type: 'string' } },
       },
+    },
+  },
+  {
+    name: 'delegate',
+    description:
+      'Delegate independent subtasks to child agents that run in PARALLEL. Your run suspends (zero compute) until every child finishes, then resumes with their outcomes so you can merge them. Use for work that splits cleanly; each child gets its own isolated workspace and a share of your remaining token budget.',
+    parameters: {
+      type: 'object',
+      properties: {
+        subtasks: {
+          type: 'array',
+          description: 'the child goals to run in parallel',
+          items: {
+            type: 'object',
+            properties: { goal: { type: 'string' } },
+            required: ['goal'],
+          },
+        },
+      },
+      required: ['subtasks'],
     },
   },
   {
@@ -252,6 +275,9 @@ export async function dispatchTool(
       return { kind: 'result', content: 'saved to long-term memory' };
     }
 
+    case 'delegate':
+      return delegate(ctx, args);
+
     case 'wait_for_signal':
       return waitForSignal(ctx, String(args.name ?? ''));
 
@@ -270,6 +296,54 @@ export async function dispatchTool(
     default:
       return { kind: 'result', content: `error: unknown tool ${name}` };
   }
+}
+
+/**
+ * Delegate subtasks to parallel child agents (memo §15, §19). First call spawns
+ * children (each with an isolated workspace and a share of the parent's
+ * remaining token budget) and suspends the parent. On resume — after all
+ * children are terminal — returns their outcomes for the parent to merge.
+ * Subruns receive no more authority than the parent (grants are NOT inherited
+ * by default; a subrun must be granted explicitly).
+ */
+async function delegate(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  // Resume path: children already spawned → return their resolved outcomes.
+  const resolved = (await listEvents(ctx.pool, ctx.run.id)).find(
+    (e) => e.type === 'ChildrenResolved',
+  );
+  if (resolved) {
+    const children = (resolved.payload as { children?: unknown[] }).children ?? [];
+    return { kind: 'result', content: JSON.stringify({ delegated_results: children }) };
+  }
+
+  const subtasks = Array.isArray(args.subtasks) ? args.subtasks : [];
+  const goals = subtasks
+    .map((s) => (s as { goal?: unknown }).goal)
+    .filter((g): g is string => typeof g === 'string' && g.trim().length > 0);
+  if (goals.length === 0) {
+    return { kind: 'result', content: 'error: delegate requires at least one subtask with a goal' };
+  }
+
+  // Carve budget: split the parent's remaining tokens across children.
+  let childBudget: number | undefined;
+  if (ctx.run.token_budget !== null) {
+    const remaining = Math.max(0, Number(ctx.run.token_budget) - Number(ctx.run.tokens_used));
+    childBudget = Math.max(1, Math.floor(remaining / goals.length));
+  }
+
+  const childRunIds = await withTransaction(ctx.pool, (tx) =>
+    spawnChildren(tx, {
+      parentRunId: ctx.run.id,
+      attemptId: ctx.attempt.id,
+      children: goals.map((goal) => ({
+        agentVersionId: ctx.run.agent_version_id, // same agent, focused subgoal
+        goal,
+        tokenBudget: childBudget,
+        input: { parentWorkspaceId: ctx.run.workspace_id },
+      })),
+    }),
+  );
+  return { kind: 'suspend_children', childRunIds };
 }
 
 /**

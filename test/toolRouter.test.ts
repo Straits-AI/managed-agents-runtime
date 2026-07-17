@@ -300,6 +300,42 @@ describe('progress_update', () => {
   });
 });
 
+describe('delegate (subagents)', () => {
+  it('spawns children with a carved budget and suspends the parent', async () => {
+    const { run, attempt } = await runningRun([]);
+    // Give the parent a token budget; delegate should split its remaining.
+    await db.pool.query(
+      `UPDATE runs SET token_budget = 1000, tokens_used = 200 WHERE id = $1`,
+      [run.id],
+    );
+    const fresh = (await getRun(db.pool, run.id))!;
+
+    const outcome = await dispatchTool(ctx(fresh, attempt), 'delegate', {
+      subtasks: [{ goal: 'research the API' }, { goal: 'draft the migration' }],
+    });
+    expect(outcome.kind).toBe('suspend_children');
+
+    const parent = await getRun(db.pool, run.id);
+    expect(parent!.status).toBe('WAITING_CHILDREN');
+
+    const { rows: kids } = await db.pool.query<{ id: string; goal: string; token_budget: string }>(
+      `SELECT id, goal, token_budget FROM runs WHERE parent_run_id = $1 ORDER BY created_at`,
+      [run.id],
+    );
+    expect(kids).toHaveLength(2);
+    // Remaining 800 split across 2 children => 400 each.
+    expect(kids.every((k) => Number(k.token_budget) === 400)).toBe(true);
+    expect(kids.map((k) => k.goal)).toEqual(['research the API', 'draft the migration']);
+  });
+
+  it('rejects an empty delegation', async () => {
+    const { run, attempt } = await runningRun([]);
+    const outcome = await dispatchTool(ctx(run, attempt), 'delegate', { subtasks: [] });
+    expect(outcome).toMatchObject({ kind: 'result' });
+    expect((outcome as { content: string }).content).toMatch(/requires at least one subtask/);
+  });
+});
+
 describe('workspace-tool observability', () => {
   // A minimal fake sandbox so we can exercise bash/file tools without cloud.
   const fakeSandbox = {

@@ -4,6 +4,8 @@ import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { insertCheckpoint, latestCheckpoint } from '../store/checkpoints.js';
 import { insertApproval, listApprovals } from '../store/approvals.js';
+import { listEvents } from '../store/events.js';
+import { spawnChildren } from '../scheduler/children.js';
 import { tokenBudgetExceeded } from './limits.js';
 
 /**
@@ -18,6 +20,7 @@ export type ScriptOp =
   | { op: 'checkpoint' }
   | { op: 'requestApproval'; action: SemanticAction }
   | { op: 'waitSignal'; name: string }
+  | { op: 'delegate'; goals: string[] }
   | { op: 'fail'; once?: boolean }
   | { op: 'complete' };
 
@@ -162,6 +165,34 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
           });
         });
         return 'suspended_for_signal';
+      }
+
+      case 'delegate': {
+        // On resume after children resolve, this step is already done — skip it.
+        const alreadySpawned = (await listEvents(pool, run.id)).some(
+          (e) => e.type === 'ChildRunSpawned' && (e.payload as { childRunIds?: string[] }).childRunIds,
+        );
+        if (alreadySpawned) break;
+
+        await withTransaction(pool, async (tx) => {
+          await insertCheckpoint(tx, {
+            runId: run.id,
+            attemptId: attempt.id,
+            eventSeq: BigInt(run.last_event_seq),
+            progress: {},
+            agentState: { step: step + 1 },
+          });
+          await spawnChildren(tx, {
+            parentRunId: run.id,
+            attemptId: attempt.id,
+            children: op.goals.map((g) => ({
+              agentVersionId: run.agent_version_id,
+              goal: g,
+              input: { script: [{ op: 'complete' }] as ScriptOp[] },
+            })),
+          });
+        });
+        return 'suspended_for_children';
       }
 
       case 'fail':

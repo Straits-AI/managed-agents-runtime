@@ -32,6 +32,9 @@ export class WorkspaceManager {
       workspaceId: string;
       seedFiles?: Record<string, string>;
       initCommand?: string;
+      /** Seed a subrun's fresh workspace from this parent workspace's head
+       *  (copy-on-write, memo §15) — used only when the subrun has no head yet. */
+      parentWorkspaceId?: string;
     },
   ): Promise<{ restoredRevisionId: string | null }> {
     const mk = await this.sandbox.exec(handle, `mkdir -p ${WORKSPACE_DIR}`);
@@ -41,7 +44,13 @@ export class WorkspaceManager {
       );
     }
 
-    const head = await headRevision(this.pool, input.workspaceId);
+    // A subrun with no revisions of its own inherits a snapshot of the parent's
+    // workspace, then diverges into its own revisions (parallel subagents never
+    // clobber each other).
+    let head = await headRevision(this.pool, input.workspaceId);
+    if (!head && input.parentWorkspaceId) {
+      head = await headRevision(this.pool, input.parentWorkspaceId);
+    }
     if (head) {
       const url = await this.store.presignGet(head.tos_key, 900);
       const res = await this.sandbox.exec(

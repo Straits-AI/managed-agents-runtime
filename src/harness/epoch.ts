@@ -110,6 +110,7 @@ export function createRealEpoch(providers: EpochProviders) {
         workspaceId: run.workspace_id!,
         seedFiles: run.input.files as Record<string, string> | undefined,
         initCommand: run.input.initCommand as string | undefined,
+        parentWorkspaceId: run.input.parentWorkspaceId as string | undefined,
       });
 
       const memoryScope = { tenantId: run.tenant_id, agentId: version.agent_id };
@@ -177,6 +178,12 @@ export function createRealEpoch(providers: EpochProviders) {
           await saveCheckpoint({ pendingToolCall: pending });
           await cleanup();
           return 'suspended_for_signal';
+        }
+        if (outcome.kind === 'suspend_children') {
+          // Children still running (shouldn't happen — resume implies resolved).
+          await saveCheckpoint({ pendingToolCall: pending });
+          await cleanup();
+          return 'suspended_for_children';
         }
         const content =
           outcome.kind === 'result'
@@ -297,6 +304,15 @@ export function createRealEpoch(providers: EpochProviders) {
             await saveCheckpoint({ pendingToolCall: call });
             await cleanup();
             return 'suspended_for_signal';
+          }
+
+          if (outcome.kind === 'suspend_children') {
+            // Tool router already spawned children + transitioned to
+            // WAITING_CHILDREN; the pending call replays on resume and returns
+            // the resolved child outcomes for the parent to merge.
+            await saveCheckpoint({ pendingToolCall: call });
+            await cleanup();
+            return 'suspended_for_children';
           }
 
           if (outcome.kind === 'complete') {

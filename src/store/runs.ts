@@ -14,6 +14,8 @@ export interface CreateRunInput {
   tokenBudget?: number;
   /** ISO timestamp; the run is not claimable until then (delayed start). */
   scheduledFor?: string;
+  /** Parent run when this is a delegated subrun (memo §15/§19). */
+  parentRunId?: string;
   grants?: {
     action: string;
     resource?: string;
@@ -34,8 +36,8 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
 
   await tx.query(
     `INSERT INTO runs (id, agent_version_id, goal, input, status, max_steps,
-                       token_budget, scheduled_for, debug_fault_points)
-     VALUES ($1, $2, $3, $4, 'CREATED', $5, $6, $7, $8)`,
+                       token_budget, scheduled_for, parent_run_id, debug_fault_points)
+     VALUES ($1, $2, $3, $4, 'CREATED', $5, $6, $7, $8, $9)`,
     [
       runId,
       input.agentVersionId,
@@ -44,6 +46,7 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
       input.maxSteps ?? 50,
       input.tokenBudget ?? null,
       input.scheduledFor ?? null,
+      input.parentRunId ?? null,
       JSON.stringify(input.debugFaultPoints ?? []),
     ],
   );

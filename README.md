@@ -29,6 +29,11 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
 - **Observability** (`src/harness/`): every tool call is auditable in the
   ledger — external writes via receipts (`ToolInvocationStarted/Committed`),
   workspace tools via `ToolInvoked` events.
+- **Subagents** (`src/scheduler/children.ts`): a run's `delegate` tool spawns
+  child runs that execute in **parallel** (each with an isolated
+  copy-on-write workspace seeded from the parent, and a carved share of the
+  parent's token budget). The parent suspends to `WAITING_CHILDREN` with zero
+  compute and resumes with the children's outcomes to merge.
 - **Scheduler** (`src/scheduler/`): lease-based claims with
   `FOR UPDATE SKIP LOCKED`; heartbeat fencing; a reaper requeues orphaned
   attempts (bounded by `MAX_ATTEMPTS`).
@@ -153,6 +158,7 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres adapter (default) behind a provider-neutral `MemoryProvider`; AgentKit adapter is a documented seam (`src/providers/agentkitMemory.ts`). 48 tests. |
 | Phase 2 — AgentKit Memory binding | ✅ **live**: `MEMORY_PROVIDER=agentkit` writes/recalls via Viking Memory (AgentKit's memory backend) through a path-based SignerV4 client. Confirmed end-to-end (write → async AI extraction → recall). |
 | Phase 2 — Knowledge / Skills / MCP | ◻ next: same provider-adapter pattern; AgentKit is confirmed enabled + directly callable (`agentkit`/`2025-10-30`) |
+| Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. 51 tests. |
 
 Phase 1 scope cuts (per memo §22.4): subagents, Kafka/RocketMQ (outbox is
 in-process), AgentKit Memory/Knowledge/Identity, KMS/FileNAS, multi-tenancy,
