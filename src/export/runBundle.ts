@@ -29,10 +29,19 @@ export async function exportRunBundle(
   pool: Pool,
   store: ObjectStore,
   runId: string,
+  /**
+   * Tenant the caller is authorized for. When provided, a run belonging to a
+   * different tenant is reported as not-found (never leak its existence or
+   * contents). REQUIRED once the API carries a per-tenant identity — an export
+   * is a bulk dump of a run's entire state, so it must be tenant-scoped.
+   */
+  expectedTenantId?: string,
 ): Promise<RunBundle> {
   const one = async (sql: string) => (await pool.query(sql, [runId])).rows;
   const run = (await pool.query('SELECT * FROM runs WHERE id = $1', [runId])).rows[0];
-  if (!run) throw new Error(`run not found: ${runId}`);
+  if (!run || (expectedTenantId !== undefined && run.tenant_id !== expectedTenantId)) {
+    throw new Error(`run not found: ${runId}`);
+  }
 
   const events = (
     await pool.query(

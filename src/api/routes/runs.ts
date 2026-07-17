@@ -231,6 +231,10 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
       }
       const { exportRunBundle } = await import('../../export/runBundle.js');
       try {
+        // Single-token API today (no per-tenant identity). When the token
+        // carries a tenant, pass it here so export is scoped — an export is a
+        // bulk dump of a run's entire state (events, receipts, grants,
+        // workspace snapshot) and must never cross tenants.
         const bundle = await exportRunBundle(pool, deps.objectStore, req.params.runId);
         return bundle;
       } catch (err) {

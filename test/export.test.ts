@@ -90,4 +90,11 @@ describe('run bundle export', () => {
   it('404s a missing run', async () => {
     await expect(exportRunBundle(db.pool, store, 'run_nope')).rejects.toThrow(/not found/);
   });
+
+  it('reports a cross-tenant run as not-found (no existence leak)', async () => {
+    const run = await withTransaction(db.pool, (tx) => createRun(tx, { agentVersionId, goal: 'tenant a' }));
+    // Correct tenant exports fine; a different tenant sees "not found".
+    await expect(exportRunBundle(db.pool, store, run.id, 'default')).resolves.toBeTruthy();
+    await expect(exportRunBundle(db.pool, store, run.id, 'other-tenant')).rejects.toThrow(/not found/);
+  });
 });
