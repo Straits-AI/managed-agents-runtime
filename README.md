@@ -85,8 +85,25 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
   tokens, and durable waits cost zero compute.
 - **Operations** (`src/log.ts`, `src/api/`): structured JSON logging,
   unauthenticated `/healthz` + `/readyz` (DB-checked) probes, per-tenant rate
-  limiting, request body limits, and bounded graceful shutdown on the API and
-  worker.
+  limiting (in-process or Postgres-backed cross-instance via
+  `RATE_LIMIT_SCOPE=global`), request body limits, and bounded graceful shutdown
+  on the API and worker.
+- **Event streaming** (`GET /v1/runs/{id}/events/stream`): real-time
+  Server-Sent Events alongside the long-poll endpoint, with `Last-Event-ID`
+  resume (events are durable, so a reconnect replays with no gap).
+- **Forking** (`POST /v1/runs/{id}/fork`): branch a new run from a source run's
+  checkpoint + workspace — copy-on-write workspace seed + resume from the
+  source's step, inheriting its progress ledger and grants (`src/store/runs.ts`).
+- **Event transport** (`src/store/outbox.ts`, `src/bin/relay.ts`): every event
+  writes a transactional outbox row; the `relay` process drains it to a
+  pluggable `EventPublisher` (`FOR UPDATE SKIP LOCKED`, at-least-once). In-process
+  by default; `KafkaPublisher` is the seam for external fan-out (`npm run relay`).
+- **Credential broker** (`src/providers/local/credentialBroker.ts`): per-tenant
+  secrets encrypted at rest (AES-256-GCM), released to a run's outbound tool call
+  only after verifying tenant + action + resource + expiry + call-limit, and
+  injected into the tool adapter — **never** the model context, tool result, or
+  audit ledger (memo §9.5). Local key by default; BytePlus KMS is a documented
+  seam. Manage with `npm run admin credential …`.
 
 ## Getting started (no BytePlus credentials needed)
 
@@ -197,12 +214,16 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). |
 | Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. |
 | Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. |
-| Productionization | ✅ multi-tenant auth (per-tenant API keys, tenant-scoped everything), per-tenant quotas, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Cost reference in [`docs/COST.md`](./docs/COST.md). 90 tests. |
+| Productionization | ✅ multi-tenant auth (per-tenant API keys, tenant-scoped everything), per-tenant quotas, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Cost reference in [`docs/COST.md`](./docs/COST.md). |
+| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, an outbox relay + `EventPublisher` seam (Kafka/RocketMQ adapter documented, in-process default), and a credential broker (encrypted per-tenant secrets injected into tool calls, never the model; KMS seam). 103 tests. |
 
 Built well beyond the original Phase 1 cut: subagents (Phase 3), signals +
 scheduling, AgentKit Memory/Knowledge/Skills/MCP (Phase 2), the semantic
-supervisor (Phase 5), and multi-tenant auth + quotas + cost attribution
-(Productionization) all landed. Remaining deferrals: Kafka/RocketMQ (the outbox
-is still in-process), KMS/FileNAS, credential escrow, streaming events (long-poll
-only), and the `fork` endpoint. Multi-instance rate limiting is per-instance
-today (a shared store like Redis would make it global).
+supervisor (Phase 5), multi-tenant auth + quotas + cost attribution
+(Productionization), and the deferral sweep above (streaming, forking, global
+rate limiting, the event-publisher relay, and the credential broker) all landed.
+What genuinely remains a stub/seam: the **live** Kafka/RocketMQ binding (the
+publisher seam + relay are built; wiring a real broker needs a provisioned queue)
+and the **KMS** credential adapter (the broker + local encrypted store are built;
+KMS envelope encryption is a documented seam). Also not built: FileNAS, and the
+outbox is still relayed rather than consumed by an external bus.
