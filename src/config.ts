@@ -21,7 +21,15 @@ const configSchema = z.object({
   BYTEPLUS_REGION: z.string().default('ap-southeast-1'),
   VEFAAS_SANDBOX_FUNCTION_ID: z.string().optional(),
   SANDBOX_IMAGE: z.string().optional(),
+  // Required alongside SANDBOX_IMAGE only when overriding the app's image
+  // per-run; the API rejects an image override without a startup command.
+  SANDBOX_STARTUP_COMMAND: z.string().optional(),
   SANDBOX_TIMEOUT_MINUTES: intFromEnv(60),
+  // APIG serverless-gateway route fronting the sandbox app. Set the domain to
+  // skip APIG discovery; the API key satisfies the route's Key Auth plugin
+  // (sent as the Authorization header the plugin is configured to read).
+  SANDBOX_GATEWAY_DOMAIN: z.string().optional(),
+  SANDBOX_GATEWAY_API_KEY: z.string().optional(),
 
   TOS_ENDPOINT: z.string().default('tos-ap-southeast-1.bytepluses.com'),
   TOS_REGION: z.string().default('ap-southeast-1'),

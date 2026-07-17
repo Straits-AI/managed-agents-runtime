@@ -14,6 +14,9 @@ export class VefaasSandboxProvider implements SandboxProvider {
   private readonly vefaas: VefaasClient;
   private readonly functionId: string;
   private readonly defaultImage: string | undefined;
+  private readonly defaultCommand: string | undefined;
+  private readonly configuredDomain: string | undefined;
+  private readonly gatewayApiKey: string | undefined;
   private domainCache: string | null = null;
 
   constructor(cfg: Config) {
@@ -31,6 +34,9 @@ export class VefaasSandboxProvider implements SandboxProvider {
     });
     this.functionId = required.VEFAAS_SANDBOX_FUNCTION_ID;
     this.defaultImage = cfg.SANDBOX_IMAGE;
+    this.defaultCommand = cfg.SANDBOX_STARTUP_COMMAND;
+    this.configuredDomain = cfg.SANDBOX_GATEWAY_DOMAIN;
+    this.gatewayApiKey = cfg.SANDBOX_GATEWAY_API_KEY;
   }
 
   /** Exposed for preflight checks. */
@@ -39,6 +45,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
   }
 
   private async apigDomain(): Promise<string> {
+    if (this.configuredDomain) return this.configuredDomain;
     if (this.domainCache) return this.domainCache;
     const domains = await this.vefaas.getApigDomains(this.functionId);
     // Prefer a public https domain when several routes exist.
@@ -54,7 +61,13 @@ export class VefaasSandboxProvider implements SandboxProvider {
   }
 
   private client(handle: SandboxHandle): SandboxClient {
-    return new SandboxClient({ environment: handle.baseUrl });
+    // The APIG route's Key Auth plugin reads the API key from the
+    // Authorization header; without it the gateway returns 401 before the
+    // request reaches the sandbox.
+    const headers = this.gatewayApiKey
+      ? { Authorization: this.gatewayApiKey }
+      : undefined;
+    return new SandboxClient({ environment: handle.baseUrl, headers });
   }
 
   private route(handle: SandboxHandle) {
@@ -73,7 +86,11 @@ export class VefaasSandboxProvider implements SandboxProvider {
       functionId: this.functionId,
       timeoutMinutes: req.timeoutMinutes,
       envs: req.envs,
-      image: req.image ?? this.defaultImage,
+      // Only override the image per-call; otherwise the instance inherits the
+      // released app's image AND startup command. Overriding Image without also
+      // supplying Command is a 400 ("Command is empty").
+      image: req.image,
+      command: req.image ? this.defaultCommand : undefined,
       cpuMilli: req.cpuMilli,
       memoryMB: req.memoryMB,
       metadata: { runId: req.runId },

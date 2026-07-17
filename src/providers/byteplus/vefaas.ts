@@ -55,6 +55,7 @@ export class VefaasClient {
     timeoutMinutes: number;
     envs?: Record<string, string>;
     image?: string;
+    command?: string;
     cpuMilli?: number;
     memoryMB?: number;
     metadata?: Record<string, string>;
@@ -63,7 +64,12 @@ export class VefaasClient {
       FunctionId: input.functionId,
       Timeout: input.timeoutMinutes,
       Envs: input.envs,
-      InstanceImageInfo: input.image ? { ImageUrl: input.image } : undefined,
+      // Official InstanceImageInfoForCreateSandboxInput fields are `Image`
+      // (URL) and `Command`; an image override without a command is a 400
+      // ("Command is empty"). Omit entirely to inherit the released app.
+      InstanceImageInfo: input.image
+        ? { Image: input.image, Command: input.command }
+        : undefined,
       CpuMilli: input.cpuMilli,
       MemoryMB: input.memoryMB,
       Metadata: input.metadata,
