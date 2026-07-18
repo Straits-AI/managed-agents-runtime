@@ -4,10 +4,14 @@ const intFromEnv = (def: number) =>
   z.coerce.number().int().positive().default(def);
 
 const configSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().default('postgres://postgres@127.0.0.1:5433/managed_agents'),
   // Operator token → the built-in 'default' tenant. Per-tenant API keys (mak_…)
   // authenticate as their own tenant; see src/api/auth.ts.
   API_AUTH_TOKEN: z.string().default('dev-token'),
+  // Loopback by default. Deployments that intentionally expose the API must opt
+  // in with API_HOST=0.0.0.0 (or another explicit interface address).
+  API_HOST: z.string().min(1).default('127.0.0.1'),
   API_PORT: intFromEnv(8080),
   // Max request body size (bytes). Bounds memory per request.
   API_BODY_LIMIT_BYTES: intFromEnv(1_048_576),
@@ -129,6 +133,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = configSchema.safeParse(env);
   if (!parsed.success) {
     throw new Error(`Invalid configuration: ${parsed.error.message}`);
+  }
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    (!env.API_AUTH_TOKEN || parsed.data.API_AUTH_TOKEN === 'dev-token')
+  ) {
+    throw new Error(
+      'Unsafe production configuration: API_AUTH_TOKEN must be explicitly set',
+    );
+  }
+  if (
+    parsed.data.NODE_ENV === 'production' &&
+    parsed.data.HARNESS_ENABLE_FAULTS !== 0
+  ) {
+    throw new Error(
+      'Unsafe production configuration: HARNESS_ENABLE_FAULTS must be disabled',
+    );
   }
   return parsed.data;
 }

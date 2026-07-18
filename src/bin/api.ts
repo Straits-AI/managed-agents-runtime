@@ -17,8 +17,8 @@ if (cfg.TOS_BUCKET && cfg.BYTEPLUS_ACCESS_KEY_ID) {
 
 const app = buildServer({ pool, cfg, presignGet, objectStore });
 
-await app.listen({ port: cfg.API_PORT, host: '0.0.0.0' });
-logger.info('listening', { port: cfg.API_PORT });
+await app.listen({ port: cfg.API_PORT, host: cfg.API_HOST });
+logger.info('listening', { host: cfg.API_HOST, port: cfg.API_PORT });
 
 let shuttingDown = false;
 async function shutdown(sig: string) {

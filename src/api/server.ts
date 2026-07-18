@@ -80,8 +80,13 @@ export function buildServer(deps: ApiDeps): FastifyInstance {
       : err.statusCode ?? 500;
     if (status >= 500) {
       log.error('request error', { reqId: req.id, err: err.message, name: err.name });
+      return reply.code(status).send({
+        error: 'internal_error',
+        message: 'Internal server error',
+        requestId: req.id,
+      });
     }
-    reply.code(status).send({ error: err.name, message: err.message });
+    return reply.code(status).send({ error: err.name, message: err.message });
   });
 
   registerHealthRoutes(app, deps);

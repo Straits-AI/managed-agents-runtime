@@ -38,7 +38,7 @@ docker compose up -d          # local Postgres on :5433
 npm run migrate
 npm test                      # full suite against local Postgres
 
-npm run api                   # control-plane API on :8080
+npm run api                   # control-plane API on 127.0.0.1:8080
 npm run worker                # harness worker (WORKER_EPOCH=scripted for no-model runs)
 npm run relay                 # outbox relay (PUBLISHER=inproc by default)
 ```
@@ -47,6 +47,18 @@ Everything runs with the local providers (child-process sandbox, filesystem
 object store) — no cloud credentials required. To connect real BytePlus
 services, copy `.env.example` to `.env` and fill it in (see the README's
 "Connecting to BytePlus" table).
+
+### Production startup boundary
+
+Set `NODE_ENV=production` for an externally deployed API. Production startup
+refuses the default `dev-token` and refuses harness fault injection. Supply an
+explicit operator secret through `API_AUTH_TOKEN`.
+
+The API binds to `127.0.0.1` by default. Set `API_HOST=0.0.0.0` only when the
+deployment network boundary, ingress authentication, and firewall are intended
+to expose it. Unexpected server failures return a public `internal_error` plus
+the request correlation ID; internal provider and database details remain in
+structured logs.
 
 ## 3. Drive an agent through the API
 
