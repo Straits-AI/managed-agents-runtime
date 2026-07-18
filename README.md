@@ -1,8 +1,10 @@
-# Managed Agents Runtime (Phase 1)
+# Managed Agents Runtime
 
 A durable, serverless execution kernel for long-running agents on BytePlus —
-the Phase 1 prototype specified in [`memo.md`](./memo.md). An agent run is a
-durable identity and event history whose execution moves across replaceable
+specified in [`memo.md`](./memo.md) and built out through the full roadmap
+(durable kernel, Phase 2 enterprise capabilities, Phase 3 subagents, Phase 5
+semantic operations, productionization, and the deferral features). An agent run
+is a durable identity and event history whose execution moves across replaceable
 workers and sandboxes: it survives worker death, sandbox loss, redeployment,
 and long approval waits without losing progress or duplicating irreversible
 actions.
@@ -123,9 +125,12 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
 npm install
 docker compose up -d   # local Postgres 16 on :5433
 npm run migrate
-npm test               # 37 tests: state machine, crash recovery, approvals,
-                       # exactly-once side effects — all against local Postgres
+npm test               # 104 tests: state machine, crash recovery, approvals,
+                       # exactly-once side effects, supervisor, multi-tenancy,
+                       # streaming, fork, credentials — all against local Postgres
 ```
+
+Then read the [Usage Guide](./docs/GUIDE.md) to drive agents through the API.
 
 ## Connecting to BytePlus
 
@@ -214,12 +219,12 @@ artifacts. Exit code 0 = Phase 1 accepted.
 
 | Milestone | State |
 | --- | --- |
-| M0–M3 kernel (schema, transitions, scheduler, API) | ✅ built + tested locally (38 tests) |
+| M0–M3 kernel (schema, transitions, scheduler, API) | ✅ built + tested locally |
 | M4 signer + preflight | ✅ built + run against live BytePlus |
 | M5–M8 real epoch, receipts, verifier | ✅ built + exercised end-to-end |
 | M9 survival benchmark | ✅ **PASSED on the live stack** (TOS + ModelArk + Cloud Sandbox via APIG), 2026-07-17 — 57-event gapless history, exactly-once external write |
 | Phase 2A: harden what we own | ✅ tool-level observability, budget-exhaustion enforcement, denied-approval, external signals + scheduled runs — all tested |
-| Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres adapter (default) behind a provider-neutral `MemoryProvider`; AgentKit adapter is a documented seam (`src/providers/agentkitMemory.ts`). 48 tests. |
+| Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres adapter (default) behind a provider-neutral `MemoryProvider`; the AgentKit adapter (`src/providers/agentkitMemory.ts`) is proven live (next row). |
 | Phase 2 — AgentKit Memory binding | ✅ **live**: `MEMORY_PROVIDER=agentkit` writes/recalls via Viking Memory (AgentKit's memory backend) through a path-based SignerV4 client. Confirmed end-to-end (write → async AI extraction → recall). |
 | Phase 2 — Knowledge / Skills / MCP | ✅ Knowledge (RAG `knowledge_search`), Skills (version-pinned, materialized into the workspace), MCP (namespaced toolsets routed through the capability layer). Postgres/registry defaults + AgentKit adapter seams. |
 | Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. |
