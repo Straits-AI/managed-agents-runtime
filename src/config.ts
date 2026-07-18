@@ -129,26 +129,35 @@ const configSchema = z.object({
 
 export type Config = z.infer<typeof configSchema>;
 
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = configSchema.safeParse(env);
   if (!parsed.success) {
     throw new Error(`Invalid configuration: ${parsed.error.message}`);
   }
-  if (
-    parsed.data.NODE_ENV === 'production' &&
-    (!env.API_AUTH_TOKEN || parsed.data.API_AUTH_TOKEN === 'dev-token')
-  ) {
-    throw new Error(
-      'Unsafe production configuration: API_AUTH_TOKEN must be explicitly set',
-    );
-  }
-  if (
-    parsed.data.NODE_ENV === 'production' &&
-    parsed.data.HARNESS_ENABLE_FAULTS !== 0
-  ) {
-    throw new Error(
-      'Unsafe production configuration: HARNESS_ENABLE_FAULTS must be disabled',
-    );
+  const isProduction = parsed.data.NODE_ENV === 'production';
+  const isExposed = !isLoopbackHost(parsed.data.API_HOST);
+  if (isProduction || isExposed) {
+    const boundary = isProduction ? 'production' : 'exposed API';
+    const configuredToken = env.API_AUTH_TOKEN?.trim();
+    if (isProduction && (!configuredToken || configuredToken === 'dev-token')) {
+      throw new Error(
+        'Unsafe production configuration: API_AUTH_TOKEN must be explicitly set',
+      );
+    }
+    if (!configuredToken || configuredToken.length < 32) {
+      throw new Error(
+        `Unsafe ${boundary} configuration: API_AUTH_TOKEN must contain at least 32 non-whitespace characters`,
+      );
+    }
+    if (parsed.data.HARNESS_ENABLE_FAULTS !== 0) {
+      throw new Error(
+        `Unsafe ${boundary} configuration: HARNESS_ENABLE_FAULTS must be disabled`,
+      );
+    }
   }
   return parsed.data;
 }

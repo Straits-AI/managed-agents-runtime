@@ -41,4 +41,29 @@ describe('API error boundary', () => {
     expect(response.body).not.toContain('postgres');
     expect(response.body).not.toContain('do-not-leak');
   });
+
+  it('generates a correlation id when the caller does not supply one', async () => {
+    const pool = {
+      query: async () => {
+        throw new Error('private provider failure');
+      },
+    } as unknown as Pool;
+    app = buildServer({
+      pool,
+      cfg: loadConfig({ API_AUTH_TOKEN: 'test-token' }),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/runs/run_missing',
+      headers: { authorization: 'Bearer test-token' },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({
+      error: 'internal_error',
+      message: 'Internal server error',
+      requestId: expect.stringMatching(/\S+/),
+    });
+  });
 });

@@ -52,11 +52,14 @@ services, copy `.env.example` to `.env` and fill it in (see the README's
 
 Set `NODE_ENV=production` for an externally deployed API. Production startup
 refuses the default `dev-token` and refuses harness fault injection. Supply an
-explicit operator secret through `API_AUTH_TOKEN`.
+explicit operator secret of at least 32 non-whitespace characters through
+`API_AUTH_TOKEN`.
 
 The API binds to `127.0.0.1` by default. Set `API_HOST=0.0.0.0` only when the
 deployment network boundary, ingress authentication, and firewall are intended
-to expose it. Unexpected server failures return a public `internal_error` plus
+to expose it. Any non-loopback binding enforces the same minimum token strength
+and disables harness fault injection even if `NODE_ENV` was not set to
+`production`. Unexpected server failures return a public `internal_error` plus
 the request correlation ID; internal provider and database details remain in
 structured logs.
 
