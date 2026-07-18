@@ -3,3 +3,4 @@ dist/
 .env
 .pgdata/
 *.log
+infra/resources.md
