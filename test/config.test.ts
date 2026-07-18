@@ -19,6 +19,15 @@ describe('production configuration', () => {
       'Unsafe production configuration: API_AUTH_TOKEN must contain at least 32 non-whitespace characters',
     );
 
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        API_AUTH_TOKEN: `a${' '.repeat(30)}b`,
+      }),
+    ).toThrow(
+      'Unsafe production configuration: API_AUTH_TOKEN must contain at least 32 non-whitespace characters',
+    );
+
     expect(
       loadConfig({
         NODE_ENV: 'production',

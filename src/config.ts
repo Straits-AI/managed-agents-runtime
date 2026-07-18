@@ -148,7 +148,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         'Unsafe production configuration: API_AUTH_TOKEN must be explicitly set',
       );
     }
-    if (!configuredToken || configuredToken.length < 32) {
+    if (!configuredToken || !/^\S{32,}$/.test(configuredToken)) {
       throw new Error(
         `Unsafe ${boundary} configuration: API_AUTH_TOKEN must contain at least 32 non-whitespace characters`,
       );
