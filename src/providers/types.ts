@@ -118,13 +118,20 @@ export interface Evidence {
   metadata: Record<string, unknown>;
 }
 
+/** Provider-neutral logical reference. Provider coordinates stay server-side. */
+export interface KnowledgeReference {
+  name: string;
+}
+
+export interface KnowledgeRetrieveRequest {
+  tenantId: string;
+  reference: KnowledgeReference;
+  query: string;
+  limit: number;
+}
+
 export interface KnowledgeProvider {
-  retrieve(
-    knowledgeBaseId: string,
-    query: string,
-    limit: number,
-    tenantId?: string,
-  ): Promise<Evidence[]>;
+  retrieve(request: KnowledgeRetrieveRequest): Promise<Evidence[]>;
 }
 
 /**

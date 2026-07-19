@@ -5,6 +5,8 @@
  *        [--max-concurrent 10] [--daily-tokens 5000000] [--id acme]
  *   node --env-file=.env --import tsx src/bin/admin.ts key create <tenantId> [--name "ci"]
  *   node --env-file=.env --import tsx src/bin/admin.ts tenant list
+ *   node --env-file=.env --import tsx src/bin/admin.ts knowledge bind <tenantId>
+ *        --name <logical> --project <providerProject> --collection <providerCollection>
  *
  * A minted key's plaintext is printed exactly once — it is never stored or
  * recoverable. Store it somewhere safe immediately.
@@ -12,6 +14,7 @@
 import { loadConfig } from '../config.js';
 import { createPool } from '../db/pool.js';
 import { createTenant, createApiKey } from '../store/tenants.js';
+import { loadKnowledgeAdminConfig, runKnowledgeAdmin } from './knowledgeAdmin.js';
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -50,11 +53,20 @@ async function buildCipher(cfg: import('../config.js').Config) {
 
 async function main(): Promise<void> {
   const [, , resource, action, ...rest] = process.argv;
-  const cfg = loadConfig();
+  // Knowledge administration is the bootstrap path that establishes live
+  // verification. It must remain runnable while production workers/APIs are
+  // correctly refusing KNOWLEDGE_PROVIDER=agentkit. For these commands only,
+  // parse all credentials/database settings with the runtime provider off.
+  const cfg =
+    resource === 'knowledge'
+      ? loadKnowledgeAdminConfig(process.env)
+      : loadConfig(process.env);
   const pool = createPool(cfg.DATABASE_URL);
 
   try {
-    if (resource === 'tenant' && action === 'create') {
+    if (resource === 'knowledge') {
+      process.stdout.write(await runKnowledgeAdmin(pool, cfg, action, rest));
+    } else if (resource === 'tenant' && action === 'create') {
       const name = rest.find((a) => !a.startsWith('--'));
       if (!name) throw new Error('usage: tenant create <name> [--id X] [--max-concurrent N] [--daily-tokens N]');
       const maxc = flag(rest, 'max-concurrent');
@@ -127,7 +139,11 @@ async function main(): Promise<void> {
           '  key create <tenantId> [--name X]\n' +
           '  credential create <tenantId> --name X --action <pattern> --header <H> --value <secret> [--resource <pattern>] [--max-uses N] [--expires <ISO>]\n' +
           '  credential list <tenantId>\n' +
-          '  credential revoke <credentialId> <tenantId>\n',
+          '  credential revoke <credentialId> <tenantId>\n' +
+          '  knowledge bind <tenantId> --name X --project X --collection X\n' +
+          '  knowledge verify <tenantId> --name X [--query X]\n' +
+          '  knowledge list <tenantId>\n' +
+          '  knowledge disable <tenantId> <name>\n',
       );
       process.exitCode = 2;
     }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
+import { loadKnowledgeAdminConfig } from '../src/bin/knowledgeAdmin.js';
 
 describe('production configuration', () => {
   it('refuses to start without an explicit non-default API token', () => {
@@ -69,5 +70,37 @@ describe('production configuration', () => {
     ).toThrow(
       'Unsafe exposed API configuration: HARNESS_ENABLE_FAULTS must be disabled',
     );
+  });
+
+  it('keeps AgentKit Knowledge disabled in shared deployments until live verification', () => {
+    const shared = {
+      NODE_ENV: 'production',
+      API_AUTH_TOKEN: 'k'.repeat(32),
+      KNOWLEDGE_PROVIDER: 'agentkit',
+    };
+    expect(() => loadConfig(shared)).toThrow(/AgentKit Knowledge.*live.*verified/i);
+    expect(
+      loadConfig({ ...shared, AGENTKIT_KNOWLEDGE_LIVE_VERIFIED: '1' })
+        .KNOWLEDGE_PROVIDER,
+    ).toBe('agentkit');
+    expect(() =>
+      loadConfig({
+        API_HOST: '0.0.0.0',
+        API_AUTH_TOKEN: 'k'.repeat(32),
+        KNOWLEDGE_PROVIDER: 'agentkit',
+      }),
+    ).toThrow(/AgentKit Knowledge.*live.*verified/i);
+  });
+
+  it('allows only the operator knowledge command to bootstrap the live verification gate', () => {
+    const shared = {
+      NODE_ENV: 'production',
+      API_AUTH_TOKEN: 'k'.repeat(32),
+      KNOWLEDGE_PROVIDER: 'agentkit',
+    };
+    expect(() => loadConfig(shared)).toThrow(/AgentKit Knowledge.*live.*verified/i);
+    const admin = loadKnowledgeAdminConfig(shared);
+    expect(admin.NODE_ENV).toBe('production');
+    expect(admin.KNOWLEDGE_PROVIDER).toBe('none');
   });
 });

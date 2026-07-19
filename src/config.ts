@@ -74,6 +74,10 @@ const configSchema = z.object({
   // Knowledge backend: 'pg' (Postgres, default), 'agentkit' (Knowledge Base),
   // or 'none'.
   KNOWLEDGE_PROVIDER: z.enum(['pg', 'agentkit', 'none']).default('pg'),
+  // Explicit operator attestation that the live AgentKit Knowledge request and
+  // isolation contract was verified for this deployment. Shared deployments
+  // fail closed while this remains 0.
+  AGENTKIT_KNOWLEDGE_LIVE_VERIFIED: z.coerce.number().int().min(0).max(1).default(0),
   // Credential broker (memo §9.5): 'local' = encrypted Postgres store (needs
   // CREDENTIAL_ENCRYPTION_KEY, a base64 32-byte AES-256 key); 'none' disables
   // credential injection (default). Injected secrets never reach model context.
@@ -156,6 +160,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     if (parsed.data.HARNESS_ENABLE_FAULTS !== 0) {
       throw new Error(
         `Unsafe ${boundary} configuration: HARNESS_ENABLE_FAULTS must be disabled`,
+      );
+    }
+    if (
+      parsed.data.KNOWLEDGE_PROVIDER === 'agentkit' &&
+      parsed.data.AGENTKIT_KNOWLEDGE_LIVE_VERIFIED !== 1
+    ) {
+      throw new Error(
+        `Unsafe ${boundary} configuration: AgentKit Knowledge must remain disabled until its live request and tenant-isolation contract is verified`,
       );
     }
   }

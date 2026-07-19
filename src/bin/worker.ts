@@ -45,11 +45,17 @@ if (epochMode === 'scripted') {
     const { AgentKitKnowledgeProvider } = await import('../providers/agentkitKnowledge.js');
     const { requireConfig } = await import('../config.js');
     const req = requireConfig(cfg, ['BYTEPLUS_ACCESS_KEY_ID', 'BYTEPLUS_SECRET_ACCESS_KEY']);
-    knowledge = new AgentKitKnowledgeProvider({
-      accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
-      secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
-      sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
-    });
+    knowledge = new AgentKitKnowledgeProvider(
+      pool,
+      {
+        accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
+        secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
+        sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
+        // The admin verification probe is the only path that may use an
+        // unverified binding. Normal workers always fail closed per binding.
+        requireLiveVerified: true,
+      },
+    );
   } else if (cfg.KNOWLEDGE_PROVIDER !== 'none') {
     const { PgKnowledgeProvider } = await import('../providers/pgKnowledge.js');
     knowledge = new PgKnowledgeProvider(pool);

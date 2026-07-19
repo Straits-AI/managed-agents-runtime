@@ -7,6 +7,7 @@ import type {
   McpToolProvider,
   MemoryProvider,
   MemoryScope,
+  KnowledgeReference,
   ObjectStore,
   SandboxHandle,
   SandboxProvider,
@@ -40,9 +41,9 @@ export interface ToolContext {
   /** Long-term memory + the scope to write it under (optional). */
   memory?: MemoryProvider;
   memoryScope?: MemoryScope;
-  /** Knowledge retrieval + the knowledge base to search (optional). */
+  /** Knowledge retrieval + provider-neutral logical reference (optional). */
   knowledge?: KnowledgeProvider;
-  knowledgeBaseId?: string;
+  knowledgeReference?: KnowledgeReference;
   /** MCP toolsets: provider + name→toolset route for resolved MCP tools. */
   mcp?: McpToolProvider;
   mcpRoute?: Map<string, McpRouteEntry>;
@@ -294,16 +295,16 @@ export async function dispatchTool(
     }
 
     case 'knowledge_search': {
-      if (!ctx.knowledge || !ctx.knowledgeBaseId) {
+      if (!ctx.knowledge || !ctx.knowledgeReference) {
         return { kind: 'result', content: 'error: no knowledge base is configured for this run' };
       }
       const limit = args.limit ? Math.min(20, Number(args.limit)) : 5;
-      const evidence = await ctx.knowledge.retrieve(
-        ctx.knowledgeBaseId,
-        String(args.query ?? ''),
+      const evidence = await ctx.knowledge.retrieve({
+        tenantId: ctx.run.tenant_id,
+        reference: ctx.knowledgeReference,
+        query: String(args.query ?? ''),
         limit,
-        ctx.run.tenant_id,
-      );
+      });
       await emitToolInvoked(ctx, 'knowledge_search', { query: String(args.query ?? '').slice(0, 200), hits: evidence.length });
       return {
         kind: 'result',

@@ -11,13 +11,17 @@ import { FsObjectStore } from '../src/providers/local/fsObjectStore.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createKnowledgeBinding } from '../src/store/knowledgeBindings.js';
 
 let db: TestDb;
 let app: FastifyInstance;
+let agentkitApp: FastifyInstance;
 let store: FsObjectStore;
 let storeDir: string;
 let keyA: string;
 let keyB: string;
+let tenantAId: string;
+let tenantBId: string;
 
 const bearer = (k: string) => ({ authorization: `Bearer ${k}` });
 let agentSeq = 0;
@@ -31,15 +35,27 @@ beforeAll(async () => {
   const cfg = loadConfig({ ...process.env, DATABASE_URL: db.url, API_AUTH_TOKEN: 'op-token' });
   // Wire an object store so /export exercises its tenant guard (not just 501).
   app = buildServer({ pool: db.pool, cfg, objectStore: store });
+  agentkitApp = buildServer({
+    pool: db.pool,
+    cfg: loadConfig({
+      ...process.env,
+      DATABASE_URL: db.url,
+      API_AUTH_TOKEN: 'op-token',
+      KNOWLEDGE_PROVIDER: 'agentkit',
+    }),
+  });
 
   const a = await createTenant(db.pool, { name: 'Tenant A' });
   const b = await createTenant(db.pool, { name: 'Tenant B' });
+  tenantAId = a.id;
+  tenantBId = b.id;
   keyA = (await createApiKey(db.pool, { tenantId: a.id })).plaintext;
   keyB = (await createApiKey(db.pool, { tenantId: b.id })).plaintext;
 });
 
 afterAll(async () => {
   await app.close();
+  await agentkitApp.close();
   await store.close();
   rmSync(storeDir, { recursive: true, force: true });
   await db.drop();
@@ -121,6 +137,96 @@ describe('multi-tenancy & auth', () => {
       payload: { agentVersionId: ver.id, goal: 'g', input: {} },
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  it('accepts only tenant-owned logical knowledge bindings in agent versions', async () => {
+    await createKnowledgeBinding(db.pool, {
+      tenantId: tenantAId,
+      name: 'tenant-handbook',
+      provider: 'agentkit',
+      providerProject: 'private-project-a',
+      providerCollection: 'private-collection-a',
+      liveVerifiedAt: new Date(),
+    });
+    const agentA = (
+      await agentkitApp.inject({
+        method: 'POST',
+        url: '/v1/agents',
+        headers: bearer(keyA),
+        payload: { name: agentName() },
+      })
+    ).json();
+    const agentB = (
+      await agentkitApp.inject({
+        method: 'POST',
+        url: '/v1/agents',
+        headers: bearer(keyB),
+        payload: { name: agentName() },
+      })
+    ).json();
+
+    const owned = await agentkitApp.inject({
+      method: 'POST',
+      url: `/v1/agents/${agentA.id}/versions`,
+      headers: bearer(keyA),
+      payload: {
+        instructions: 'use the handbook',
+        modelPolicy: {},
+        knowledgeConfig: { binding: 'tenant-handbook' },
+      },
+    });
+    expect(owned.statusCode, owned.body).toBe(201);
+    expect(owned.json().knowledge_config).toEqual({ binding: 'tenant-handbook' });
+
+    await createKnowledgeBinding(db.pool, {
+      tenantId: tenantAId,
+      name: 'unverified-handbook',
+      provider: 'agentkit',
+      providerProject: 'private-project-unverified',
+      providerCollection: 'private-collection-unverified',
+    });
+    const unverified = await agentkitApp.inject({
+      method: 'POST',
+      url: `/v1/agents/${agentA.id}/versions`,
+      headers: bearer(keyA),
+      payload: {
+        instructions: 'must not use unverified binding',
+        modelPolicy: {},
+        knowledgeConfig: { binding: 'unverified-handbook' },
+      },
+    });
+    expect(unverified.statusCode).toBe(400);
+
+    const crossTenant = await agentkitApp.inject({
+      method: 'POST',
+      url: `/v1/agents/${agentB.id}/versions`,
+      headers: bearer(keyB),
+      payload: {
+        instructions: 'steal handbook',
+        modelPolicy: {},
+        knowledgeConfig: { binding: 'tenant-handbook' },
+      },
+    });
+    expect(crossTenant.statusCode).toBe(400);
+    expect(crossTenant.json().error).toMatch(/unavailable/i);
+
+    for (const knowledgeConfig of [
+      { binding: 'private-collection-a' },
+      {
+        binding: 'tenant-handbook',
+        providerProject: 'private-project-a',
+        providerCollection: 'private-collection-a',
+      },
+    ]) {
+      const rejected = await agentkitApp.inject({
+        method: 'POST',
+        url: `/v1/agents/${agentB.id}/versions`,
+        headers: bearer(keyB),
+        payload: { instructions: 'arbitrary provider target', modelPolicy: {}, knowledgeConfig },
+      });
+      expect(rejected.statusCode, rejected.body).toBe(400);
+    }
+    expect(tenantBId).not.toBe(tenantAId);
   });
 });
 

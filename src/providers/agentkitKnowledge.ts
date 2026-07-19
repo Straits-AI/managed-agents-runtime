@@ -1,5 +1,8 @@
 import { signedCallV4 } from './byteplus/signerV4.js';
-import type { Evidence, KnowledgeProvider } from './types.js';
+import type { SignV4Input } from './byteplus/signerV4.js';
+import type { Evidence, KnowledgeProvider, KnowledgeRetrieveRequest } from './types.js';
+import type { Pool } from 'pg';
+import { getKnowledgeBinding } from '../store/knowledgeBindings.js';
 
 /**
  * AgentKit Knowledge Base adapter (memo §9.4) — the RAG counterpart to the
@@ -8,30 +11,48 @@ import type { Evidence, KnowledgeProvider } from './types.js';
  * region `cn-north-1`; see byteplus/signerV4.ts). Implements the same
  * KnowledgeProvider interface as PgKnowledgeProvider — a one-line swap.
  *
- * Like Viking Memory, AgentKit Knowledge Base is a billable product that must
- * be activated and have a knowledge base + documents provisioned before
- * retrieval works. The search request shape mirrors the Viking search APIs
- * (collection/resource id + query + a filter/limit config); confirm the exact
- * path (`/api/knowledge/search_knowledge` family) and body against a live
- * knowledge base — the same console-network / probe method that mapped memory.
+ * Provider project and collection identifiers are resolved from an
+ * authoritative tenant-owned binding. Callers supply only its logical name.
+ * The product is billable and must be provisioned before retrieval works; use
+ * `npm run admin knowledge verify` to make a real signed request and record the
+ * binding's live-contract verification before enabling shared execution.
  */
 export interface AgentKitKnowledgeConfig {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken?: string;
+  requireLiveVerified: boolean;
+}
+
+export type AgentKitKnowledgeCall = <T>(input: SignV4Input) => Promise<T>;
+
+export class KnowledgeBindingUnavailableError extends Error {
+  constructor() {
+    super('knowledge binding is unavailable');
+    this.name = 'KnowledgeBindingUnavailableError';
+  }
 }
 
 const HOST = 'api-knowledgebase.mlp.cn-hongkong.bytepluses.com';
 
 export class AgentKitKnowledgeProvider implements KnowledgeProvider {
-  constructor(private readonly cfg: AgentKitKnowledgeConfig) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly cfg: AgentKitKnowledgeConfig,
+    private readonly call: AgentKitKnowledgeCall = signedCallV4,
+  ) {}
 
-  async retrieve(
-    knowledgeBaseId: string,
-    query: string,
-    limit: number,
-  ): Promise<Evidence[]> {
-    const res = await signedCallV4<{
+  async retrieve(request: KnowledgeRetrieveRequest): Promise<Evidence[]> {
+    const { tenantId, reference, query, limit } = request;
+    const binding = await getKnowledgeBinding(this.pool, tenantId, reference.name);
+    if (
+      !binding ||
+      binding.provider !== 'agentkit' ||
+      (this.cfg.requireLiveVerified && binding.live_verified_at === null)
+    ) {
+      throw new KnowledgeBindingUnavailableError();
+    }
+    const res = await this.call<{
       result_list?: { content?: string; title?: string; score?: number; id?: string }[];
     }>({
       host: HOST,
@@ -39,8 +60,8 @@ export class AgentKitKnowledgeProvider implements KnowledgeProvider {
       service: 'air',
       path: '/api/knowledge/collection/search_knowledge',
       body: JSON.stringify({
-        collection_name: knowledgeBaseId,
-        project: 'default',
+        collection_name: binding.provider_collection,
+        project: binding.provider_project,
         query,
         limit,
       }),

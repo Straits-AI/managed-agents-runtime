@@ -191,3 +191,49 @@ describe('tenant-lineage migration', () => {
     }
   });
 });
+
+describe('knowledge-binding migration', () => {
+  it('adds tenant-scoped logical bindings without changing existing agent versions', async () => {
+    const legacy = await createTestDb({ through: '0011_run_tenant_invariants.sql' });
+    try {
+      await legacy.pool.query(
+        `INSERT INTO tenants (id, name) VALUES ('tenant_knowledge_upgrade', 'Knowledge upgrade')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_definitions (id, tenant_id, name)
+         VALUES ('ad_knowledge_upgrade', 'tenant_knowledge_upgrade', 'legacy-agent')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_versions
+           (id, agent_id, version, instructions, model_policy, knowledge_config)
+         VALUES ('av_knowledge_upgrade', 'ad_knowledge_upgrade', 1, 'legacy', '{}',
+                 '{"knowledgeBaseId":"handbook"}')`,
+      );
+      await expect(legacy.applyRemainingMigrations()).resolves.toContain(
+        '0012_knowledge_bindings.sql',
+      );
+      const { rows: versions } = await legacy.pool.query<{
+        knowledge_config: Record<string, string>;
+      }>(
+        `SELECT knowledge_config FROM agent_versions WHERE id = 'av_knowledge_upgrade'`,
+      );
+      expect(versions[0]?.knowledge_config).toEqual({ knowledgeBaseId: 'handbook' });
+      await legacy.pool.query(
+        `INSERT INTO knowledge_bindings
+           (id, tenant_id, name, provider, provider_project, provider_collection)
+         VALUES ('kbnd_upgrade', 'tenant_knowledge_upgrade', 'handbook',
+                 'agentkit', 'project-a', 'collection-a')`,
+      );
+      await expect(
+        legacy.pool.query(
+          `INSERT INTO knowledge_bindings
+             (id, tenant_id, name, provider, provider_project, provider_collection)
+           VALUES ('kbnd_duplicate', 'tenant_knowledge_upgrade', 'handbook',
+                   'agentkit', 'project-b', 'collection-b')`,
+        ),
+      ).rejects.toThrow(/duplicate key/);
+    } finally {
+      await legacy.drop();
+    }
+  });
+});

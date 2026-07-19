@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { newId } from '../ids.js';
-import type { Evidence, KnowledgeProvider } from './types.js';
+import type { Evidence, KnowledgeProvider, KnowledgeRetrieveRequest } from './types.js';
 
 /**
  * Postgres-backed knowledge retrieval (the default KnowledgeProvider): full-text
@@ -10,12 +10,8 @@ import type { Evidence, KnowledgeProvider } from './types.js';
 export class PgKnowledgeProvider implements KnowledgeProvider {
   constructor(private readonly pool: Pool) {}
 
-  async retrieve(
-    knowledgeBaseId: string,
-    query: string,
-    limit: number,
-    tenantId = 'default',
-  ): Promise<Evidence[]> {
+  async retrieve(request: KnowledgeRetrieveRequest): Promise<Evidence[]> {
+    const { tenantId, reference, query, limit } = request;
     // OR the query terms so a passage matching ANY term is retrieved (RAG-style
     // recall), ranked by relevance. Sanitize to keep to_tsquery syntax valid.
     const terms = query
@@ -38,7 +34,7 @@ export class PgKnowledgeProvider implements KnowledgeProvider {
          AND search_tsv @@ to_tsquery('english', $3)
        ORDER BY score DESC
        LIMIT $4`,
-      [tenantId, knowledgeBaseId, terms, limit],
+      [tenantId, reference.name, terms, limit],
     );
     return rows.map((r) => ({
       id: r.id,

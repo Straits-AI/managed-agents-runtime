@@ -55,7 +55,7 @@ describe('knowledge retrieval', () => {
       objectStore: {} as ToolContext['objectStore'],
       step: 1,
       knowledge: kb,
-      knowledgeBaseId: KB,
+      knowledgeReference: { name: KB },
     };
     const outcome = await dispatchTool(ctx, 'knowledge_search', { query: 'refund window', limit: 3 });
     const parsed = JSON.parse((outcome as { content: string }).content);
@@ -81,7 +81,12 @@ describe('knowledge retrieval', () => {
   it('scopes retrieval to the given knowledge base', async () => {
     const kb = new PgKnowledgeProvider(db.pool);
     await kb.ingest('other-kb', [{ content: 'secret from another knowledge base about refunds' }]);
-    const hits = await kb.retrieve(KB, 'refund', 10);
+    const hits = await kb.retrieve({
+      tenantId: 'default',
+      reference: { name: KB },
+      query: 'refund',
+      limit: 10,
+    });
     expect(hits.every((h) => !h.content.includes('another knowledge base'))).toBe(true);
   });
 });
