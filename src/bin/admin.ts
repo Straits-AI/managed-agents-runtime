@@ -14,6 +14,7 @@
 import { loadConfig } from '../config.js';
 import { createPool } from '../db/pool.js';
 import { createTenant, createApiKey } from '../store/tenants.js';
+import { loadKnowledgeAdminConfig, runKnowledgeAdmin } from './knowledgeAdmin.js';
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -56,15 +57,16 @@ async function main(): Promise<void> {
   // verification. It must remain runnable while production workers/APIs are
   // correctly refusing KNOWLEDGE_PROVIDER=agentkit. For these commands only,
   // parse all credentials/database settings with the runtime provider off.
-  const cfg = loadConfig(
+  const cfg =
     resource === 'knowledge'
-      ? { ...process.env, KNOWLEDGE_PROVIDER: 'none' }
-      : process.env,
-  );
+      ? loadKnowledgeAdminConfig(process.env)
+      : loadConfig(process.env);
   const pool = createPool(cfg.DATABASE_URL);
 
   try {
-    if (resource === 'tenant' && action === 'create') {
+    if (resource === 'knowledge') {
+      process.stdout.write(await runKnowledgeAdmin(pool, cfg, action, rest));
+    } else if (resource === 'tenant' && action === 'create') {
       const name = rest.find((a) => !a.startsWith('--'));
       if (!name) throw new Error('usage: tenant create <name> [--id X] [--max-concurrent N] [--daily-tokens N]');
       const maxc = flag(rest, 'max-concurrent');
@@ -129,68 +131,6 @@ async function main(): Promise<void> {
       const { revokeCredential } = await import('../store/credentials.js');
       const ok = await revokeCredential(pool, id, tenantId);
       process.stdout.write(ok ? `revoked ${id}\n` : `not found: ${id}\n`);
-    } else if (resource === 'knowledge' && action === 'bind') {
-      const tenantId = rest.find((a) => !a.startsWith('--'));
-      const name = flag(rest, 'name');
-      const project = flag(rest, 'project');
-      const collection = flag(rest, 'collection');
-      if (!tenantId || !name || !project || !collection) {
-        throw new Error(
-          'usage: knowledge bind <tenantId> --name X --project X --collection X',
-        );
-      }
-      const { createKnowledgeBinding } = await import('../store/knowledgeBindings.js');
-      const binding = await createKnowledgeBinding(pool, {
-        tenantId,
-        name,
-        provider: 'agentkit',
-        providerProject: project,
-        providerCollection: collection,
-      });
-      process.stdout.write(`knowledge binding created: ${binding.name} for tenant ${tenantId}\n`);
-    } else if (resource === 'knowledge' && action === 'verify') {
-      const tenantId = rest.find((a) => !a.startsWith('--'));
-      const name = flag(rest, 'name');
-      if (!tenantId || !name) {
-        throw new Error('usage: knowledge verify <tenantId> --name X [--query X]');
-      }
-      const { requireConfig } = await import('../config.js');
-      const req = requireConfig(cfg, [
-        'BYTEPLUS_ACCESS_KEY_ID',
-        'BYTEPLUS_SECRET_ACCESS_KEY',
-      ]);
-      const { AgentKitKnowledgeProvider } = await import(
-        '../providers/agentkitKnowledge.js'
-      );
-      const provider = new AgentKitKnowledgeProvider(pool, {
-        accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
-        secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
-        sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
-        requireLiveVerified: false,
-      });
-      await provider.retrieve(name, flag(rest, 'query') ?? 'contract verification', 1, tenantId);
-      const { markKnowledgeBindingVerified } = await import(
-        '../store/knowledgeBindings.js'
-      );
-      if (!(await markKnowledgeBindingVerified(pool, tenantId, name))) {
-        throw new Error('knowledge binding is unavailable');
-      }
-      process.stdout.write(`knowledge binding live-verified: ${name} for tenant ${tenantId}\n`);
-    } else if (resource === 'knowledge' && action === 'list') {
-      const tenantId = rest.find((a) => !a.startsWith('--'));
-      if (!tenantId) throw new Error('usage: knowledge list <tenantId>');
-      const { listKnowledgeBindings } = await import('../store/knowledgeBindings.js');
-      process.stdout.write(
-        JSON.stringify(await listKnowledgeBindings(pool, tenantId), null, 2) + '\n',
-      );
-    } else if (resource === 'knowledge' && action === 'disable') {
-      const [tenantId, name] = rest.filter((a) => !a.startsWith('--'));
-      if (!tenantId || !name) {
-        throw new Error('usage: knowledge disable <tenantId> <name>');
-      }
-      const { disableKnowledgeBinding } = await import('../store/knowledgeBindings.js');
-      const ok = await disableKnowledgeBinding(pool, tenantId, name);
-      process.stdout.write(ok ? `disabled ${name}\n` : `not found: ${name}\n`);
     } else {
       process.stderr.write(
         'usage:\n' +

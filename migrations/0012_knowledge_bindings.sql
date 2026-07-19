@@ -10,6 +10,7 @@ CREATE TABLE knowledge_bindings (
   provider_collection  TEXT NOT NULL,
   status               TEXT NOT NULL DEFAULT 'active'
                        CHECK (status IN ('active', 'disabled')),
+  revision             INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
   live_verified_at     TIMESTAMPTZ,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, name),

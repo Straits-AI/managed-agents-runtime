@@ -35,8 +35,23 @@ export interface AgentVersionRow {
   };
   context_strategy: Record<string, unknown>;
   verifier_policy: Record<string, unknown>;
-  knowledge_config: { binding?: string };
+  knowledge_config: {
+    binding?: string;
+    /**
+     * Pre-0012 compatibility only. New API requests reject this field. During
+     * rollout it is treated as a logical tenant binding name, never as provider
+     * coordinates.
+     */
+    knowledgeBaseId?: string;
+  };
   created_at: Date;
+}
+
+export function knowledgeReferenceFromConfig(
+  config: AgentVersionRow['knowledge_config'],
+): { name: string } | undefined {
+  const name = config.binding ?? config.knowledgeBaseId;
+  return name ? { name } : undefined;
 }
 
 export async function createAgentDefinition(

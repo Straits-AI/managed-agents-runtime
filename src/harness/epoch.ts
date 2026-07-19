@@ -26,7 +26,7 @@ import { materializeSkills, type MaterializedSkill } from './skills.js';
 import { resolveMcpTools } from './mcp.js';
 import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
-import { getAgentVersion } from '../store/agents.js';
+import { getAgentVersion, knowledgeReferenceFromConfig } from '../store/agents.js';
 import { getRun } from '../store/runs.js';
 import { insertCheckpoint, latestCheckpoint } from '../store/checkpoints.js';
 import { listGrants } from '../store/grants.js';
@@ -202,7 +202,7 @@ export function createRealEpoch(providers: EpochProviders) {
         memory: providers.memory,
         memoryScope,
         knowledge: providers.knowledge,
-        knowledgeBaseId: version.knowledge_config.binding,
+        knowledgeReference: knowledgeReferenceFromConfig(version.knowledge_config),
         mcp: providers.mcp,
         mcpRoute: mcp.route,
         credentials: providers.credentials,

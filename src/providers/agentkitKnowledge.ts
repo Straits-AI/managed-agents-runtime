@@ -1,6 +1,6 @@
 import { signedCallV4 } from './byteplus/signerV4.js';
 import type { SignV4Input } from './byteplus/signerV4.js';
-import type { Evidence, KnowledgeProvider } from './types.js';
+import type { Evidence, KnowledgeProvider, KnowledgeRetrieveRequest } from './types.js';
 import type { Pool } from 'pg';
 import { getKnowledgeBinding } from '../store/knowledgeBindings.js';
 
@@ -42,14 +42,9 @@ export class AgentKitKnowledgeProvider implements KnowledgeProvider {
     private readonly call: AgentKitKnowledgeCall = signedCallV4,
   ) {}
 
-  async retrieve(
-    knowledgeBaseId: string,
-    query: string,
-    limit: number,
-    tenantId?: string,
-  ): Promise<Evidence[]> {
-    if (!tenantId) throw new KnowledgeBindingUnavailableError();
-    const binding = await getKnowledgeBinding(this.pool, tenantId, knowledgeBaseId);
+  async retrieve(request: KnowledgeRetrieveRequest): Promise<Evidence[]> {
+    const { tenantId, reference, query, limit } = request;
+    const binding = await getKnowledgeBinding(this.pool, tenantId, reference.name);
     if (
       !binding ||
       binding.provider !== 'agentkit' ||

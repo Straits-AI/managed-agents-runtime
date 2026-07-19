@@ -3,8 +3,10 @@ import { createTestDb, type TestDb } from './helpers/db.js';
 import { createTenant } from '../src/store/tenants.js';
 import {
   createKnowledgeBinding,
+  disableKnowledgeBinding,
   getKnowledgeBinding,
   markKnowledgeBindingVerified,
+  rebindKnowledgeBinding,
 } from '../src/store/knowledgeBindings.js';
 import {
   AgentKitKnowledgeProvider,
@@ -53,8 +55,18 @@ describe('tenant-owned AgentKit Knowledge bindings', () => {
       },
     );
 
-    await provider.retrieve('handbook', 'refund', 3, tenantA.id);
-    await provider.retrieve('handbook', 'refund', 3, tenantB.id);
+    await provider.retrieve({
+      tenantId: tenantA.id,
+      reference: { name: 'handbook' },
+      query: 'refund',
+      limit: 3,
+    });
+    await provider.retrieve({
+      tenantId: tenantB.id,
+      reference: { name: 'handbook' },
+      query: 'refund',
+      limit: 3,
+    });
 
     expect(calls.map((call) => JSON.parse(call.body!))).toEqual([
       {
@@ -93,19 +105,65 @@ describe('tenant-owned AgentKit Knowledge bindings', () => {
     );
 
     await expect(
-      provider.retrieve('owner-collection', 'claim', 3, attacker.id),
+      provider.retrieve({
+        tenantId: attacker.id,
+        reference: { name: 'owner-collection' },
+        query: 'claim',
+        limit: 3,
+      }),
     ).rejects.toBeInstanceOf(KnowledgeBindingUnavailableError);
     await expect(
-      provider.retrieve('claims', 'claim', 3),
-    ).rejects.toBeInstanceOf(KnowledgeBindingUnavailableError);
-    await expect(
-      provider.retrieve('claims', 'claim', 3, owner.id),
+      provider.retrieve({
+        tenantId: owner.id,
+        reference: { name: 'claims' },
+        query: 'claim',
+        limit: 3,
+      }),
     ).rejects.toBeInstanceOf(KnowledgeBindingUnavailableError);
     expect(calls).toBe(0);
 
-    expect(await markKnowledgeBindingVerified(db.pool, owner.id, 'claims')).toBe(true);
-    await provider.retrieve('claims', 'claim', 3, owner.id);
+    const binding = await getKnowledgeBinding(db.pool, owner.id, 'claims');
+    expect(
+      await markKnowledgeBindingVerified(db.pool, owner.id, 'claims', binding!.revision),
+    ).toBe(true);
+    await provider.retrieve({
+      tenantId: owner.id,
+      reference: { name: 'claims' },
+      query: 'claim',
+      limit: 3,
+    });
     expect(calls).toBe(1);
+  });
+
+  it('rebinds safely, resets verification, and rejects stale verification completion', async () => {
+    const tenant = await createTenant(db.pool, { name: 'Binding rotation' });
+    const original = await createKnowledgeBinding(db.pool, {
+      tenantId: tenant.id,
+      name: 'policies',
+      provider: 'agentkit',
+      providerProject: 'project-old',
+      providerCollection: 'collection-old',
+      liveVerifiedAt: new Date('2026-07-19T00:00:00Z'),
+    });
+
+    const rebound = await rebindKnowledgeBinding(db.pool, {
+      tenantId: tenant.id,
+      name: 'policies',
+      provider: 'agentkit',
+      providerProject: 'project-new',
+      providerCollection: 'collection-new',
+    });
+    expect(rebound.revision).toBe(original.revision + 1);
+    expect(rebound.status).toBe('active');
+    expect(rebound.live_verified_at).toBeNull();
+    expect(
+      await markKnowledgeBindingVerified(db.pool, tenant.id, 'policies', original.revision),
+    ).toBe(false);
+
+    expect(await disableKnowledgeBinding(db.pool, tenant.id, 'policies')).toBe(true);
+    expect(
+      await markKnowledgeBindingVerified(db.pool, tenant.id, 'policies', rebound.revision),
+    ).toBe(false);
   });
 
   it('registers logical names per tenant without exposing provider fields to lookup callers', async () => {
