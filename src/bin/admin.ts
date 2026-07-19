@@ -52,7 +52,15 @@ async function buildCipher(cfg: import('../config.js').Config) {
 
 async function main(): Promise<void> {
   const [, , resource, action, ...rest] = process.argv;
-  const cfg = loadConfig();
+  // Knowledge administration is the bootstrap path that establishes live
+  // verification. It must remain runnable while production workers/APIs are
+  // correctly refusing KNOWLEDGE_PROVIDER=agentkit. For these commands only,
+  // parse all credentials/database settings with the runtime provider off.
+  const cfg = loadConfig(
+    resource === 'knowledge'
+      ? { ...process.env, KNOWLEDGE_PROVIDER: 'none' }
+      : process.env,
+  );
   const pool = createPool(cfg.DATABASE_URL);
 
   try {
