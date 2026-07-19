@@ -399,8 +399,9 @@ partition.
 Map (per the byteplus-cloud skill's service selection): control API + workers +
 harness → veFaaS; sandbox → Cloud Sandbox; state → RDS PostgreSQL; artifacts →
 TOS; model → ModelArk; event bus → Message Queue for Kafka; secrets → KMS;
-memory/knowledge → AgentKit (VikingDB). Provisioning + credential helpers are in
-[`scripts/`](../scripts) and [`infra/resources.md`](../infra/resources.md); run
-`npm run preflight` to check every surface. **Note:** some BytePlus services need
+memory/knowledge → AgentKit (VikingDB). Provisioning and credential helpers are
+in [`scripts/`](../scripts); deployment-specific resource IDs belong in the
+private operator inventory. Run `npm run preflight` to check every surface.
+**Note:** some BytePlus services need
 a one-time console **activation** (KMS) or **service-linked-role** authorization
 (Kafka's `ServiceRoleForKafka`) before their APIs work — these are console-only.

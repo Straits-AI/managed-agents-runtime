@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+node_modules
+release-evidence
+scenarios/results
+coverage
+npm-debug.log*
+Dockerfile*
+!Dockerfile

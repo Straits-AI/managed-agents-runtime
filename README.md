@@ -23,6 +23,7 @@ Architecture and release boundaries:
 - [Kertas product boundary](./docs/KERTAS-PRODUCT-BOUNDARY.md)
 - [Kertas ↔ runtime contract](./docs/KERTAS-RUNTIME-CONTRACT.md)
 - [Engineering risk register](./docs/ENGINEERING-RISK-REGISTER.md)
+- [Controlled-alpha deployment and rollback](./docs/CONTROLLED-ALPHA-DEPLOYMENT.md)
 
 > **Release status:** the automated
 > [controlled multi-tenant alpha gate](./docs/CONTROLLED-ALPHA-RELEASE-GATE.md)
@@ -144,6 +145,22 @@ npm run release:gate   # dependency audit + controlled-alpha P0 evidence
 ```
 
 Then read the [Usage Guide](./docs/GUIDE.md) to drive agents through the API.
+
+### Controlled-alpha container
+
+The versioned image runs as a non-root user and exposes explicit process roles:
+
+```bash
+docker run --rm --env-file runtime.env \
+  ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.1 migrate
+
+docker run --rm --env-file runtime.env -p 8080:8080 \
+  ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.1 api
+```
+
+Deploy by the registry digest recorded in the GitHub prerelease, not by tag
+alone. See the [deployment and rollback runbook](./docs/CONTROLLED-ALPHA-DEPLOYMENT.md)
+for role, probe, migration, and rollback contracts.
 
 ## Connecting to BytePlus
 

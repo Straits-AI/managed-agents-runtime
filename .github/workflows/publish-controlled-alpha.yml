@@ -1,0 +1,144 @@
+name: Publish controlled alpha
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgres://postgres@127.0.0.1:5433/postgres
+      RELEASE_GATE_COMMIT: ${{ github.sha }}
+      RELEASE_VERSION: 0.1.0-alpha.1
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_COMMIT: ${{ github.sha }}
+      RELEASE_EVIDENCE_DIR: release-evidence/container
+      CONTAINER_IMAGE: managed-agents-runtime:${{ github.sha }}
+      REGISTRY_IMAGE: ghcr.io/straits-ai/managed-agents-runtime
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0, Node 24
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify tag, package, and changelog agreement
+        run: npm run release:version
+      - name: Run exact-tag controlled-alpha gate
+        run: npm run release:gate -- --evidence-dir release-evidence/kernel
+      - name: Build tagged image locally
+        run: >-
+          docker build
+          --build-arg VERSION="${RELEASE_VERSION}"
+          --build-arg REVISION="${RELEASE_COMMIT}"
+          --tag "${CONTAINER_IMAGE}"
+          .
+      - name: Smoke tagged image
+        run: npm run container:smoke
+      - name: Record local image and SBOM evidence
+        run: npm run container:evidence
+      - name: Authenticate to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: Initialize attestation-capable BuildKit builder
+        run: |
+          docker buildx create \
+            --name controlled-alpha-builder \
+            --driver docker-container \
+            --driver-opt image=moby/buildkit:buildx-stable-1@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec \
+            --use
+          docker buildx inspect --bootstrap
+      - name: Publish image with registry SBOM and provenance attestations
+        run: >-
+          docker buildx build
+          --platform linux/amd64
+          --build-arg VERSION="${RELEASE_VERSION}"
+          --build-arg REVISION="${RELEASE_COMMIT}"
+          --tag "${REGISTRY_IMAGE}:${RELEASE_TAG}"
+          --tag "${REGISTRY_IMAGE}:${RELEASE_VERSION}"
+          --attest=type=sbom,generator=docker/buildkit-syft-scanner:stable-1@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68
+          --attest=type=provenance,mode=max
+          --metadata-file release-evidence/registry-metadata.json
+          --push
+          .
+      - name: Record immutable registry digest
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          const metadata = JSON.parse(await readFile('release-evidence/registry-metadata.json', 'utf8'));
+          const digest = metadata['containerimage.digest'];
+          if (!/^sha256:[0-9a-f]{64}$/.test(digest ?? '')) {
+            throw new Error('BuildKit did not return a registry manifest digest');
+          }
+          const summary = {
+            schemaVersion: 1,
+            version: process.env.RELEASE_VERSION,
+            tag: process.env.RELEASE_TAG,
+            sourceCommit: process.env.RELEASE_COMMIT,
+            image: `${process.env.REGISTRY_IMAGE}@${digest}`,
+            manifestDigest: digest,
+            attestations: ['https://slsa.dev/provenance/v1', 'https://spdx.dev/Document'],
+            platform: 'linux/amd64',
+          };
+          await writeFile('release-evidence/registry-summary.json', `${JSON.stringify(summary, null, 2)}\n`);
+          await writeFile(
+            'release-evidence/release-notes.md',
+            `Controlled multi-tenant alpha. This is not a public-beta or production-ready release.\n\n` +
+            `OCI image: \`${summary.image}\`\n\n` +
+            `The registry manifest carries BuildKit SBOM and provenance attestations. ` +
+            `Download the attached CycloneDX application SBOM and exact-commit gate evidence for audit.\n`,
+          );
+          NODE
+      - name: Retain release evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
+        with:
+          name: controlled-alpha-release-${{ github.ref_name }}
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --prerelease \
+              --title "${RELEASE_TAG}" \
+              --notes-file release-evidence/release-notes.md
+          else
+            gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --prerelease \
+              --title "${RELEASE_TAG}" \
+              --notes-file release-evidence/release-notes.md
+          fi
+          gh release upload "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber \
+            release-evidence/registry-summary.json \
+            release-evidence/container/container-summary.json \
+            release-evidence/container/container-image.json \
+            release-evidence/container/container-sbom.cdx.json

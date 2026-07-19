@@ -1,8 +1,9 @@
 {
   "name": "managed-agents-runtime",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "type": "module",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "migrate": "tsx src/bin/migrate.ts",
     "test": "vitest run",
     "typecheck": "tsc",
@@ -13,7 +14,10 @@
     "relay": "tsx src/bin/relay.ts",
     "admin": "tsx src/bin/admin.ts",
     "bench:survival": "tsx bench/survival.ts",
-    "release:gate": "tsx scripts/release-gate.ts"
+    "release:gate": "tsx scripts/release-gate.ts",
+    "container:smoke": "tsx scripts/smoke-container.ts",
+    "container:evidence": "tsx scripts/write-container-evidence.ts",
+    "release:version": "tsx scripts/check-release-version.ts"
   },
   "dependencies": {
     "@agent-infra/sandbox": "^1.0.17",

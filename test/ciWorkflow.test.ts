@@ -1,12 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = join(import.meta.dirname, '..');
-const workflow = readFileSync(
-  join(root, '.github', 'workflows', 'controlled-alpha-gate.yml'),
-  'utf8',
-);
+const workflowsDir = join(root, '.github', 'workflows');
+const workflowSources = readdirSync(workflowsDir)
+  .filter((file) => /\.ya?ml$/.test(file))
+  .sort()
+  .map((file) => readFileSync(join(workflowsDir, file), 'utf8'));
 const provenance = readFileSync(
   join(root, 'docs', 'CONTROLLED-ALPHA-RELEASE-GATE.md'),
   'utf8',
@@ -32,12 +33,12 @@ const reviewedActions = [
 
 describe('controlled-alpha GitHub Actions supply chain', () => {
   it('uses only the reviewed Node 24-native actions at immutable SHAs', () => {
-    const references = [
+    const references = workflowSources.flatMap((workflow) => [
       ...workflow.matchAll(/^\s*(?:-\s*)?uses:\s*([^\s#]+)/gm),
-    ].map(([, reference]) => reference);
+    ].map(([, reference]) => reference!));
 
-    expect(references).toEqual(
-      reviewedActions.map(({ repository, sha }) => `${repository}@${sha}`),
+    expect([...new Set(references)].sort()).toEqual(
+      reviewedActions.map(({ repository, sha }) => `${repository}@${sha}`).sort(),
     );
 
     for (const { repository, tag, sha } of reviewedActions) {

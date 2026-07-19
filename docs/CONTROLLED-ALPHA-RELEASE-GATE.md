@@ -88,8 +88,19 @@ gate definition is retained as evidence rather than disappearing before the
 artifact step.
 
 The GitHub workflow runs the same command with a clean dependency install and a
-fresh PostgreSQL service. It uploads the evidence directory even when the gate
-fails, retaining the artifact for 30 days.
+fresh PostgreSQL service. It then verifies package/changelog version agreement,
+builds the non-root release image, exercises its migration/API/worker/relay/admin
+and health seams against a real containerized PostgreSQL instance, and generates
+the image plus CycloneDX SBOM evidence under `release-evidence/container/`. It
+uploads the evidence directory even when a later step fails, retaining the
+artifact for 30 days.
+
+The tag-only publication workflow repeats the exact-commit gate and container
+smoke before pushing an image. It uses digest-pinned Dockerfile, Node, BuildKit,
+and SBOM-scanner inputs; attaches native BuildKit SBOM and maximum-mode
+provenance to the registry manifest; and retains the registry digest and release
+evidence for 90 days. See
+[`CONTROLLED-ALPHA-DEPLOYMENT.md`](./CONTROLLED-ALPHA-DEPLOYMENT.md).
 
 ### GitHub Action provenance
 
