@@ -218,6 +218,11 @@ export async function executeGovernedAction<T extends Record<string, unknown>>(
         reason,
       };
     }
+    if (approval.status === 'EXPIRED') {
+      const reason = `approval expired for ${spec.action}`;
+      await auditDenial(ctx, spec, reason, 'approval');
+      return { kind: 'denied', reason };
+    }
     if (approval.status !== 'APPROVED') {
       return { kind: 'denied', reason: 'approval still pending' };
     }

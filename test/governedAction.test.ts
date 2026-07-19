@@ -305,7 +305,40 @@ describe('governed action pipeline', () => {
 
     expect(result.kind).toBe('suspend_approval');
     expect(dispatched).toBe(false);
-    expect(await listApprovals(db.pool, run.id, 'PENDING')).toHaveLength(1);
+    const [approval] = await listApprovals(db.pool, run.id, 'PENDING');
+    expect(approval).toBeDefined();
+
+    await db.pool.query(
+      `UPDATE approvals SET status = 'EXPIRED', decided_at = now() WHERE id = $1`,
+      [approval!.id],
+    );
+    const expired = await executeGovernedAction(context(run, attempt), {
+      connector: 'test',
+      action: 'connector.records.read',
+      resource: 'records',
+      args: { id: 'R-sensitive' },
+      classification: 'read',
+      requireGrant: true,
+      recovery: 'retry_with_idempotency',
+      dispatch: async () => {
+        dispatched = true;
+        return { value: {} };
+      },
+    });
+    expect(expired).toEqual({
+      kind: 'denied',
+      reason: 'approval expired for connector.records.read',
+    });
+    expect(dispatched).toBe(false);
+    const { rows } = await db.pool.query<{ payload: Record<string, unknown> }>(
+      `SELECT payload FROM run_events
+       WHERE run_id = $1 AND type = 'ActionDenied'`,
+      [run.id],
+    );
+    expect(rows.at(-1)?.payload).toMatchObject({
+      stage: 'approval',
+      reason: 'approval expired for connector.records.read',
+    });
   });
 
   it('marks uncertain mutation failures for reconciliation and will not redispatch them', async () => {
