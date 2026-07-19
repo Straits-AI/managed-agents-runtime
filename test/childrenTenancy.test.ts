@@ -13,6 +13,7 @@ import { authorizeAndConsume, listGrants } from '../src/store/grants.js';
 import { claimRun } from '../src/scheduler/claim.js';
 import { exitAttempt } from '../src/store/attempts.js';
 import { listEvents } from '../src/store/events.js';
+import { decideApproval, listApprovals } from '../src/store/approvals.js';
 import { WorkspaceManager } from '../src/harness/workspace.js';
 import { createRealEpoch } from '../src/harness/epoch.js';
 import { LocalSandboxProvider } from '../src/providers/local/localSandbox.js';
@@ -347,17 +348,75 @@ describe('delegated run tenancy and policy', () => {
       body: JSON.stringify({ id: 43 }),
       redirects: 0,
     }));
+    const recoveryContext = {
+      pool: db.pool,
+      cfg,
+      run: runningReplacement,
+      attempt: replacementClaim!.attempt,
+      sandbox: { sandboxId: 'unused', baseUrl: 'unused' },
+      sandboxProvider: sandbox,
+      objectStore,
+      http: { request: httpRequest },
+      step: 2,
+    };
+    const suspendedRecovery = await dispatchTool(
+      recoveryContext,
+      'external_http_request',
+      pendingArgs,
+    );
+    expect(suspendedRecovery.kind).toBe('suspend_approval');
+    expect(httpRequest).not.toHaveBeenCalled();
+    const [recoveryApproval] = await listApprovals(
+      db.pool,
+      replacement!.id,
+      'PENDING',
+    );
+    expect(recoveryApproval).toBeDefined();
+    await db.pool.query(
+      `UPDATE approvals SET status = 'EXPIRED', decided_at = clock_timestamp()
+       WHERE id = $1`,
+      [recoveryApproval!.id],
+    );
+    await withTransaction(db.pool, async (tx) => {
+      await transitionRun(tx, replacement!.id, {
+        expectFrom: ['WAITING_APPROVAL'],
+        to: 'QUEUED',
+        event: { type: 'ApprovalReceived', payload: { approvalId: recoveryApproval!.id } },
+      });
+      await transitionRun(tx, replacement!.id, {
+        expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' },
+      });
+      await transitionRun(tx, replacement!.id, {
+        expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' },
+      });
+    });
+    const expiredApprovalRun = await getRun(db.pool, replacement!.id);
+    const refreshed = await dispatchTool(
+      { ...recoveryContext, run: expiredApprovalRun! },
+      'external_http_request',
+      pendingArgs,
+    );
+    expect(refreshed.kind).toBe('suspend_approval');
+    const [freshApproval] = await listApprovals(db.pool, replacement!.id, 'PENDING');
+    expect(freshApproval?.id).not.toBe(recoveryApproval!.id);
+    await withTransaction(db.pool, async (tx) => {
+      await decideApproval(tx, freshApproval!.id, 'APPROVED', 'replacement-test');
+      await transitionRun(tx, replacement!.id, {
+        expectFrom: ['WAITING_APPROVAL'], to: 'QUEUED',
+        event: { type: 'ApprovalReceived', payload: { approvalId: freshApproval!.id } },
+      });
+      await transitionRun(tx, replacement!.id, {
+        expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' },
+      });
+      await transitionRun(tx, replacement!.id, {
+        expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' },
+      });
+    });
+    const resumedReplacement = await getRun(db.pool, replacement!.id);
     const recovered = await dispatchTool(
       {
-        pool: db.pool,
-        cfg,
-        run: runningReplacement,
-        attempt: replacementClaim!.attempt,
-        sandbox: { sandboxId: 'unused', baseUrl: 'unused' },
-        sandboxProvider: sandbox,
-        objectStore,
-        http: { request: httpRequest },
-        step: 2,
+        ...recoveryContext,
+        run: resumedReplacement!,
       },
       'external_http_request',
       pendingArgs,

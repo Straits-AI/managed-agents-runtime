@@ -49,6 +49,55 @@ export async function listApprovals(
   return rows;
 }
 
+/**
+ * Lock and revalidate an approval at the execution boundary using the database
+ * clock. An expired PENDING/APPROVED row is durably transitioned to EXPIRED so
+ * no worker can continue using a stale authorization decision.
+ */
+export async function lockApprovalForExecution(
+  tx: Tx,
+  input: {
+    approvalId: string;
+    runId: string;
+    action: string;
+    resource: string;
+    idempotencyKey: string;
+  },
+): Promise<ApprovalRow | null> {
+  const { rows } = await tx.query<ApprovalRow & { is_expired: boolean }>(
+    `SELECT a.*,
+            (a.expires_at IS NOT NULL AND a.expires_at <= clock_timestamp()) AS is_expired
+     FROM approvals a
+     WHERE a.id = $1 AND a.run_id = $2
+       AND a.action->>'action' = $3
+       AND a.action->>'resource' = $4
+       AND a.action->'arguments'->>'__idemKey' = $5
+     FOR UPDATE`,
+    [
+      input.approvalId,
+      input.runId,
+      input.action,
+      input.resource,
+      input.idempotencyKey,
+    ],
+  );
+  const approval = rows[0];
+  if (!approval) return null;
+  if (
+    approval.is_expired &&
+    (approval.status === 'PENDING' || approval.status === 'APPROVED')
+  ) {
+    const { rows: expired } = await tx.query<ApprovalRow>(
+      `UPDATE approvals SET status = 'EXPIRED'
+       WHERE id = $1 AND status IN ('PENDING', 'APPROVED')
+       RETURNING *`,
+      [approval.id],
+    );
+    return expired[0] ?? null;
+  }
+  return approval;
+}
+
 /** Decide a PENDING approval; returns null if it was not PENDING (idempotent-safe). */
 export async function decideApproval(
   tx: Tx,

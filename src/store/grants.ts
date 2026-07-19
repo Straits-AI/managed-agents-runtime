@@ -93,3 +93,24 @@ export async function authorizeAndConsume(
   );
   return { allowed: true, grant, requiresApproval: grant.requires_approval };
 }
+
+/**
+ * Revalidate the already-selected logical-call grant at the last dispatch
+ * boundary without consuming it a second time during receipt recovery.
+ */
+export async function revalidateGrantForDispatch(
+  tx: Tx,
+  input: { grantId: string; runId: string; action: string; resource: string },
+): Promise<boolean> {
+  const { rows } = await tx.query<CapabilityGrantEligibilityRow>(
+    `SELECT *, (expires_at IS NULL OR expires_at > clock_timestamp()) AS is_unexpired
+     FROM capability_grants WHERE id = $1 AND run_id = $2 FOR UPDATE`,
+    [input.grantId, input.runId],
+  );
+  const grant = rows[0];
+  return Boolean(
+    grant?.is_unexpired &&
+    patternMatches(grant.action_pattern, input.action) &&
+    patternMatches(grant.resource_pattern, input.resource),
+  );
+}

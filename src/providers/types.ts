@@ -24,6 +24,45 @@ export interface ToolDef {
   annotations?: { readOnlyHint?: boolean };
 }
 
+export type McpToolExecutionPolicy =
+  | { classification: 'read' }
+  | {
+      classification: 'mutation';
+      /**
+       * idempotent: callTool durably honors idempotencyKey;
+       * reconcile: reconcileTool authoritatively resolves a pending key;
+       * manual: an uncertain outcome stops for operator reconciliation.
+       */
+      recovery: 'idempotent' | 'reconcile' | 'manual';
+    };
+
+export interface McpCallContext {
+  idempotencyKey: string;
+  credential: { headerName: string; headerValue: string } | null;
+  signal: AbortSignal;
+  /** Provider adapters must enforce these limits before buffering responses. */
+  maxResponseBytes: number;
+  maxExternalTxnIdBytes: number;
+}
+
+export interface McpToolResult {
+  /** Streamed so the kernel can enforce limits before buffering the response. */
+  content: AsyncIterable<string | Uint8Array>;
+  externalTxnId?: string;
+}
+
+export type McpReconciliationResult =
+  | ({ status: 'committed' } & McpToolResult)
+  | {
+      status: 'not_found';
+      /**
+       * Certifies no current or future remote commit can occur for this key.
+       * Without this terminal guarantee the kernel must not redispatch.
+       */
+      terminal: true;
+    }
+  | { status: 'unknown' };
+
 export interface ModelProvider {
   chat(req: {
     model: string;
@@ -170,15 +209,23 @@ export interface SkillProvider {
  */
 export interface McpToolProvider {
   listTools(toolsetRef: string): Promise<ToolDef[]>;
+  /** Server-side adapter policy; do not infer mutation safety from model text. */
+  getToolExecutionPolicy(
+    toolsetRef: string,
+    name: string,
+  ): Promise<McpToolExecutionPolicy>;
   callTool(
     toolsetRef: string,
     name: string,
     args: Record<string, unknown>,
-    context: {
-      idempotencyKey: string;
-      credential: { headerName: string; headerValue: string } | null;
-    },
-  ): Promise<{ content: string }>;
+    context: McpCallContext,
+  ): Promise<McpToolResult>;
+  reconcileTool(
+    toolsetRef: string,
+    name: string,
+    args: Record<string, unknown>,
+    context: McpCallContext,
+  ): Promise<McpReconciliationResult>;
 }
 
 /**

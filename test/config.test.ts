@@ -154,4 +154,12 @@ describe('production configuration', () => {
       HTTP_EGRESS_ALLOWLIST: 'file:///etc/passwd',
     })).toThrow(/invalid HTTP egress allowlist origin/i);
   });
+
+  it('applies bounded MCP defaults', () => {
+    const cfg = loadConfig({});
+    expect(cfg.MCP_CALL_TIMEOUT_MS).toBe(30_000);
+    expect(cfg.MCP_MAX_RESPONSE_BYTES).toBe(1_048_576);
+    expect(cfg.MCP_MAX_EXTERNAL_TXN_ID_BYTES).toBe(1_024);
+    expect(cfg.HTTP_MAX_EXTERNAL_TXN_ID_BYTES).toBe(1_024);
+  });
 });

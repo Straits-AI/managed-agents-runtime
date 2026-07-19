@@ -106,7 +106,56 @@ explicit loopback sidecar.
 At connection time, every address returned for a plaintext sidecar must itself
 be loopback; trusting the configured `localhost` name alone is insufficient.
 Tune the bounds with `HTTP_CONNECT_TIMEOUT_MS`, `HTTP_TOTAL_TIMEOUT_MS`,
-`HTTP_MAX_REDIRECTS`, and `HTTP_MAX_RESPONSE_BYTES`.
+`HTTP_MAX_REDIRECTS`, `HTTP_MAX_RESPONSE_BYTES`, and
+`HTTP_MAX_EXTERNAL_TXN_ID_BYTES`. Worker cancellation is propagated through
+DNS and transport, and neither response bodies nor external transaction IDs
+may directly reflect scoped credential material into receipts or model context.
+
+### MCP execution and recovery contract
+
+Every MCP adapter must classify each tool before it is exposed to the model.
+The safe default is a **mutation with manual recovery**; only an explicit
+provider policy makes a tool read-only, idempotent, or reconcilable.
+
+Read tools still require their own action/resource grant and produce a
+reversible receipt and audit events, but they do not acquire mutation
+authority. All MCP calls and reconciliation responses are bounded by
+`MCP_CALL_TIMEOUT_MS`, `MCP_MAX_RESPONSE_BYTES`, and
+`MCP_MAX_EXTERNAL_TXN_ID_BYTES`. Provider adapters must enforce the byte
+limits while streaming, before buffering a response; the kernel validates the
+returned async byte stream chunk by chunk before it can reach a receipt or
+model context. An adapter that buffers an unbounded response before returning
+does not satisfy this interface contract.
+
+Mutations run through the common governed-action sequence:
+
+```text
+classification → validation → grant → approval → scoped credential
+→ PENDING receipt → provider dispatch → COMMITTED receipt → audit
+```
+
+Provider recovery policy defines the precise crash guarantee:
+
+- `idempotent`: recovery may call the tool again with the same stable
+  idempotency key. Exactly-once effect is claimed only when the provider has
+  been verified to durably honor that key.
+- `reconcile`: recovery asks the provider for the outcome associated with the
+  stable key. A committed result closes the existing receipt. `not_found`
+  permits dispatch only when the provider certifies that no present or future
+  commit can occur for the key; an unknown or failed reconciliation stops for
+  operator action.
+- `manual`: an uncertain PENDING mutation is never replayed automatically and
+  becomes `NEEDS_RECONCILIATION`.
+
+The built-in registry defaults unannotated tools to `mutation/manual`.
+Deployment adapters must prove their idempotency or reconciliation contract in
+provider conformance tests before selecting a stronger mode. Registry tool
+handlers never receive scoped credential plaintext, returned values are
+checked for accidental direct secret reflection, and provider exceptions are
+sanitized before they can enter worker logs. Fault-injection
+boundaries are available at `before_mcp_dispatch`,
+`after_mcp_remote_commit`, and `after_mcp_receipt_commit` when
+`HARNESS_ENABLE_FAULTS=1` (which shared deployments prohibit).
 
 ## 3. Drive an agent through the API
 
@@ -243,7 +292,9 @@ credential grant. The broker checks tenant, immutable agent version, run
 lineage, caller, purpose, action, resource, approval, expiry, and use limit.
 Consumption and its secret-free receipt are one database transaction; retries
 of the same logical action reuse that receipt rather than spending the grant
-again. The secret is stored encrypted (AES-256-GCM locally, or KMS ciphertext)
+again. If an expired approval is replaced, the new approval produces a distinct
+immutable credential-use receipt without double-consuming the same logical
+grant use. The secret is stored encrypted (AES-256-GCM locally, or KMS ciphertext)
 and never enters model context, tool results, or the audit ledger. Operators can
 inspect the non-secret trail with `npm run admin credential-receipt list
 <tenantId>`.

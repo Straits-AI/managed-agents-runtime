@@ -6,6 +6,8 @@ import type {
   CredentialProvider,
   KnowledgeProvider,
   McpToolProvider,
+  McpReconciliationResult,
+  McpToolResult,
   MemoryProvider,
   MemoryScope,
   KnowledgeReference,
@@ -20,7 +22,7 @@ import { appendEvent, transitionRun } from '../core/transition.js';
 import { listEvents } from '../store/events.js';
 import { spawnChildren } from '../scheduler/children.js';
 import { WORKSPACE_DIR } from './workspace.js';
-import { maybeCrash } from './faults.js';
+import { maybeCrash, type FaultPoint } from './faults.js';
 import { executeGovernedAction } from './governedAction.js';
 import { SafeHttpClient, assertPublicAddress } from '../net/safeHttp.js';
 
@@ -53,6 +55,10 @@ export interface ToolContext {
   credentials?: CredentialProvider;
   /** Bounded outbound transport; injectable for connector conformance tests. */
   http?: Pick<SafeHttpClient, 'request'>;
+  /** Test seam for crash boundaries; production uses hard-kill fault injection. */
+  injectFault?: (point: FaultPoint) => void;
+  /** Worker lease/cancellation signal propagated into governed provider calls. */
+  signal?: AbortSignal;
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -205,6 +211,143 @@ export const TOOL_DOCS = TOOL_DEFS.map(
 ).join('\n');
 
 const ACTION_NAME = 'external.http.request';
+
+class McpValidationError extends Error {}
+
+function injectFault(ctx: ToolContext, point: FaultPoint): void {
+  if (ctx.injectFault) ctx.injectFault(point);
+  else maybeCrash(ctx.cfg, ctx.run, point);
+}
+
+async function boundedMcpOperation<T>(
+  ctx: ToolContext,
+  parentSignal: AbortSignal,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const abortFromParent = () => controller.abort(parentSignal.reason);
+  parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  if (parentSignal.aborted) abortFromParent();
+  try {
+    const aborted = new Promise<never>((_resolve, reject) => {
+      const rejectOnAbort = () => reject(
+        controller.signal.reason instanceof Error
+          ? controller.signal.reason
+          : new Error('MCP call aborted'),
+      );
+      controller.signal.addEventListener('abort', rejectOnAbort, { once: true });
+      timer = setTimeout(() => {
+        controller.abort(
+          new Error(`MCP call deadline exceeded (${ctx.cfg.MCP_CALL_TIMEOUT_MS}ms)`),
+        );
+      }, ctx.cfg.MCP_CALL_TIMEOUT_MS);
+      if (controller.signal.aborted) rejectOnAbort();
+    });
+    if (controller.signal.aborted) return await aborted;
+    const value = await Promise.race([
+      operation(controller.signal),
+      aborted,
+    ]);
+    return value;
+  } finally {
+    clearTimeout(timer);
+    parentSignal.removeEventListener('abort', abortFromParent);
+  }
+}
+
+async function validateMcpResult(
+  value: unknown,
+  ctx: ToolContext,
+  credential: { headerName: string; headerValue: string } | null,
+): Promise<{ content: string; externalTxnId?: string }> {
+  if (!value || typeof value !== 'object') {
+    throw new McpValidationError('MCP provider returned a malformed result');
+  }
+  const candidate = value as Record<string, unknown>;
+  const stream = candidate.content as AsyncIterable<unknown> | undefined;
+  if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') {
+    throw new McpValidationError('MCP provider result content must be an async byte stream');
+  }
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of stream) {
+    if (typeof chunk !== 'string' && !(chunk instanceof Uint8Array)) {
+      throw new McpValidationError('MCP provider response stream yielded an invalid chunk');
+    }
+    const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk);
+    bytes += buffer.byteLength;
+    if (bytes > ctx.cfg.MCP_MAX_RESPONSE_BYTES) {
+      throw new McpValidationError(
+        `MCP response byte limit exceeded (${ctx.cfg.MCP_MAX_RESPONSE_BYTES})`,
+      );
+    }
+    chunks.push(buffer);
+  }
+  const content = Buffer.concat(chunks, bytes).toString('utf8');
+  if (
+    candidate.externalTxnId !== undefined &&
+    typeof candidate.externalTxnId !== 'string'
+  ) {
+    throw new McpValidationError('MCP provider external transaction ID must be a string');
+  }
+  const externalTxnId = candidate.externalTxnId as string | undefined;
+  if (
+    externalTxnId !== undefined &&
+    Buffer.byteLength(externalTxnId) > ctx.cfg.MCP_MAX_EXTERNAL_TXN_ID_BYTES
+  ) {
+    throw new McpValidationError(
+      `MCP external transaction ID byte limit exceeded (${ctx.cfg.MCP_MAX_EXTERNAL_TXN_ID_BYTES})`,
+    );
+  }
+  const secret = credential?.headerValue;
+  if (
+    secret &&
+    (content.includes(secret) || externalTxnId?.includes(secret))
+  ) {
+    throw new McpValidationError(
+      'MCP provider response contained scoped credential material',
+    );
+  }
+  return { content, ...(externalTxnId ? { externalTxnId } : {}) };
+}
+
+async function validateMcpReconciliation(
+  value: unknown,
+  ctx: ToolContext,
+): Promise<
+  | { status: 'committed'; content: string; externalTxnId?: string }
+  | { status: 'not_found'; terminal: true }
+  | { status: 'unknown' }
+> {
+  if (!value || typeof value !== 'object') {
+    throw new McpValidationError('MCP provider returned a malformed reconciliation result');
+  }
+  const candidate = value as Record<string, unknown>;
+  if (candidate.status === 'committed') {
+    return { status: 'committed', ...await validateMcpResult(candidate, ctx, null) };
+  }
+  if (candidate.status === 'not_found' && candidate.terminal === true) {
+    return { status: 'not_found', terminal: true };
+  }
+  if (candidate.status === 'unknown') return { status: 'unknown' };
+  throw new McpValidationError('MCP provider returned an invalid reconciliation status');
+}
+
+function mcpProviderContext(
+  ctx: ToolContext,
+  idempotencyKey: string,
+  credential: { headerName: string; headerValue: string } | null,
+  signal: AbortSignal,
+) {
+  return {
+    idempotencyKey,
+    credential,
+    signal,
+    maxResponseBytes: ctx.cfg.MCP_MAX_RESPONSE_BYTES,
+    maxExternalTxnIdBytes: ctx.cfg.MCP_MAX_EXTERNAL_TXN_ID_BYTES,
+  };
+}
 
 function resolvePath(path: string): string {
   return path.startsWith('/') ? path : `${WORKSPACE_DIR}/${path}`;
@@ -367,6 +510,7 @@ async function dispatchMcp(
       attempt: ctx.attempt,
       step: ctx.step,
       credentials: ctx.credentials,
+      signal: ctx.signal,
     },
     {
       connector: 'mcp',
@@ -376,20 +520,61 @@ async function dispatchMcp(
       args,
       classification: entry.classification,
       requireGrant: true,
-      // MCP has no idempotency/reconciliation protocol yet. Never blindly
-      // replay an uncertain mutation. Providers receive the stable key so a
-      // transport that supports idempotency can honor it; issue #8 adds
-      // provider-level conformance and reconciliation capabilities.
-      recovery: 'reconcile',
-      dispatch: async ({ idempotencyKey, credential }) => {
-        const result = await ctx.mcp!.callTool(
-          entry.toolsetRef,
-          entry.originalName,
-          args,
-          { idempotencyKey, credential },
-        );
+      recovery:
+        entry.classification === 'read' || entry.recovery === 'idempotent'
+          ? 'retry_with_idempotency'
+          : 'reconcile',
+      audit: { mcpRecovery: entry.recovery },
+      beforeDispatch: () => injectFault(ctx, 'before_mcp_dispatch'),
+      afterDispatch: () => injectFault(ctx, 'after_mcp_remote_commit'),
+      afterCommit: () => injectFault(ctx, 'after_mcp_receipt_commit'),
+      reconcile: entry.recovery === 'reconcile'
+        ? async ({ idempotencyKey, credential, signal: actionSignal }) => {
+            const validated = await boundedMcpOperation(ctx, actionSignal, async (signal) => {
+              let reconciled: McpReconciliationResult;
+              try {
+                reconciled = await ctx.mcp!.reconcileTool(
+                  entry.toolsetRef,
+                  entry.originalName,
+                  args,
+                  mcpProviderContext(ctx, idempotencyKey, credential, signal),
+                );
+                return await validateMcpReconciliation(reconciled, ctx);
+              } catch (error) {
+                if (signal.aborted && signal.reason instanceof Error) throw signal.reason;
+                if (error instanceof McpValidationError) throw error;
+                throw new Error('MCP provider reconciliation failed');
+              }
+            });
+            if (validated.status !== 'committed') return validated;
+            return {
+          status: 'committed' as const,
+          value: { content: validated.content },
+              externalTxnId: validated.externalTxnId,
+              audit: { reconciled: true },
+            };
+          }
+        : undefined,
+      dispatch: async ({ idempotencyKey, credential, signal: actionSignal }) => {
+        const validated = await boundedMcpOperation(ctx, actionSignal, async (signal) => {
+          let result: McpToolResult;
+          try {
+            result = await ctx.mcp!.callTool(
+              entry.toolsetRef,
+              entry.originalName,
+              args,
+              mcpProviderContext(ctx, idempotencyKey, credential, signal),
+            );
+            return await validateMcpResult(result, ctx, credential);
+          } catch (error) {
+            if (signal.aborted && signal.reason instanceof Error) throw signal.reason;
+            if (error instanceof McpValidationError) throw error;
+            throw new Error('MCP provider call failed');
+          }
+        });
         return {
-          value: result,
+          value: { content: validated.content },
+          externalTxnId: validated.externalTxnId,
         };
       },
     },
@@ -521,6 +706,7 @@ async function externalHttpRequest(
       attempt: ctx.attempt,
       step: ctx.step,
       credentials: ctx.credentials,
+      signal: ctx.signal,
     },
     {
       connector: 'http',
@@ -539,9 +725,9 @@ async function externalHttpRequest(
         );
         return checkUrlPolicy(url, privateOrigins.length > 0);
       },
-      beforeDispatch: () => maybeCrash(ctx.cfg, ctx.run, 'before_external_commit'),
-      afterCommit: () => maybeCrash(ctx.cfg, ctx.run, 'after_external_commit'),
-      dispatch: async ({ idempotencyKey, credential }) => {
+      beforeDispatch: () => injectFault(ctx, 'before_external_commit'),
+      afterCommit: () => injectFault(ctx, 'after_external_commit'),
+      dispatch: async ({ idempotencyKey, credential, signal }) => {
         // Model headers may add metadata, but reserved transport headers and
         // credentials always win and never enter the model-visible args.
         const headers: Record<string, string> = {};
@@ -582,7 +768,24 @@ async function externalHttpRequest(
               ? JSON.stringify(args.body)
               : undefined,
           privateOrigins,
+          signal,
         });
+        const externalTxnId = response.headers['x-transaction-id'];
+        if (
+          externalTxnId !== undefined &&
+          Buffer.byteLength(externalTxnId) > ctx.cfg.HTTP_MAX_EXTERNAL_TXN_ID_BYTES
+        ) {
+          throw new Error(
+            `HTTP external transaction ID byte limit exceeded (${ctx.cfg.HTTP_MAX_EXTERNAL_TXN_ID_BYTES})`,
+          );
+        }
+        if (
+          credential?.headerValue &&
+          (response.body.includes(credential.headerValue) ||
+            externalTxnId?.includes(credential.headerValue))
+        ) {
+          throw new Error('HTTP response contained scoped credential material');
+        }
         let parsedBody: unknown;
         try {
           parsedBody = JSON.parse(response.body);
@@ -592,7 +795,7 @@ async function externalHttpRequest(
         const result = { status: response.status, body: parsedBody };
         return {
           value: result,
-          externalTxnId: response.headers['x-transaction-id'],
+          externalTxnId,
           audit: { status: response.status },
         };
       },

@@ -170,6 +170,11 @@ describe('schema', () => {
     expect(grantTriggers.map((trigger) => trigger.tgname)).toContain(
       'credential_grants_subject_guard',
     );
+    const { rows: reauthorizationMigration } = await db.pool.query<{ name: string }>(
+      `SELECT name FROM schema_migrations
+       WHERE name = '0015_credential_reauthorization_receipts.sql'`,
+    );
+    expect(reauthorizationMigration).toHaveLength(1);
   });
 });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createTestDb, type TestDb } from './helpers/db.js';
 import { startExternalSystem, type ExternalSystem } from '../bench/externalSystem.js';
 import { withTransaction } from '../src/db/tx.js';
@@ -66,6 +66,7 @@ async function runningRun(
       to: 'STARTING',
       event: { type: 'AttemptStarted' },
       attemptId,
+      patch: { current_attempt_id: attemptId },
     });
     return transitionRun(tx, run.id, {
       expectFrom: ['STARTING'],
@@ -190,6 +191,45 @@ describe('external.http.request', () => {
       method: 'POST',
       status: 201,
     });
+  });
+
+  it('rejects credential reflection and oversized transaction IDs before durable commit', async () => {
+    const secret = 'http-transport-secret';
+    for (const mode of ['body', 'transaction-id'] as const) {
+      const { run, attempt } = await runningRun([{
+        action: 'external.http.*', resource: external.url,
+      }]);
+      const responseHeaders: Record<string, string> = mode === 'body'
+        ? { 'content-type': 'application/json' }
+        : { 'x-transaction-id': `${secret}${'x'.repeat(2_000)}` };
+      const request = vi.fn(async () => ({
+        status: 200,
+        headers: responseHeaders,
+        body: mode === 'body' ? JSON.stringify({ echoed: secret }) : '{}',
+        redirects: 0,
+      }));
+      await expect(dispatchTool({
+        ...ctx(run, attempt),
+        http: { request },
+        credentials: {
+          resolve: async () => ({ headerName: 'authorization', headerValue: secret }),
+        },
+      }, 'external_http_request', {
+        method: 'POST', url: `${external.url}/sensitive`, body: { ok: true },
+      })).rejects.toThrow(mode === 'body'
+        ? /contained scoped credential material/i
+        : /transaction ID byte limit/i);
+      const { rows } = await db.pool.query(
+        `SELECT result AS data FROM tool_receipts WHERE run_id = $1
+         UNION ALL SELECT payload AS data FROM run_events WHERE run_id = $1`,
+        [run.id],
+      );
+      expect(JSON.stringify(rows)).not.toContain(secret);
+      const { rows: receipts } = await db.pool.query<{ status: string }>(
+        'SELECT status FROM tool_receipts WHERE run_id = $1', [run.id],
+      );
+      expect(receipts).toEqual([{ status: 'PENDING' }]);
+    }
   });
 
   it('consumes the exact-origin grant instead of a wildcard for private egress', async () => {

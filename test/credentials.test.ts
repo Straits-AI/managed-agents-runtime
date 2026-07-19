@@ -581,6 +581,46 @@ describe('credential broker', () => {
     expect(await broker.resolve({ ...request(subject, 'wrong-action'), approvalId, resource: 'https://evil.com' })).toBeNull();
   });
 
+  it('records a distinct immutable receipt when a logical use is reauthorized', async () => {
+    const subject = await execution('approval-reauthorization');
+    const credential = await createCredential(db.pool, {
+      tenantId: subject.tenantId, name: 'gh', action: '*', resource: '*',
+      headerName: 'Authorization', secret: 'reauthorized', cipher,
+    });
+    const grant = await createCredentialGrant(db.pool, {
+      tenantId: subject.tenantId, credentialId: credential.id,
+      agentVersionId: subject.agentVersionId, runId: subject.run.id,
+      caller: '*', purpose: '*', action: '*', resource: '*',
+      requiresApproval: true, maxUses: 1,
+    });
+    const approvedRequest = request(subject, 'reauthorized-logical-use');
+    const approvalIds = [newId('apr'), newId('apr')];
+    for (const approvalId of approvalIds) {
+      await db.pool.query(
+        `INSERT INTO approvals (id, run_id, action, status, decision_by, decided_at)
+         VALUES ($1,$2,$3,'APPROVED','reviewer',clock_timestamp())`,
+        [approvalId, subject.run.id, JSON.stringify({
+          action: approvedRequest.action,
+          resource: approvedRequest.resource,
+          arguments: { __idemKey: approvedRequest.idempotencyKey },
+          risk: 'external_write',
+        })],
+      );
+    }
+    const broker = new CredentialBroker(db.pool, cipher);
+    expect(await broker.resolve({ ...approvedRequest, approvalId: approvalIds[0] }))
+      .not.toBeNull();
+    expect(await broker.resolve({ ...approvedRequest, approvalId: approvalIds[1] }))
+      .not.toBeNull();
+    const receipts = (await listCredentialUseReceipts(db.pool, subject.tenantId))
+      .filter((receipt) => receipt.idempotency_key === approvedRequest.idempotencyKey);
+    expect(receipts.map((receipt) => receipt.approval_id)).toEqual(approvalIds);
+    const { rows } = await db.pool.query<{ uses: number }>(
+      'SELECT uses FROM credential_grants WHERE id = $1', [grant.id],
+    );
+    expect(rows[0]?.uses).toBe(1);
+  });
+
   it('rejects an approval that expires while credential policy locks are blocked', async () => {
     const subject = await execution('approval-expiry-fence');
     const credential = await createCredential(db.pool, {

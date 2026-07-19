@@ -39,6 +39,10 @@ const configSchema = z.object({
   HTTP_TOTAL_TIMEOUT_MS: intFromEnv(30_000),
   HTTP_MAX_REDIRECTS: z.coerce.number().int().min(0).default(3),
   HTTP_MAX_RESPONSE_BYTES: intFromEnv(1_048_576),
+  HTTP_MAX_EXTERNAL_TXN_ID_BYTES: intFromEnv(1_024),
+  MCP_CALL_TIMEOUT_MS: intFromEnv(30_000),
+  MCP_MAX_RESPONSE_BYTES: intFromEnv(1_048_576),
+  MCP_MAX_EXTERNAL_TXN_ID_BYTES: intFromEnv(1_024),
 
   ARK_API_KEY: z.string().optional(),
   ARK_BASE_URL: z.string().default('https://ark.ap-southeast.bytepluses.com/api/v3'),

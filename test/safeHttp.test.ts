@@ -203,6 +203,35 @@ describe('egress address policy', () => {
 });
 
 describe('bounded redirects and transport', () => {
+  it('honors an already-aborted request signal before DNS or transport', async () => {
+    let resolved = false;
+    const controller = new AbortController();
+    controller.abort(new Error('caller cancelled'));
+    const client = new SafeHttpClient(policy(), {
+      resolver: async () => {
+        resolved = true;
+        return [{ address: '93.184.216.34', family: 4 }];
+      },
+    });
+    await expect(client.request({
+      url: 'https://cancelled.example/', method: 'GET', signal: controller.signal,
+    })).rejects.toThrow('caller cancelled');
+    expect(resolved).toBe(false);
+  });
+
+  it('aborts an in-flight response when the caller signal fires', async () => {
+    const { origin } = await httpServer((_req, res) => {
+      setTimeout(() => res.end('late'), 200);
+    });
+    const controller = new AbortController();
+    const request = new SafeHttpClient(policy()).request({
+      url: `${origin}/slow`, method: 'GET', privateOrigins: [origin],
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(new Error('lease lost')), 20);
+    await expect(request).rejects.toThrow('lease lost');
+  });
+
   it('revalidates each redirect and denies metadata destinations', async () => {
     const { origin } = await httpServer((_req, res) => {
       res.statusCode = 302;

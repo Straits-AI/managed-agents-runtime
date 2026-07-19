@@ -28,6 +28,7 @@ export interface SafeHttpRequest {
   body?: string;
   /** Exact origins explicitly authorized to reach non-public address space. */
   privateOrigins?: string[];
+  signal?: AbortSignal;
 }
 
 export interface SafeHttpResponse {
@@ -219,6 +220,7 @@ export class SafeHttpClient {
   }
 
   async request(input: SafeHttpRequest): Promise<SafeHttpResponse> {
+    if (input.signal?.aborted) throw cancellationError(input.signal);
     const deadline = Date.now() + this.policy.totalTimeoutMs;
     let target = this.parseTarget(input.url);
     let method = input.method.toUpperCase();
@@ -232,7 +234,11 @@ export class SafeHttpClient {
         target,
         privateOrigins.has(target.origin),
         deadline,
+        true,
+        false,
+        input.signal,
       );
+      if (input.signal?.aborted) throw cancellationError(input.signal);
       let transportUrl = target;
       let transportAddress = targetAddress;
       if (this.policy.proxyUrl) {
@@ -245,6 +251,7 @@ export class SafeHttpClient {
           deadline,
           false,
           transportUrl.protocol === 'http:',
+          input.signal,
         );
         // The controlled proxy MUST connect to this already-validated address
         // while preserving target URL host/SNI. Re-resolving the hostname at
@@ -263,6 +270,7 @@ export class SafeHttpClient {
         headers,
         body,
         totalTimeoutMs: remaining,
+        signal: input.signal,
       });
       const location = response.headers.location;
       if (![301, 302, 303, 307, 308].includes(response.status) || !location) {
@@ -309,6 +317,7 @@ export class SafeHttpClient {
     deadline: number,
     enforceAllowlist = true,
     requireLoopback = false,
+    signal?: AbortSignal,
   ): Promise<ResolvedAddress> {
     if (enforceAllowlist && this.policy.allowedOrigins.length > 0 &&
       !this.policy.allowedOrigins.some((pattern) => matchesOrigin(pattern, url))) {
@@ -317,6 +326,12 @@ export class SafeHttpClient {
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error('HTTP total deadline exceeded');
     let timer: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
+    const abort = new Promise<never>((_resolve, reject) => {
+      abortListener = () => reject(cancellationError(signal!));
+      signal?.addEventListener('abort', abortListener, { once: true });
+      if (signal?.aborted) abortListener();
+    });
     const answers = await Promise.race([
       this.resolver(normalizedHostname(url)),
       new Promise<never>((_resolve, reject) => {
@@ -325,7 +340,11 @@ export class SafeHttpClient {
           remaining,
         );
       }),
-    ]).finally(() => clearTimeout(timer));
+      abort,
+    ]).finally(() => {
+      clearTimeout(timer);
+      if (abortListener) signal?.removeEventListener('abort', abortListener);
+    });
     if (answers.length === 0) throw new Error(`DNS returned no addresses for ${url.hostname}`);
     for (const answer of answers) {
       if (isIP(answer.address) !== answer.family) {
@@ -351,14 +370,18 @@ export class SafeHttpClient {
     headers: Record<string, string>;
     body?: string;
     totalTimeoutMs: number;
+    signal?: AbortSignal;
   }): Promise<Omit<SafeHttpResponse, 'redirects'>> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let request: ReturnType<typeof httpRequest>;
+      const abort = () => request?.destroy(cancellationError(input.signal!));
       const finish = <T>(fn: (value: T) => void, value: T) => {
         if (settled) return;
         settled = true;
         clearTimeout(totalTimer);
         clearTimeout(connectTimer);
+        input.signal?.removeEventListener('abort', abort);
         fn(value);
       };
       const fail = (error: Error) => finish(reject, error);
@@ -379,7 +402,7 @@ export class SafeHttpClient {
           callback(null, input.address.address, input.address.family);
         },
       };
-      const request = (input.url.protocol === 'https:' ? httpsRequest : httpRequest)(
+      request = (input.url.protocol === 'https:' ? httpsRequest : httpRequest)(
         options,
         (response) => {
           const chunks: Buffer[] = [];
@@ -410,8 +433,19 @@ export class SafeHttpClient {
         socket.once(connectedEvent, () => clearTimeout(connectTimer));
       });
       request.once('error', fail);
+      input.signal?.addEventListener('abort', abort, { once: true });
+      if (input.signal?.aborted) {
+        abort();
+        return;
+      }
       if (input.body !== undefined) request.write(input.body);
       request.end();
     });
   }
+}
+
+function cancellationError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error('HTTP request cancelled');
 }
