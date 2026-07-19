@@ -16,7 +16,9 @@ export type IdPrefix =
   | 'kbnd' // tenant-owned knowledge binding
   | 'tnt'  // tenant
   | 'key'  // api key
-  | 'cred'; // credential
+  | 'cred' // credential
+  | 'cgr'  // credential grant
+  | 'cuse'; // credential use receipt
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${ulid().toLowerCase()}`;

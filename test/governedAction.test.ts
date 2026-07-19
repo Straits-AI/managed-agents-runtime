@@ -89,9 +89,13 @@ describe('governed action pipeline', () => {
       { action: 'connector.records.read', resource: 'records', maxCalls: 1 },
     ]);
     const seen: Record<string, unknown> = {};
+    let credentialRequest: Parameters<CredentialProvider['resolve']>[0] | undefined;
     const result = await executeGovernedAction(
       context(run, attempt, {
-        resolve: async () => ({ headerName: 'authorization', headerValue: 'secret' }),
+        resolve: async (input) => {
+          credentialRequest = input;
+          return { headerName: 'authorization', headerValue: 'secret' };
+        },
       }),
       {
       connector: 'test',
@@ -128,6 +132,16 @@ describe('governed action pipeline', () => {
       credential: { headerName: 'authorization', headerValue: 'secret' },
     });
     expect(String(seen.idempotencyKey)).toHaveLength(64);
+    expect(credentialRequest).toMatchObject({
+      tenantId: 'default',
+      runId: run.id,
+      attemptId: attempt.id,
+      caller: 'test',
+      purpose: 'connector.records.read',
+      action: 'connector.records.read',
+      resource: 'records',
+      idempotencyKey: seen.idempotencyKey,
+    });
     expect((await listGrants(db.pool, run.id))[0]?.calls_used).toBe(1);
     const { rows: receipts } = await db.pool.query<{
       id: string;

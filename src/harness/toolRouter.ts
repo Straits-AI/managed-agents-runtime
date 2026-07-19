@@ -366,6 +366,7 @@ async function dispatchMcp(
     },
     {
       connector: 'mcp',
+      purpose: 'mcp.tool_call',
       action,
       resource,
       args,
@@ -505,6 +506,7 @@ async function externalHttpRequest(
     },
     {
       connector: 'http',
+      purpose: 'http.request',
       action: ACTION_NAME,
       resource,
       args,

@@ -178,12 +178,30 @@ npm run admin credential create <tenantId> \
   --name github --action external.http.request \
   --resource https://api.github.com --header Authorization \
   --value "Bearer ghp_…" --max-uses 100
+
+# A vault entry is inert until it is bound to an immutable agent version and
+# originating run. Caller and purpose are independent policy dimensions.
+npm run admin credential-grant create <tenantId> \
+  --credential <credentialId> --agent-version <agentVersionId> --run <runId> \
+  --caller http --purpose http.request \
+  --action external.http.request --resource https://api.github.com \
+  --max-uses 20
+
+# These are opt-in; child and fork inheritance is denied by default:
+#   --allow-delegated-runs  --allow-forks
+# Approval-gated secret release additionally requires:
+#   --requires-approval
 ```
 
-At tool time, a run with a matching capability **grant** for the action+resource
-gets the credential injected (verified by tenant + action + resource + expiry +
-call-limit). The secret is stored encrypted (AES-256-GCM locally, or KMS
-ciphertext) and never enters model context, tool results, or the audit ledger.
+At tool time, the run must satisfy both its capability grant and a separate
+credential grant. The broker checks tenant, immutable agent version, run
+lineage, caller, purpose, action, resource, approval, expiry, and use limit.
+Consumption and its secret-free receipt are one database transaction; retries
+of the same logical action reuse that receipt rather than spending the grant
+again. The secret is stored encrypted (AES-256-GCM locally, or KMS ciphertext)
+and never enters model context, tool results, or the audit ledger. Operators can
+inspect the non-secret trail with `npm run admin credential-receipt list
+<tenantId>`.
 
 ### Tenant-bound AgentKit Knowledge
 
