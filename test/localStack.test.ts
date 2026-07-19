@@ -7,7 +7,10 @@ import { withTransaction } from '../src/db/tx.js';
 import { createAgentDefinition, createAgentVersion } from '../src/store/agents.js';
 import { createRun } from '../src/store/runs.js';
 import { FsObjectStore } from '../src/providers/local/fsObjectStore.js';
-import { LocalSandboxProvider } from '../src/providers/local/localSandbox.js';
+import {
+  LocalSandboxProvider,
+  mapSandboxText,
+} from '../src/providers/local/localSandbox.js';
 import { WorkspaceManager, WORKSPACE_DIR } from '../src/harness/workspace.js';
 import { newId } from '../src/ids.js';
 import type { RunRow } from '../src/core/types.js';
@@ -51,6 +54,17 @@ async function attemptFor(runId: string): Promise<string> {
 }
 
 describe('local execution stack (no BytePlus)', () => {
+  it('maps logical paths exactly once when the sandbox root is under /tmp', () => {
+    const root = '/tmp/ma-local-linux-root';
+
+    expect(mapSandboxText(root, `mkdir -p ${WORKSPACE_DIR}`)).toBe(
+      `mkdir -p ${root}/workspace`,
+    );
+    expect(mapSandboxText(root, 'cp /tmp/input.txt /tmp/output.txt')).toBe(
+      `cp ${root}/tmp/input.txt ${root}/tmp/output.txt`,
+    );
+  });
+
   it('FsObjectStore round-trips objects and presigned URLs', async () => {
     await store.put('k/a.txt', Buffer.from('hello'));
     expect((await store.get('k/a.txt')).toString()).toBe('hello');
