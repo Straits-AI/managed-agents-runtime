@@ -107,24 +107,3 @@ export async function tenantUsage(
     since,
   };
 }
-
-/** Count a tenant's runs that are not in a terminal state (for concurrency quota). */
-export async function countActiveRuns(pool: Pool, tenantId: string): Promise<number> {
-  const { rows } = await pool.query<{ n: string }>(
-    `SELECT COUNT(*) AS n FROM runs
-     WHERE tenant_id = $1 AND status <> ALL($2::text[])`,
-    [tenantId, ['COMPLETED', 'FAILED', 'CANCELLED']],
-  );
-  return Number(rows[0]!.n);
-}
-
-/** Sum a tenant's tokens_used across runs created since the start of the UTC day. */
-export async function tenantTokensToday(pool: Pool, tenantId: string): Promise<bigint> {
-  const since = new Date(new Date().toISOString().slice(0, 10)).toISOString();
-  const { rows } = await pool.query<{ total: string }>(
-    `SELECT COALESCE(SUM(tokens_used), 0) AS total
-     FROM runs WHERE tenant_id = $1 AND created_at >= $2`,
-    [tenantId, since],
-  );
-  return BigInt(rows[0]!.total);
-}

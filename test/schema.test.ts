@@ -54,7 +54,7 @@ describe('schema', () => {
     );
     await db.pool.query(
       `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
-       VALUES ($1, 'default', $2, 'g', 'CREATED')`,
+       VALUES ($1, 'default', $2, 'g', 'COMPLETED')`,
       [runId, avId],
     );
     await db.pool.query(
@@ -86,7 +86,7 @@ describe('schema', () => {
     );
     await db.pool.query(
       `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
-       VALUES ($1, 'default', $2, 'g', 'CREATED')`,
+       VALUES ($1, 'default', $2, 'g', 'COMPLETED')`,
       [runId, avId],
     );
     await db.pool.query(
@@ -105,6 +105,41 @@ describe('schema', () => {
 
     await insertReceipt(newId('rcpt'));
     await expect(insertReceipt(newId('rcpt'))).rejects.toThrow(/duplicate key/);
+  });
+
+  it('rejects a legacy non-terminal run insert that omits admission', async () => {
+    const adId = newId('ad');
+    const avId = newId('av');
+    const runId = newId('run');
+    await db.pool.query(`INSERT INTO agent_definitions (id, name) VALUES ($1, $2)`, [
+      adId,
+      `agent-${adId}`,
+    ]);
+    await db.pool.query(
+      `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+       VALUES ($1, $2, 1, 'x', '{}')`,
+      [avId, adId],
+    );
+
+    await expect(
+      db.pool.query(
+        `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+         VALUES ($1, 'default', $2, 'legacy writer', 'CREATED')`,
+        [runId, avId],
+      ),
+    ).rejects.toThrow(/requires an active admission/);
+    const { rows } = await db.pool.query('SELECT id FROM runs WHERE id = $1', [runId]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('installs the partial model-usage index used during admission', async () => {
+    const { rows } = await db.pool.query<{ indexdef: string }>(
+      `SELECT indexdef FROM pg_indexes
+       WHERE schemaname = current_schema()
+         AND indexname = 'run_events_model_usage_created'`,
+    );
+    expect(rows[0]?.indexdef).toContain('ModelInvocationCompleted');
+    expect(rows[0]?.indexdef).toContain('created_at');
   });
 });
 
@@ -232,6 +267,158 @@ describe('knowledge-binding migration', () => {
                    'agentkit', 'project-b', 'collection-b')`,
         ),
       ).rejects.toThrow(/duplicate key/);
+    } finally {
+      await legacy.drop();
+    }
+  });
+});
+
+describe('run-admission migration', () => {
+  it('backfills only non-terminal runs with constrained reservations', async () => {
+    const legacy = await createTestDb({ through: '0012_knowledge_bindings.sql' });
+    try {
+      await legacy.pool.query(
+        `INSERT INTO tenants (id, name, daily_token_budget)
+         VALUES ('tenant_admission_upgrade', 'Admission upgrade', 500)`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_definitions (id, tenant_id, name)
+         VALUES ('ad_admission_upgrade', 'tenant_admission_upgrade', 'admission-agent')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+         VALUES ('av_admission_upgrade', 'ad_admission_upgrade', 1, 'x', '{}')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs
+           (id, tenant_id, agent_version_id, goal, status, token_budget)
+         VALUES
+           ('run_admission_active_a', 'tenant_admission_upgrade', 'av_admission_upgrade',
+            'active-a', 'QUEUED', 200),
+           ('run_admission_active_b', 'tenant_admission_upgrade', 'av_admission_upgrade',
+            'active-b', 'WAITING_SIGNAL', 300),
+           ('run_admission_terminal', 'tenant_admission_upgrade', 'av_admission_upgrade',
+            'terminal', 'COMPLETED', 456)`,
+      );
+
+      await expect(legacy.applyRemainingMigrations()).resolves.toContain(
+        '0013_run_admissions.sql',
+      );
+      const { rows } = await legacy.pool.query<{
+        run_id: string;
+        kind: string;
+        status: string;
+        reserved_tokens: string;
+        token_budget: string;
+      }>(
+         `SELECT a.run_id, a.kind, a.status, a.reserved_tokens, r.token_budget
+         FROM run_admissions a JOIN runs r ON r.id = a.run_id
+         WHERE a.tenant_id = 'tenant_admission_upgrade' ORDER BY a.run_id`,
+      );
+      expect(rows).toEqual([
+        {
+          run_id: 'run_admission_active_a',
+          kind: 'direct',
+          status: 'active',
+          reserved_tokens: '200',
+          token_budget: '200',
+        },
+        {
+          run_id: 'run_admission_active_b',
+          kind: 'direct',
+          status: 'active',
+          reserved_tokens: '300',
+          token_budget: '300',
+        },
+      ]);
+      await expect(
+        legacy.pool.query(
+          `INSERT INTO run_admissions
+             (run_id, tenant_id, kind, reserved_tokens)
+           VALUES ('run_admission_terminal', 'tenant_admission_upgrade', 'unknown', 0)`,
+        ),
+      ).rejects.toThrow(/check constraint/);
+      await expect(
+        legacy.pool.query(
+          `INSERT INTO run_admissions
+             (run_id, tenant_id, kind, reserved_tokens)
+           VALUES ('run_admission_terminal', 'default', 'direct', 0)`,
+        ),
+      ).rejects.toThrow(/foreign key/);
+    } finally {
+      await legacy.drop();
+    }
+  });
+
+  it('fails safely when legacy active budgets cannot fit the tenant quota', async () => {
+    const legacy = await createTestDb({ through: '0012_knowledge_bindings.sql' });
+    try {
+      await legacy.pool.query(
+        `INSERT INTO tenants (id, name, daily_token_budget)
+         VALUES ('tenant_admission_unsafe', 'Unsafe admission upgrade', 500)`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_definitions (id, tenant_id, name)
+         VALUES ('ad_admission_unsafe', 'tenant_admission_unsafe', 'unsafe-agent')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+         VALUES ('av_admission_unsafe', 'ad_admission_unsafe', 1, 'x', '{}')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs
+           (id, tenant_id, agent_version_id, goal, status, token_budget)
+         VALUES
+           ('run_admission_unsafe_a', 'tenant_admission_unsafe', 'av_admission_unsafe',
+            'a', 'QUEUED', 300),
+           ('run_admission_unsafe_b', 'tenant_admission_unsafe', 'av_admission_unsafe',
+            'b', 'QUEUED', 300)`,
+      );
+      await expect(legacy.applyRemainingMigrations()).rejects.toThrow(
+        /finite aggregate token budgets within the tenant quota/,
+      );
+      const { rows } = await legacy.pool.query<{ exists: boolean }>(
+        `SELECT to_regclass('public.run_admissions') IS NOT NULL AS exists`,
+      );
+      expect(rows[0]?.exists).toBe(false);
+    } finally {
+      await legacy.drop();
+    }
+  });
+
+  it('includes tokens already consumed today when validating legacy capacity', async () => {
+    const legacy = await createTestDb({ through: '0012_knowledge_bindings.sql' });
+    try {
+      await legacy.pool.query(
+        `INSERT INTO tenants (id, name, daily_token_budget)
+         VALUES ('tenant_admission_spent', 'Spent admission upgrade', 500)`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_definitions (id, tenant_id, name)
+         VALUES ('ad_admission_spent', 'tenant_admission_spent', 'spent-agent')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+         VALUES ('av_admission_spent', 'ad_admission_spent', 1, 'x', '{}')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs
+           (id, tenant_id, agent_version_id, goal, status, token_budget, tokens_used)
+         VALUES
+           ('run_admission_spent_terminal', 'tenant_admission_spent',
+            'av_admission_spent', 'spent', 'COMPLETED', 400, 400),
+           ('run_admission_spent_active', 'tenant_admission_spent',
+            'av_admission_spent', 'active', 'QUEUED', 300, 0)`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO run_events (run_id, seq, type, payload)
+         VALUES ('run_admission_spent_terminal', 1, 'ModelInvocationCompleted',
+                 '{"usage":{"inputTokens":400,"outputTokens":0}}')`,
+      );
+
+      await expect(legacy.applyRemainingMigrations()).rejects.toThrow(
+        /finite aggregate token budgets within the tenant quota/,
+      );
     } finally {
       await legacy.drop();
     }

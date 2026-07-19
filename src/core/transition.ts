@@ -1,6 +1,8 @@
 import type { Tx } from '../db/tx.js';
 import type { EventType, RunRow, RunStatus } from './types.js';
-import { InvalidTransitionError, isTransitionAllowed } from './stateMachine.js';
+import { InvalidTransitionError, isTerminal, isTransitionAllowed } from './stateMachine.js';
+import { releaseRunAdmission } from '../store/admissions.js';
+import { MODEL_INVOCATION_LOCK_SEED } from './locks.js';
 
 /**
  * The single choke point for run state changes (memo §11, §12).
@@ -82,6 +84,16 @@ export async function transitionRun(
   runId: string,
   opts: TransitionOptions,
 ): Promise<RunRow> {
+  if (isTerminal(opts.to)) {
+    // A provider call may outlive its worker lease. Terminal transitions wait
+    // for that call to finish and record actual usage before releasing the
+    // run's admission capacity. Every model completion takes this same lock
+    // before the run-row lock, preserving a single lock order.
+    await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, $2))', [
+      runId,
+      MODEL_INVOCATION_LOCK_SEED,
+    ]);
+  }
   const run = await lockRun(tx, runId);
 
   if (!opts.expectFrom.includes(run.status)) {
@@ -129,6 +141,9 @@ export async function transitionRun(
       patch.awaited_signal ?? null,
     ],
   );
+  if (isTerminal(opts.to)) {
+    await releaseRunAdmission(tx, runId, `run_${opts.to.toLowerCase()}`);
+  }
   return rows[0]!;
 }
 

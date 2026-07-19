@@ -3,6 +3,11 @@ import type { Tx } from '../db/tx.js';
 import type { RunRow } from '../core/types.js';
 import { transitionRun } from '../core/transition.js';
 import { newId } from '../ids.js';
+import {
+  prepareRunAdmission,
+  recordRunAdmission,
+  type RunAdmissionKind,
+} from './admissions.js';
 
 type Q = Pool | Tx;
 
@@ -43,12 +48,20 @@ export interface CreateRunInput {
   debugFaultPoints?: string[];
 }
 
+function admissionKind(input: CreateRunInput): RunAdmissionKind {
+  if (input.replacesRunId) return 'replacement';
+  if (input.parentRunId) return 'delegated';
+  if (input.forkedFromRunId) return 'fork';
+  return 'direct';
+}
+
 /**
  * Create a run and drive it CREATED → RESOLVING → QUEUED in one
  * transaction (Phase 1 "resolving" only pins the agent version, which is
  * already immutable, and materializes capability grants).
  */
 export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> {
+  const capacity = await prepareRunAdmission(tx, input);
   const { rows: ownedVersions } = await tx.query<{ id: string }>(
     `SELECT av.id
      FROM agent_versions av
@@ -79,7 +92,7 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
       JSON.stringify(input.input ?? {}),
       JSON.stringify(input.progress ?? {}),
       input.maxSteps ?? 50,
-      input.tokenBudget ?? null,
+      capacity.effectiveTokenBudget?.toString() ?? null,
       input.scheduledFor ?? null,
       input.parentRunId ?? null,
       JSON.stringify(input.debugFaultPoints ?? []),
@@ -88,6 +101,12 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
       input.forkedFromRunId ?? null,
     ],
   );
+  await recordRunAdmission(tx, {
+    runId,
+    tenantId: input.tenantId,
+    kind: admissionKind(input),
+    reservedTokens: capacity.reservedTokens,
+  });
   await tx.query(`INSERT INTO workspaces (id, run_id) VALUES ($1, $2)`, [wsId, runId]);
 
   for (const g of input.grants ?? []) {

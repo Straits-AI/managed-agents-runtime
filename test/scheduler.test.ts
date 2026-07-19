@@ -221,7 +221,12 @@ describe('scheduler + worker', () => {
     const done = await waitFor(
       async () => {
         const r = await getRun(db.pool, parent.id);
-        return r?.status === 'COMPLETED' ? r : null;
+        if (r?.status !== 'COMPLETED') return null;
+        // Run completion is committed by the epoch just before the worker
+        // settles the attempt. Wait for both durable records instead of racing
+        // that short, valid interval.
+        const durableAttempts = await listAttempts(db.pool, parent.id);
+        return durableAttempts.at(-1)?.exit_reason === 'completed' ? r : null;
       },
       { label: 'parent COMPLETED after children', timeoutMs: 30_000 },
     );

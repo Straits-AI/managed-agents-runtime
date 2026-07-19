@@ -4,6 +4,11 @@ import { withTransaction } from '../db/tx.js';
 import { transitionRun, appendEvent, RunNotFoundError } from '../core/transition.js';
 import { createRun } from '../store/runs.js';
 import { listGrants } from '../store/grants.js';
+import {
+  lockRunAdmissionTenant,
+  lockRunAdmissionTenantRow,
+  RunAdmissionRejectedError,
+} from '../store/admissions.js';
 
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
 
@@ -31,6 +36,15 @@ export async function spawnChildren(
   tx: Tx,
   input: { parentRunId: string; attemptId: string; children: ChildSpec[] },
 ): Promise<string[]> {
+  const { rows: ownershipRows } = await tx.query<{ tenant_id: string }>(
+    'SELECT tenant_id FROM runs WHERE id = $1',
+    [input.parentRunId],
+  );
+  const ownership = ownershipRows[0];
+  if (!ownership) throw new RunNotFoundError(input.parentRunId);
+  // All creation paths lock tenant capacity before lineage rows. Keeping this
+  // order prevents fork/delegation admission from deadlocking each other.
+  await lockRunAdmissionTenant(tx, ownership.tenant_id);
   const { rows: parentRows } = await tx.query<{ tenant_id: string }>(
     'SELECT tenant_id FROM runs WHERE id = $1 FOR UPDATE',
     [input.parentRunId],
@@ -77,6 +91,7 @@ interface ChildResolution {
   tenant_id: string;
   max_steps: number;
   token_budget: string | null;
+  tokens_used: string;
   replacement_generation: number;
   superseded: boolean;
 }
@@ -104,30 +119,51 @@ export async function wakeReadyParents(
   pool: Pool,
   maxChildReplacements = 0,
 ): Promise<WakeResult> {
-  return withTransaction(pool, async (tx) => {
-    // A parent is a candidate when none of its *non-superseded* children are
-    // still running. Superseded children (already replaced) are terminal by
-    // construction, so the simple "no non-terminal child" test is sufficient.
-    const { rows } = await tx.query<{ id: string; tenant_id: string }>(
-      `SELECT p.id, p.tenant_id
-       FROM runs p
-       WHERE p.status = 'WAITING_CHILDREN'
-         AND NOT EXISTS (
-           SELECT 1 FROM runs c
-           WHERE c.parent_run_id = p.id
-             AND c.status <> ALL($1::text[])
-         )
-       FOR UPDATE SKIP LOCKED`,
-      [TERMINAL],
-    );
+  const { rows: candidates } = await pool.query<{ id: string; tenant_id: string }>(
+    `SELECT p.id, p.tenant_id
+     FROM runs p
+     WHERE p.status = 'WAITING_CHILDREN'
+       AND NOT EXISTS (
+         SELECT 1 FROM runs c
+         WHERE c.parent_run_id = p.id
+           AND c.status <> ALL($1::text[])
+       )
+     ORDER BY p.updated_at, p.id
+     LIMIT 32`,
+    [TERMINAL],
+  );
 
-    const woken: string[] = [];
-    const replaced: string[] = [];
+  for (const candidate of candidates) {
+    const outcome = await withTransaction(pool, async (tx) => {
+      const empty: WakeResult = { woken: [], replaced: [] };
+      // Claim one parent per transaction. A transaction-scoped advisory lock
+      // lets concurrent workers choose different parents without taking a run
+      // row before its tenant row (which would invert admission's lock order).
+      const { rows: locks } = await tx.query<{ locked: boolean }>(
+        `SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0)) AS locked`,
+        [candidate.id],
+      );
+      if (!locks[0]?.locked) return empty;
+      await lockRunAdmissionTenantRow(tx, candidate.tenant_id);
+      const { rows: claimed } = await tx.query<{ id: string; tenant_id: string }>(
+        `SELECT p.id, p.tenant_id
+         FROM runs p
+         WHERE p.id = $1 AND p.status = 'WAITING_CHILDREN'
+           AND NOT EXISTS (
+             SELECT 1 FROM runs c
+             WHERE c.parent_run_id = p.id
+               AND c.status <> ALL($2::text[])
+           )
+         FOR UPDATE SKIP LOCKED`,
+        [candidate.id, TERMINAL],
+      );
+      const parent = claimed[0];
+      if (!parent) return empty;
 
-    for (const { id, tenant_id: parentTenantId } of rows) {
+      const { id, tenant_id: parentTenantId } = parent;
       const { rows: kids } = await tx.query<ChildResolution>(
         `SELECT c.id, c.status, c.goal, c.agent_version_id, c.input, c.tenant_id,
-                c.max_steps, c.token_budget,
+                c.max_steps, c.token_budget, c.tokens_used,
                 c.replacement_generation,
                 EXISTS (SELECT 1 FROM runs r WHERE r.replaces_run_id = c.id) AS superseded
          FROM runs c WHERE c.parent_run_id = $1 ORDER BY c.created_at`,
@@ -136,55 +172,91 @@ export async function wakeReadyParents(
       // Only the current generation of each subtask matters for resolution.
       const active = kids.filter((k) => !k.superseded);
       const replaceable = active.filter(
-        (k) => k.status === 'FAILED' && k.replacement_generation < maxChildReplacements,
+        (k) =>
+          k.status === 'FAILED' &&
+          k.replacement_generation < maxChildReplacements &&
+          (k.token_budget === null || BigInt(k.token_budget) > BigInt(k.tokens_used)),
       );
 
       if (replaceable.length > 0) {
         // Swap each failed subtask for a fresh attempt; the parent keeps waiting.
-        for (const k of replaceable) {
-          if (k.tenant_id !== parentTenantId) {
-            throw new Error(`child ${k.id} tenant does not match parent ${id}`);
-          }
-          const gen = k.replacement_generation + 1;
-          const grants = await listGrants(tx, k.id);
-          const child = await createRun(tx, {
-            tenantId: parentTenantId,
-            agentVersionId: k.agent_version_id,
-            goal: k.goal,
-            input: {
-              ...k.input,
-              // Give the fresh attempt the context that its predecessor failed.
-              replacedFrom: k.id,
-              replacementGeneration: gen,
-            },
-            parentRunId: id,
-            replacesRunId: k.id,
-            replacementGeneration: gen,
-            maxSteps: k.max_steps,
-            tokenBudget: k.token_budget ?? undefined,
-            grants: grants.map((grant) => ({
-              action: grant.action_pattern,
-              resource: grant.resource_pattern,
-              requiresApproval: grant.requires_approval,
-              maxCalls:
-                grant.max_calls === null
-                  ? undefined
-                  : Math.max(0, grant.max_calls - grant.calls_used),
-              expiresAt: grant.expires_at ?? undefined,
-            })),
-          });
-          await appendEvent(tx, id, {
-            type: 'ChildRunReplaced',
-            payload: {
-              failedChildId: k.id,
-              replacementChildId: child.id,
+        await tx.query('SAVEPOINT replace_parent');
+        const replacementsForParent: string[] = [];
+        try {
+          for (const k of replaceable) {
+            if (k.tenant_id !== parentTenantId) {
+              throw new Error(`child ${k.id} tenant does not match parent ${id}`);
+            }
+            const gen = k.replacement_generation + 1;
+            const grants = await listGrants(tx, k.id);
+            const child = await createRun(tx, {
+              tenantId: parentTenantId,
+              agentVersionId: k.agent_version_id,
               goal: k.goal,
-              generation: gen,
-            },
-          });
-          replaced.push(child.id);
+              input: {
+                ...k.input,
+                // Give the fresh attempt the context that its predecessor failed.
+                replacedFrom: k.id,
+                replacementGeneration: gen,
+              },
+              parentRunId: id,
+              replacesRunId: k.id,
+              replacementGeneration: gen,
+              maxSteps: k.max_steps,
+              tokenBudget:
+                k.token_budget === null
+                  ? undefined
+                  : BigInt(k.token_budget) - BigInt(k.tokens_used),
+              grants: grants.map((grant) => ({
+                action: grant.action_pattern,
+                resource: grant.resource_pattern,
+                requiresApproval: grant.requires_approval,
+                maxCalls:
+                  grant.max_calls === null
+                    ? undefined
+                    : Math.max(0, grant.max_calls - grant.calls_used),
+                expiresAt: grant.expires_at ?? undefined,
+              })),
+            });
+            await appendEvent(tx, id, {
+              type: 'ChildRunReplaced',
+              payload: {
+                failedChildId: k.id,
+                replacementChildId: child.id,
+                goal: k.goal,
+                generation: gen,
+              },
+            });
+            replacementsForParent.push(child.id);
+          }
+          await tx.query('RELEASE SAVEPOINT replace_parent');
+          return { woken: [], replaced: replacementsForParent };
+        } catch (err) {
+          await tx.query('ROLLBACK TO SAVEPOINT replace_parent');
+          await tx.query('RELEASE SAVEPOINT replace_parent');
+          if (!(err instanceof RunAdmissionRejectedError)) throw err;
+          // Capacity or tenant status can change independently for each parent.
+          // Record each distinct reason once, then only rotate updated_at. This
+          // preserves audit evidence and candidate-window liveness without
+          // generating an unbounded event/outbox stream on every worker poll.
+          const { rowCount: alreadyRecorded } = await tx.query(
+            `SELECT 1 FROM run_events
+             WHERE run_id = $1
+               AND type = 'ChildReplacementDeferred'
+               AND payload->>'reason' = $2
+             LIMIT 1`,
+            [id, err.reason],
+          );
+          if ((alreadyRecorded ?? 0) === 0) {
+            await appendEvent(tx, id, {
+              type: 'ChildReplacementDeferred',
+              payload: { reason: err.reason },
+            });
+          } else {
+            await tx.query('UPDATE runs SET updated_at = now() WHERE id = $1', [id]);
+          }
+          return empty;
         }
-        continue; // do not wake — wait for the replacements
       }
 
       // Every current-generation child is resolved and none is replaceable.
@@ -199,8 +271,9 @@ export async function wakeReadyParents(
         },
         patch: { current_attempt_id: null },
       });
-      woken.push(id);
-    }
-    return { woken, replaced };
-  });
+      return { woken: [id], replaced: [] };
+    });
+    if (outcome.woken.length > 0 || outcome.replaced.length > 0) return outcome;
+  }
+  return { woken: [], replaced: [] };
 }

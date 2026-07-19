@@ -66,6 +66,7 @@ export type EventType =
   | 'SignalReceived'
   | 'ChildRunSpawned'
   | 'ChildRunReplaced'
+  | 'ChildReplacementDeferred'
   | 'ChildrenResolved'
   | 'ApprovalRequested'
   | 'ApprovalReceived'

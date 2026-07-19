@@ -101,7 +101,7 @@ describe('delegated run tenancy and policy', () => {
           {
             agentVersionId: version.id,
             goal: 'tenant-bound child',
-            tokenBudget: 4_000,
+            tokenBudget: 40_000,
             maxSteps: 7,
             grants: [
               {
@@ -125,7 +125,7 @@ describe('delegated run tenancy and policy', () => {
       parent_run_id: parent.id,
       agent_version_id: version.id,
       max_steps: 7,
-      token_budget: '4000',
+      token_budget: '40000',
     });
     expect(child!.workspace_id).not.toBe(parent.workspace_id);
     expect(await getRun(db.pool, childId, 'default')).toBeNull();
@@ -289,7 +289,9 @@ describe('delegated run tenancy and policy', () => {
       replacement_generation: 1,
       agent_version_id: version.id,
       max_steps: 7,
-      token_budget: '4000',
+      // The failed child consumed 2 tokens before replacement; only its
+      // remaining allocation may be reserved again.
+      token_budget: '39998',
     });
     expect(replacement!.input).toMatchObject({
       replacedFrom: childId,

@@ -24,3 +24,19 @@ export async function withTransaction<T>(
     client.release();
   }
 }
+
+/** Run a transaction on a caller-owned client without releasing the session. */
+export async function withClientTransaction<T>(
+  client: PoolClient,
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  }
+}

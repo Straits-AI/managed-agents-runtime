@@ -40,6 +40,9 @@ const configSchema = z.object({
   // per deployment/model. Used by /usage cost estimates — not billing-authoritative.
   MODEL_PRICE_INPUT_PER_MTOK: z.coerce.number().min(0).default(0.25),
   MODEL_PRICE_OUTPUT_PER_MTOK: z.coerce.number().min(0).default(2.0),
+  // Provider/model output ceiling used when an agent version omits maxTokens.
+  // Prevents a large tenant/run budget from becoming an invalid max_tokens.
+  MODEL_MAX_OUTPUT_TOKENS: intFromEnv(8_192),
 
   BYTEPLUS_ACCESS_KEY_ID: z.string().optional(),
   BYTEPLUS_SECRET_ACCESS_KEY: z.string().optional(),
