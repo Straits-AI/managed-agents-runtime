@@ -12,7 +12,8 @@
     "worker": "tsx src/bin/worker.ts",
     "relay": "tsx src/bin/relay.ts",
     "admin": "tsx src/bin/admin.ts",
-    "bench:survival": "tsx bench/survival.ts"
+    "bench:survival": "tsx bench/survival.ts",
+    "release:gate": "tsx scripts/release-gate.ts"
   },
   "dependencies": {
     "@agent-infra/sandbox": "^1.0.17",

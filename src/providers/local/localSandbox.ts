@@ -42,8 +42,7 @@ export class LocalSandboxProvider implements SandboxProvider {
 
   /** Remap logical paths (WORKSPACE_DIR, /tmp) into this sandbox's temp root. */
   private mapText(handle: SandboxHandle, s: string): string {
-    const root = this.root(handle);
-    return s.split(WORKSPACE_DIR).join(join(root, 'workspace')).split('/tmp/').join(join(root, 'tmp') + '/');
+    return mapSandboxText(this.root(handle), s);
   }
 
   async exec(
@@ -83,4 +82,17 @@ export class LocalSandboxProvider implements SandboxProvider {
       this.roots.delete(handle.sandboxId);
     }
   }
+}
+
+/**
+ * Translate logical sandbox paths without recursively translating paths that
+ * the mapper itself introduces. This matters on Linux, where `tmpdir()` and
+ * therefore `root` normally begin with `/tmp/`.
+ */
+export function mapSandboxText(root: string, text: string): string {
+  return text
+    .split('/tmp/')
+    .join(join(root, 'tmp') + '/')
+    .split(WORKSPACE_DIR)
+    .join(join(root, 'workspace'));
 }
