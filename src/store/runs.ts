@@ -6,14 +6,21 @@ import { newId } from '../ids.js';
 
 type Q = Pool | Tx;
 
+export class AgentVersionTenantMismatchError extends Error {
+  constructor(agentVersionId: string, tenantId: string) {
+    super(`agent version ${agentVersionId} does not belong to tenant ${tenantId}`);
+    this.name = 'AgentVersionTenantMismatchError';
+  }
+}
+
 export interface CreateRunInput {
-  /** Owning tenant. Defaults to 'default' for back-compat / internal callers. */
-  tenantId?: string;
+  /** Owning tenant. Internal callers must derive this explicitly. */
+  tenantId: string;
   agentVersionId: string;
   goal: string;
   input?: Record<string, unknown>;
   maxSteps?: number;
-  tokenBudget?: number;
+  tokenBudget?: number | string | bigint;
   /** ISO timestamp; the run is not claimable until then (delayed start). */
   scheduledFor?: string;
   /** Parent run when this is a delegated subrun (memo §15/§19). */
@@ -31,6 +38,7 @@ export interface CreateRunInput {
     resource?: string;
     requiresApproval?: boolean;
     maxCalls?: number;
+    expiresAt?: Date | string;
   }[];
   debugFaultPoints?: string[];
 }
@@ -41,6 +49,20 @@ export interface CreateRunInput {
  * already immutable, and materializes capability grants).
  */
 export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> {
+  const { rows: ownedVersions } = await tx.query<{ id: string }>(
+    `SELECT av.id
+     FROM agent_versions av
+     JOIN agent_definitions ad ON ad.id = av.agent_id
+     WHERE av.id = $1 AND ad.tenant_id = $2`,
+    [input.agentVersionId, input.tenantId],
+  );
+  if (!ownedVersions[0]) {
+    throw new AgentVersionTenantMismatchError(
+      input.agentVersionId,
+      input.tenantId,
+    );
+  }
+
   const runId = newId('run');
   const wsId = newId('ws');
 
@@ -51,7 +73,7 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
      VALUES ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       runId,
-      input.tenantId ?? 'default',
+      input.tenantId,
       input.agentVersionId,
       input.goal,
       JSON.stringify(input.input ?? {}),
@@ -71,8 +93,8 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
   for (const g of input.grants ?? []) {
     await tx.query(
       `INSERT INTO capability_grants
-         (id, run_id, action_pattern, resource_pattern, requires_approval, max_calls)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+         (id, run_id, action_pattern, resource_pattern, requires_approval, max_calls, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         newId('cap'),
         runId,
@@ -80,6 +102,7 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
         g.resource ?? '*',
         g.requiresApproval ?? false,
         g.maxCalls ?? null,
+        g.expiresAt ?? null,
       ],
     );
   }

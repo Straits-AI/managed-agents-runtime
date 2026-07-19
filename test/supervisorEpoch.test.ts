@@ -67,6 +67,7 @@ describe('semantic supervisor — live epoch (no BytePlus)', () => {
     );
     const run = await withTransaction(db.pool, (tx) =>
       createRun(tx, {
+        tenantId: 'default',
         agentVersionId: ver.id,
         goal: 'accomplish something',
         input: { files: { 'input.txt': 'seed\n' } },

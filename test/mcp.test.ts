@@ -41,7 +41,7 @@ afterAll(async () => {
 async function runningRun(
   grants: { action: string; resource?: string; requiresApproval?: boolean; maxCalls?: number }[],
 ) {
-  const run = await withTransaction(db.pool, (tx) => createRun(tx, { agentVersionId, goal: 'g', grants }));
+  const run = await withTransaction(db.pool, (tx) => createRun(tx, { tenantId: 'default', agentVersionId, goal: 'g', grants }));
   const attemptId = newId('att');
   const { rows } = await db.pool.query<RunAttemptRow>(
     `INSERT INTO run_attempts (id, run_id, attempt_no, worker_id, state, lease_expires_at)

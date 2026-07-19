@@ -17,9 +17,10 @@ import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import {
   commitReceipt,
-  findReceiptByKey,
+  findReceiptByLineageKey,
   idempotencyKey,
   insertPendingReceipt,
+  replacementRootRunId,
 } from '../store/receipts.js';
 import { authorizeAndConsume, listGrants, patternMatches } from '../store/grants.js';
 import { insertApproval, listApprovals } from '../store/approvals.js';
@@ -526,7 +527,8 @@ async function externalHttpRequest(
   const url = String(args.url ?? '');
   const resource = safeOrigin(url);
   const isWrite = method !== 'GET';
-  const idemKey = idempotencyKey({ runId: ctx.run.id, action: ACTION_NAME, args });
+  const idempotencyScope = await replacementRootRunId(ctx.pool, ctx.run.id);
+  const idemKey = idempotencyKey({ runId: idempotencyScope, action: ACTION_NAME, args });
 
   // SSRF guard: only http(s), and private/loopback/link-local hosts are
   // reachable only when a capability grant explicitly covers the origin —
@@ -544,7 +546,7 @@ async function externalHttpRequest(
 
   // Recovery dedupe: an already-committed identical action returns its
   // recorded result — the external effect happened exactly once.
-  const existing = await findReceiptByKey(ctx.pool, ctx.run.id, idemKey);
+  const existing = await findReceiptByLineageKey(ctx.pool, ctx.run.id, idemKey);
   if (existing?.status === 'COMMITTED') {
     return {
       kind: 'result',
@@ -555,15 +557,25 @@ async function externalHttpRequest(
       }),
     };
   }
+  if (existing && existing.status !== 'PENDING') {
+    return {
+      kind: 'result',
+      content: `error: prior external action is ${existing.status.toLowerCase()} and requires reconciliation`,
+    };
+  }
+  const pendingRecovery = existing?.status === 'PENDING';
 
   if (isWrite) {
-    // Grant match (no consumption yet — consumption happens at execution).
+    // A PENDING receipt was created only after grant consumption and any
+    // required approval. Recovery must reuse it even when that consumption
+    // exhausted the allowance; a genuinely new action still needs capacity.
     const grants = await listGrants(ctx.pool, ctx.run.id);
     const grant = grants.find(
       (g) =>
         patternMatches(g.action_pattern, ACTION_NAME) &&
         patternMatches(g.resource_pattern, resource) &&
-        (g.max_calls === null || g.calls_used < g.max_calls),
+        (g.expires_at === null || g.expires_at > new Date()) &&
+        (pendingRecovery || g.max_calls === null || g.calls_used < g.max_calls),
     );
     if (!grant) {
       await withTransaction(ctx.pool, (tx) =>
@@ -580,7 +592,7 @@ async function externalHttpRequest(
       };
     }
 
-    if (grant.requires_approval) {
+    if (grant.requires_approval && !pendingRecovery) {
       const approvals = await listApprovals(ctx.pool, ctx.run.id);
       const match = approvals.find(
         (a) => (a.action.arguments as { __idemKey?: string }).__idemKey === idemKey,
@@ -626,7 +638,7 @@ async function externalHttpRequest(
 
   // Execute with the durable receipt protocol.
   const receipt =
-    existing ??
+    (pendingRecovery ? existing : null) ??
     (await withTransaction(ctx.pool, async (tx) => {
       const auth = await authorizeAndConsume(tx, ctx.run.id, ACTION_NAME, resource);
       if (isWrite && !auth.allowed) {

@@ -33,7 +33,7 @@ afterAll(async () => {
 
 async function runWithAttempt(): Promise<{ run: RunRow; attempt: RunAttemptRow }> {
   const run = await withTransaction(db.pool, (tx) =>
-    createRun(tx, { agentVersionId, goal: 'do the deploy for project atlas' }),
+    createRun(tx, { tenantId: 'default', agentVersionId, goal: 'do the deploy for project atlas' }),
   );
   const attemptId = newId('att');
   const { rows } = await db.pool.query<RunAttemptRow>(

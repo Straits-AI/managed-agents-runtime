@@ -84,7 +84,7 @@ describe('SSE event streaming', () => {
       { op: 'complete' },
     ];
     const run = await withTransaction(db.pool, (tx) =>
-      createRun(tx, { agentVersionId, goal: 'stream me', input: { script } }),
+      createRun(tx, { tenantId: 'default', agentVersionId, goal: 'stream me', input: { script } }),
     );
     // Connect from seq 0 first; events are durable so we replay from the start
     // regardless of whether the worker races ahead — no missed-event window.

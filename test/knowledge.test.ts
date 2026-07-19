@@ -28,7 +28,7 @@ afterAll(async () => {
 
 async function runWithAttempt() {
   const run = await withTransaction(db.pool, (tx) =>
-    createRun(tx, { agentVersionId, goal: 'answer a policy question' }),
+    createRun(tx, { tenantId: 'default', agentVersionId, goal: 'answer a policy question' }),
   );
   const attemptId = newId('att');
   const { rows } = await db.pool.query<RunAttemptRow>(

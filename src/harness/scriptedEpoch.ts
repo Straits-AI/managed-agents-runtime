@@ -48,8 +48,8 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
   // when the source is the same tenant.
   let step = ckpt?.agent_state.step ?? 0;
   if (!ckpt && run.forked_from_run_id) {
-    const source = await getRun(pool, run.forked_from_run_id);
-    if (source && source.tenant_id === run.tenant_id) {
+    const source = await getRun(pool, run.forked_from_run_id, run.tenant_id);
+    if (source) {
       step = (await latestCheckpoint(pool, source.id))?.agent_state.step ?? 0;
     }
   }

@@ -53,7 +53,8 @@ describe('schema', () => {
       [avId, adId],
     );
     await db.pool.query(
-      `INSERT INTO runs (id, agent_version_id, goal, status) VALUES ($1, $2, 'g', 'CREATED')`,
+      `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+       VALUES ($1, 'default', $2, 'g', 'CREATED')`,
       [runId, avId],
     );
     await db.pool.query(
@@ -84,7 +85,8 @@ describe('schema', () => {
       [avId, adId],
     );
     await db.pool.query(
-      `INSERT INTO runs (id, agent_version_id, goal, status) VALUES ($1, $2, 'g', 'CREATED')`,
+      `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+       VALUES ($1, 'default', $2, 'g', 'CREATED')`,
       [runId, avId],
     );
     await db.pool.query(
@@ -103,5 +105,89 @@ describe('schema', () => {
 
     await insertReceipt(newId('rcpt'));
     await expect(insertReceipt(newId('rcpt'))).rejects.toThrow(/duplicate key/);
+  });
+});
+
+describe('tenant-lineage migration', () => {
+  it('repairs children created by the historical default-tenant bug before validation', async () => {
+    const legacy = await createTestDb({ through: '0010_credentials.sql' });
+    try {
+      await legacy.pool.query(
+        `INSERT INTO tenants (id, name) VALUES ('tenant_upgrade', 'Upgrade tenant')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_definitions (id, tenant_id, name)
+         VALUES ('ad_upgrade', 'tenant_upgrade', 'upgrade-agent')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+         VALUES ('av_upgrade', 'ad_upgrade', 1, 'x', '{}')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+         VALUES ('run_upgrade_parent', 'tenant_upgrade', 'av_upgrade', 'parent', 'QUEUED')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs
+           (id, tenant_id, agent_version_id, parent_run_id, goal, status)
+         VALUES
+           ('run_upgrade_child', 'default', 'av_upgrade', 'run_upgrade_parent', 'child', 'FAILED'),
+           ('run_upgrade_grandchild', 'default', 'av_upgrade', 'run_upgrade_child', 'grandchild', 'FAILED')`,
+      );
+
+      await expect(legacy.applyRemainingMigrations()).resolves.toContain(
+        '0011_run_tenant_invariants.sql',
+      );
+      const { rows } = await legacy.pool.query<{ tenant_id: string }>(
+        `SELECT tenant_id FROM runs
+         WHERE id IN ('run_upgrade_child', 'run_upgrade_grandchild')
+         ORDER BY id`,
+      );
+      expect(rows.map((row) => row.tenant_id)).toEqual([
+        'tenant_upgrade',
+        'tenant_upgrade',
+      ]);
+    } finally {
+      await legacy.drop();
+    }
+  });
+
+  it('rejects an ambiguous cross-tenant child instead of rewriting ownership', async () => {
+    const legacy = await createTestDb({ through: '0010_credentials.sql' });
+    try {
+      await legacy.pool.query(
+        `INSERT INTO tenants (id, name)
+         VALUES ('tenant_owner', 'Owner'), ('tenant_ambiguous', 'Ambiguous')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_definitions (id, tenant_id, name)
+         VALUES ('ad_owner', 'tenant_owner', 'owner-agent')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+         VALUES ('av_owner', 'ad_owner', 1, 'x', '{}')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+         VALUES ('run_owner_parent', 'tenant_owner', 'av_owner', 'parent', 'QUEUED')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs
+           (id, tenant_id, agent_version_id, parent_run_id, goal, status)
+         VALUES
+           ('run_ambiguous_child', 'tenant_ambiguous', 'av_owner',
+            'run_owner_parent', 'ambiguous', 'FAILED')`,
+      );
+
+      await expect(legacy.applyRemainingMigrations()).rejects.toThrow(
+        /runs_parent_same_tenant/,
+      );
+      const { rows } = await legacy.pool.query<{ tenant_id: string }>(
+        `SELECT tenant_id FROM runs WHERE id = 'run_ambiguous_child'`,
+      );
+      expect(rows[0]?.tenant_id).toBe('tenant_ambiguous');
+    } finally {
+      await legacy.drop();
+    }
   });
 });

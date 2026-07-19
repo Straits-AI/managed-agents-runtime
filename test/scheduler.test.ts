@@ -43,7 +43,7 @@ function newWorker(env: Record<string, string> = {}): SpawnedWorker {
 
 async function newRun(script: ScriptOp[], extra: { tokenBudget?: number; maxSteps?: number } = {}) {
   return withTransaction(db.pool, (tx) =>
-    createRun(tx, { agentVersionId, goal: 'scripted run', input: { script }, ...extra }),
+    createRun(tx, { tenantId: 'default', agentVersionId, goal: 'scripted run', input: { script }, ...extra }),
   );
 }
 
@@ -172,6 +172,7 @@ describe('scheduler + worker', () => {
     const future = new Date(Date.now() + 3600_000).toISOString();
     const run = await withTransaction(db.pool, (tx) =>
       createRun(tx, {
+        tenantId: 'default',
         agentVersionId,
         goal: 'scheduled',
         input: { script: [{ op: 'complete' }] as ScriptOp[] },
