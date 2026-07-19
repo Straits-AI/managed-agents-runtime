@@ -15,7 +15,9 @@ First deployable controlled-alpha release.
 - a non-root OCI image with API, worker, relay, migration, preflight, and admin
   command contracts;
 - real-container migration, process, and health/readiness smoke testing;
-- CycloneDX application SBOM and image provenance evidence; and
+- CycloneDX application SBOM and image provenance evidence;
+- annotated-main tag enforcement plus immutable registry-digest smoke and
+  promotion; and
 - the Kertas product boundary, target ManagedSession contract, and public-beta
   engineering risk register.
 

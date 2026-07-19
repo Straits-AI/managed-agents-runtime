@@ -7,6 +7,7 @@ const image = process.env.CONTAINER_IMAGE?.trim();
 if (!image) {
   throw new Error('CONTAINER_IMAGE is required');
 }
+const postgresImage = 'postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20';
 
 const suffix = `${process.pid}-${Date.now()}`;
 const network = `managed-agents-smoke-${suffix}`;
@@ -90,7 +91,7 @@ try {
     '-e', 'POSTGRES_USER=postgres',
     '-e', 'POSTGRES_HOST_AUTH_METHOD=trust',
     '-e', 'POSTGRES_DB=postgres',
-    'postgres:16',
+    postgresImage,
   ]);
   await waitForPostgres();
 

@@ -95,11 +95,15 @@ the image plus CycloneDX SBOM evidence under `release-evidence/container/`. It
 uploads the evidence directory even when a later step fails, retaining the
 artifact for 30 days.
 
-The tag-only publication workflow repeats the exact-commit gate and container
-smoke before pushing an image. It uses digest-pinned Dockerfile, Node, BuildKit,
-and SBOM-scanner inputs; attaches native BuildKit SBOM and maximum-mode
-provenance to the registry manifest; and retains the registry digest and release
-evidence for 90 days. See
+The tag-only publication workflow accepts only an annotated tag at the exact
+current `main` commit after that commit's push gate has passed. Validation runs
+with read-only permissions and no persisted checkout credential. A separate
+publish job pushes an unpromoted candidate, resolves and pulls its immutable
+digest, verifies its native BuildKit SBOM and maximum-mode provenance, removes
+registry credentials, and runs the real-container smoke against those exact
+bytes. Only a passing digest is promoted to release tags. The workflow attaches
+the kernel evidence bundle and retains all registry and release evidence for 90
+days. See
 [`CONTROLLED-ALPHA-DEPLOYMENT.md`](./CONTROLLED-ALPHA-DEPLOYMENT.md).
 
 ### GitHub Action provenance
@@ -110,6 +114,7 @@ Node.js 24-native action tags resolve in their official repositories as follows:
 | Action | Official tag | Immutable commit SHA | Runtime |
 | --- | --- | --- | --- |
 | [`actions/checkout`](https://github.com/actions/checkout/releases/tag/v7.0.0) | `v7.0.0` | `9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0` | `node24` |
+| [`actions/download-artifact`](https://github.com/actions/download-artifact/releases/tag/v8.0.0) | `v8.0.0` | `70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3` | `node24` |
 | [`actions/setup-node`](https://github.com/actions/setup-node/releases/tag/v7.0.0) | `v7.0.0` | `820762786026740c76f36085b0efc47a31fe5020` | `node24` |
 | [`actions/upload-artifact`](https://github.com/actions/upload-artifact/releases/tag/v7.0.1) | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | `node24` |
 

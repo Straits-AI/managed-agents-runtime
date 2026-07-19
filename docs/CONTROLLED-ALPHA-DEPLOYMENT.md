@@ -17,15 +17,17 @@ The release image is built from:
 - compiled JavaScript produced by the pinned TypeScript dependency; and
 - migration files copied from the tagged source.
 
-The tag workflow also pins the Dockerfile frontend, BuildKit builder image, and
-SBOM scanner by digest. The hosted runner and Buildx client versions are recorded
-by workflow logs and provenance; they are not claimed to produce a bit-identical
-local image configuration digest across builders.
+The tag workflow also pins the Dockerfile frontend, BuildKit builder image,
+SBOM scanner, and PostgreSQL smoke dependency by digest. The hosted runner and
+Buildx client versions are recorded by workflow logs and provenance.
 
-The release workflow publishes a Linux `amd64` image by digest. The registry
-manifest carries BuildKit SBOM and provenance attestations. GitHub release
-evidence also records the registry digest, local image configuration digest,
-CycloneDX application SBOM, source commit, labels, user, entrypoint, and artifact
+The release workflow first pushes a commit-scoped candidate Linux `amd64`
+manifest with BuildKit SBOM and provenance attestations. It resolves and pulls
+that immutable digest, verifies both attestations, removes registry credentials,
+and exercises the exact pulled bytes through the complete container smoke. Only
+then does it promote the same digest to the version tags. GitHub release evidence
+records that registry digest, image configuration digest, CycloneDX application
+SBOM, source commit, labels, user, entrypoint, kernel gate bundle, and artifact
 hashes. A later release may add a multi-architecture manifest; do not assume one
 for this alpha.
 
@@ -160,8 +162,11 @@ must remain blocked until it has an explicit data migration and recovery plan.
 4. Live provider conformance is recorded for every provider capability claimed
    by the release; unavailable capabilities remain labelled and fail closed.
 5. Only then is the annotated `v0.1.0-alpha.1` tag created.
-6. The tag workflow pushes the image, attaches native SBOM/provenance, records
-   the registry digest, and creates the GitHub prerelease.
+6. The tag workflow rejects a tag that is not annotated, is not the exact
+   current `main` commit, or lacks a successful exact-commit `main` gate.
+7. The publish job pushes an unpromoted candidate, verifies and smokes its
+   immutable registry digest, promotes that digest to the release tags, and
+   creates the GitHub prerelease with kernel and container evidence attached.
 
 The package version, changelog heading, release tag, image version label, and
 GitHub prerelease title must agree exactly.
