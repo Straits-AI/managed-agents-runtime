@@ -1,7 +1,9 @@
 # Controlled-alpha deployment and rollback
 
-**Applies to:** `v0.1.0-alpha.1`  
-**Release level:** controlled multi-tenant alpha  
+**Applies to:** `v0.1.0-alpha.1`
+
+**Release level:** controlled multi-tenant alpha
+
 **Image:** `ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.1`
 
 This runbook defines the deployable image contract. Passing it does not establish
