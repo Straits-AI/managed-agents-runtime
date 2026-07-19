@@ -2,6 +2,8 @@
 // these; BytePlus implementations live beside them and other providers can
 // be added without touching the kernel.
 
+import type { CredentialReleaseRequest } from '../core/credentials.js';
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | null;
@@ -205,10 +207,8 @@ export interface EventPublisher {
  * adapters are interchangeable.
  */
 export interface CredentialProvider {
-  resolve(input: {
-    tenantId: string;
-    runId: string;
-    action: string;
-    resource: string;
-  }): Promise<{ headerName: string; headerValue: string } | null>;
+  resolve(input: CredentialReleaseRequest): Promise<{
+    headerName: string;
+    headerValue: string;
+  } | null>;
 }

@@ -33,6 +33,8 @@ export interface GovernedDispatchInput {
 
 export interface GovernedActionSpec<T extends Record<string, unknown>> {
   connector: string;
+  /** Stable reason for credential release, distinct from the transport action. */
+  purpose?: string;
   action: string;
   resource: string;
   args: Record<string, unknown>;
@@ -234,8 +236,13 @@ export async function executeGovernedAction<T extends Record<string, unknown>>(
       (await ctx.credentials?.resolve({
         tenantId: ctx.run.tenant_id,
         runId: ctx.run.id,
+        attemptId: ctx.attempt.id,
+        caller: spec.connector,
+        purpose: spec.purpose ?? spec.action,
         action: spec.action,
         resource: spec.resource,
+        approvalId,
+        idempotencyKey: key,
       })) ?? null;
   } catch {
     await withTransaction(ctx.pool, (tx) =>

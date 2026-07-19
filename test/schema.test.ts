@@ -141,6 +141,36 @@ describe('schema', () => {
     expect(rows[0]?.indexdef).toContain('ModelInvocationCompleted');
     expect(rows[0]?.indexdef).toContain('created_at');
   });
+
+  it('installs execution-scoped credential grants and secret-free use receipts', async () => {
+    const { rows: migrations } = await db.pool.query<{ name: string }>(
+      `SELECT name FROM schema_migrations WHERE name = '0014_execution_credential_grants.sql'`,
+    );
+    expect(migrations).toHaveLength(1);
+    const { rows: receiptColumns } = await db.pool.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'credential_use_receipts'`,
+    );
+    const names = receiptColumns.map((column) => column.column_name);
+    expect(names).toContain('idempotency_key');
+    expect(names).not.toContain('secret_ct');
+    expect(names).not.toContain('iv');
+    expect(names).not.toContain('auth_tag');
+    const { rows: triggers } = await db.pool.query<{ tgname: string }>(
+      `SELECT tgname FROM pg_trigger
+       WHERE tgrelid = 'credential_use_receipts'::regclass AND NOT tgisinternal`,
+    );
+    expect(triggers.map((trigger) => trigger.tgname)).toContain(
+      'credential_use_receipts_no_update',
+    );
+    const { rows: grantTriggers } = await db.pool.query<{ tgname: string }>(
+      `SELECT tgname FROM pg_trigger
+       WHERE tgrelid = 'credential_grants'::regclass AND NOT tgisinternal`,
+    );
+    expect(grantTriggers.map((trigger) => trigger.tgname)).toContain(
+      'credential_grants_subject_guard',
+    );
+  });
 });
 
 describe('tenant-lineage migration', () => {

@@ -131,6 +131,53 @@ async function main(): Promise<void> {
       const { revokeCredential } = await import('../store/credentials.js');
       const ok = await revokeCredential(pool, id, tenantId);
       process.stdout.write(ok ? `revoked ${id}\n` : `not found: ${id}\n`);
+    } else if (resource === 'credential-grant' && action === 'create') {
+      const tenantId = rest.find((a) => !a.startsWith('--'));
+      const credentialId = flag(rest, 'credential');
+      const agentVersionId = flag(rest, 'agent-version');
+      const runId = flag(rest, 'run');
+      const caller = flag(rest, 'caller');
+      const purpose = flag(rest, 'purpose');
+      const act = flag(rest, 'action');
+      if (!tenantId || !credentialId || !agentVersionId || !runId || !caller || !purpose || !act) {
+        throw new Error(
+          'usage: credential-grant create <tenantId> --credential ID --agent-version ID --run ID --caller <pattern> --purpose <pattern> --action <pattern> [--resource <pattern>] [--requires-approval] [--allow-delegated-runs] [--allow-forks] [--max-uses N] [--expires <ISO>]',
+        );
+      }
+      const { createCredentialGrant } = await import('../store/credentials.js');
+      const maxUses = flag(rest, 'max-uses');
+      const grant = await createCredentialGrant(pool, {
+        tenantId,
+        credentialId,
+        agentVersionId,
+        runId,
+        caller,
+        purpose,
+        action: act,
+        resource: flag(rest, 'resource'),
+        requiresApproval: rest.includes('--requires-approval'),
+        allowDelegatedRuns: rest.includes('--allow-delegated-runs'),
+        allowForks: rest.includes('--allow-forks'),
+        maxUses: maxUses ? Number(maxUses) : undefined,
+        expiresAt: flag(rest, 'expires'),
+      });
+      process.stdout.write(`credential grant created: ${grant.id} for run ${runId}\n`);
+    } else if (resource === 'credential-grant' && action === 'list') {
+      const tenantId = rest.find((a) => !a.startsWith('--'));
+      if (!tenantId) throw new Error('usage: credential-grant list <tenantId>');
+      const { listCredentialGrants } = await import('../store/credentials.js');
+      process.stdout.write(JSON.stringify(await listCredentialGrants(pool, tenantId), null, 2) + '\n');
+    } else if (resource === 'credential-grant' && action === 'revoke') {
+      const [id, tenantId] = rest.filter((a) => !a.startsWith('--'));
+      if (!id || !tenantId) throw new Error('usage: credential-grant revoke <grantId> <tenantId>');
+      const { revokeCredentialGrant } = await import('../store/credentials.js');
+      const ok = await revokeCredentialGrant(pool, id, tenantId);
+      process.stdout.write(ok ? `revoked ${id}\n` : `not found: ${id}\n`);
+    } else if (resource === 'credential-receipt' && action === 'list') {
+      const tenantId = rest.find((a) => !a.startsWith('--'));
+      if (!tenantId) throw new Error('usage: credential-receipt list <tenantId>');
+      const { listCredentialUseReceipts } = await import('../store/credentials.js');
+      process.stdout.write(JSON.stringify(await listCredentialUseReceipts(pool, tenantId), null, 2) + '\n');
     } else {
       process.stderr.write(
         'usage:\n' +
@@ -140,6 +187,10 @@ async function main(): Promise<void> {
           '  credential create <tenantId> --name X --action <pattern> --header <H> --value <secret> [--resource <pattern>] [--max-uses N] [--expires <ISO>]\n' +
           '  credential list <tenantId>\n' +
           '  credential revoke <credentialId> <tenantId>\n' +
+          '  credential-grant create <tenantId> --credential ID --agent-version ID --run ID --caller <pattern> --purpose <pattern> --action <pattern> [--resource <pattern>] [--requires-approval] [--allow-delegated-runs] [--allow-forks] [--max-uses N] [--expires <ISO>]\n' +
+          '  credential-grant list <tenantId>\n' +
+          '  credential-grant revoke <grantId> <tenantId>\n' +
+          '  credential-receipt list <tenantId>\n' +
           '  knowledge bind <tenantId> --name X --project X --collection X\n' +
           '  knowledge verify <tenantId> --name X [--query X]\n' +
           '  knowledge list <tenantId>\n' +
