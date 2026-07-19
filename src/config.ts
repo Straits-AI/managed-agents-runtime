@@ -81,6 +81,10 @@ const configSchema = z.object({
   TOS_ENDPOINT: z.string().default('tos-ap-southeast-1.bytepluses.com'),
   TOS_REGION: z.string().default('ap-southeast-1'),
   TOS_BUCKET: z.string().optional(),
+  TOS_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
+  TOS_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  TOS_MAX_OBJECT_BYTES: z.coerce.number().int().min(1).max(2_147_483_648)
+    .default(512 * 1024 * 1024),
 
   AGENTKIT_MCP_URL: z.string().optional(),
   AGENTKIT_MCP_API_KEY: z.string().optional(),
