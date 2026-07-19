@@ -18,6 +18,12 @@ actions.
 drive agents through the API, multi-tenancy, credentials, streaming/Kafka, and
 best practices. Cost is in [docs/COST.md](./docs/COST.md).
 
+Architecture and release boundaries:
+
+- [Kertas product boundary](./docs/KERTAS-PRODUCT-BOUNDARY.md)
+- [Kertas ↔ runtime contract](./docs/KERTAS-RUNTIME-CONTRACT.md)
+- [Engineering risk register](./docs/ENGINEERING-RISK-REGISTER.md)
+
 > **Release status:** the automated
 > [controlled multi-tenant alpha gate](./docs/CONTROLLED-ALPHA-RELEASE-GATE.md)
 > passes for this source revision. It checks the full suite plus named P0
@@ -141,11 +147,11 @@ Then read the [Usage Guide](./docs/GUIDE.md) to drive agents through the API.
 
 ## Connecting to BytePlus
 
-Copy `.env.example` to `.env` and fill it in. The live dev stack is provisioned
-and documented in [`infra/resources.md`](./infra/resources.md); provisioning and
-credential helpers live in [`scripts/`](./scripts/):
+Copy `.env.example` to `.env` and fill it in. Provisioning and credential helpers
+live in [`scripts/`](./scripts/). Keep deployment-specific resource IDs in a
+private operator inventory rather than committing them to this repository:
 
-| Setting | How to obtain (see `scripts/` + `infra/resources.md`) |
+| Setting | How to obtain |
 | --- | --- |
 | `BYTEPLUS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN` | `python3 scripts/refresh-creds.py` syncs STS creds from `bp login` (~15 min TTL; rerun before a cloud batch) |
 | `TOS_BUCKET` | `scripts/provision-tos.ts` (idempotent create + roundtrip verify) |
@@ -153,8 +159,8 @@ credential helpers live in [`scripts/`](./scripts/):
 | `VEFAAS_SANDBOX_FUNCTION_ID` | sandbox application created in the console (only surface that sets `FunctionType: sandbox`); instances are then fully programmatic |
 | `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | APIG serverless gateway + Key Auth route fronting the sandbox; key registered via `bp apig CreateConsumerCredential` |
 
-> **Provisioning notes learned the hard way** (all in `infra/resources.md`):
-> sandbox applications and the APIG gateway are console-only to create;
+> **Provisioning notes learned the hard way:** sandbox applications and the
+> APIG gateway are console-only to create;
 > `CreateSandbox` uses `InstanceImageInfo.{Image,Command}` (not `ImageUrl`) and
 > inherits the released app image when omitted; the AIO sandbox runs as user
 > `gem`, so the workspace lives under `/home/gem/workspace`.
