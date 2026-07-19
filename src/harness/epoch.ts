@@ -99,8 +99,8 @@ export function createRealEpoch(providers: EpochProviders) {
     let forkAgentState: CheckpointAgentState | undefined;
     const lineageId = run.forked_from_run_id ?? run.parent_run_id;
     if (lineageId) {
-      const source = await getRun(pool, lineageId);
-      if (source && source.tenant_id === run.tenant_id) {
+      const source = await getRun(pool, lineageId, run.tenant_id);
+      if (source) {
         seedWorkspaceId = source.workspace_id ?? undefined; // copy-on-write seed
         // A fork additionally resumes execution state from the source checkpoint.
         if (!ckpt && run.forked_from_run_id) {

@@ -50,7 +50,7 @@ async function runningRun(
   grants: { action: string; resource?: string; requiresApproval?: boolean; maxCalls?: number }[],
 ): Promise<{ run: RunRow; attempt: RunAttemptRow }> {
   const run = await withTransaction(db.pool, (tx) =>
-    createRun(tx, { agentVersionId, goal: 'router test', grants }),
+    createRun(tx, { tenantId: 'default', agentVersionId, goal: 'router test', grants }),
   );
   const attemptId = newId('att');
   const { rows } = await db.pool.query<RunAttemptRow>(

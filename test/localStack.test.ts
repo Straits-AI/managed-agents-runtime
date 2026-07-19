@@ -37,7 +37,7 @@ afterAll(async () => {
 
 async function newRun(): Promise<RunRow> {
   return withTransaction(db.pool, (tx) =>
-    createRun(tx, { agentVersionId, goal: 'local stack', input: { files: { 'input.txt': 'seed data\n' } } }),
+    createRun(tx, { tenantId: 'default', agentVersionId, goal: 'local stack', input: { files: { 'input.txt': 'seed data\n' } } }),
   );
 }
 async function attemptFor(runId: string): Promise<string> {

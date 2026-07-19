@@ -1,8 +1,9 @@
 import type { Pool } from 'pg';
 import type { Tx } from '../db/tx.js';
 import { withTransaction } from '../db/tx.js';
-import { transitionRun, appendEvent } from '../core/transition.js';
+import { transitionRun, appendEvent, RunNotFoundError } from '../core/transition.js';
 import { createRun } from '../store/runs.js';
+import { listGrants } from '../store/grants.js';
 
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
 
@@ -10,7 +11,13 @@ export interface ChildSpec {
   agentVersionId: string;
   goal: string;
   input?: Record<string, unknown>;
-  grants?: { action: string; resource?: string; requiresApproval?: boolean; maxCalls?: number }[];
+  grants?: {
+    action: string;
+    resource?: string;
+    requiresApproval?: boolean;
+    maxCalls?: number;
+    expiresAt?: Date | string;
+  }[];
   tokenBudget?: number;
   maxSteps?: number;
 }
@@ -24,9 +31,17 @@ export async function spawnChildren(
   tx: Tx,
   input: { parentRunId: string; attemptId: string; children: ChildSpec[] },
 ): Promise<string[]> {
+  const { rows: parentRows } = await tx.query<{ tenant_id: string }>(
+    'SELECT tenant_id FROM runs WHERE id = $1 FOR UPDATE',
+    [input.parentRunId],
+  );
+  const parent = parentRows[0];
+  if (!parent) throw new RunNotFoundError(input.parentRunId);
+
   const ids: string[] = [];
   for (const c of input.children) {
     const child = await createRun(tx, {
+      tenantId: parent.tenant_id,
       agentVersionId: c.agentVersionId,
       goal: c.goal,
       input: c.input,
@@ -59,6 +74,9 @@ interface ChildResolution {
   goal: string;
   agent_version_id: string;
   input: Record<string, unknown>;
+  tenant_id: string;
+  max_steps: number;
+  token_budget: string | null;
   replacement_generation: number;
   superseded: boolean;
 }
@@ -90,8 +108,8 @@ export async function wakeReadyParents(
     // A parent is a candidate when none of its *non-superseded* children are
     // still running. Superseded children (already replaced) are terminal by
     // construction, so the simple "no non-terminal child" test is sufficient.
-    const { rows } = await tx.query<{ id: string }>(
-      `SELECT p.id
+    const { rows } = await tx.query<{ id: string; tenant_id: string }>(
+      `SELECT p.id, p.tenant_id
        FROM runs p
        WHERE p.status = 'WAITING_CHILDREN'
          AND NOT EXISTS (
@@ -106,9 +124,10 @@ export async function wakeReadyParents(
     const woken: string[] = [];
     const replaced: string[] = [];
 
-    for (const { id } of rows) {
+    for (const { id, tenant_id: parentTenantId } of rows) {
       const { rows: kids } = await tx.query<ChildResolution>(
-        `SELECT c.id, c.status, c.goal, c.agent_version_id, c.input,
+        `SELECT c.id, c.status, c.goal, c.agent_version_id, c.input, c.tenant_id,
+                c.max_steps, c.token_budget,
                 c.replacement_generation,
                 EXISTS (SELECT 1 FROM runs r WHERE r.replaces_run_id = c.id) AS superseded
          FROM runs c WHERE c.parent_run_id = $1 ORDER BY c.created_at`,
@@ -123,8 +142,13 @@ export async function wakeReadyParents(
       if (replaceable.length > 0) {
         // Swap each failed subtask for a fresh attempt; the parent keeps waiting.
         for (const k of replaceable) {
+          if (k.tenant_id !== parentTenantId) {
+            throw new Error(`child ${k.id} tenant does not match parent ${id}`);
+          }
           const gen = k.replacement_generation + 1;
+          const grants = await listGrants(tx, k.id);
           const child = await createRun(tx, {
+            tenantId: parentTenantId,
             agentVersionId: k.agent_version_id,
             goal: k.goal,
             input: {
@@ -136,6 +160,15 @@ export async function wakeReadyParents(
             parentRunId: id,
             replacesRunId: k.id,
             replacementGeneration: gen,
+            maxSteps: k.max_steps,
+            tokenBudget: k.token_budget ?? undefined,
+            grants: grants.map((grant) => ({
+              action: grant.action_pattern,
+              resource: grant.resource_pattern,
+              requiresApproval: grant.requires_approval,
+              maxCalls: grant.max_calls ?? undefined,
+              expiresAt: grant.expires_at ?? undefined,
+            })),
           });
           await appendEvent(tx, id, {
             type: 'ChildRunReplaced',

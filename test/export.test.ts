@@ -37,7 +37,7 @@ afterAll(async () => {
 describe('run bundle export', () => {
   it('exports a portable bundle: gapless events, receipts, grants, workspace snapshot', async () => {
     const run = await withTransaction(db.pool, (tx) =>
-      createRun(tx, { agentVersionId, goal: 'exportable', grants: [{ action: 'external.http.*', resource: '*' }] }),
+      createRun(tx, { tenantId: 'default', agentVersionId, goal: 'exportable', grants: [{ action: 'external.http.*', resource: '*' }] }),
     );
     const attemptId = newId('att');
     await db.pool.query(
@@ -75,7 +75,7 @@ describe('run bundle export', () => {
   });
 
   it('the event history is append-only, so an exported bundle cannot be gapped', async () => {
-    const run = await withTransaction(db.pool, (tx) => createRun(tx, { agentVersionId, goal: 'immutable' }));
+    const run = await withTransaction(db.pool, (tx) => createRun(tx, { tenantId: 'default', agentVersionId, goal: 'immutable' }));
     // The append-only trigger makes events un-deletable — a gap is impossible.
     await expect(
       db.pool.query(`DELETE FROM run_events WHERE run_id = $1 AND seq = 1`, [run.id]),
@@ -92,7 +92,7 @@ describe('run bundle export', () => {
   });
 
   it('reports a cross-tenant run as not-found (no existence leak)', async () => {
-    const run = await withTransaction(db.pool, (tx) => createRun(tx, { agentVersionId, goal: 'tenant a' }));
+    const run = await withTransaction(db.pool, (tx) => createRun(tx, { tenantId: 'default', agentVersionId, goal: 'tenant a' }));
     // Correct tenant exports fine; a different tenant sees "not found".
     await expect(exportRunBundle(db.pool, store, run.id, 'default')).resolves.toBeTruthy();
     await expect(exportRunBundle(db.pool, store, run.id, 'other-tenant')).rejects.toThrow(/not found/);

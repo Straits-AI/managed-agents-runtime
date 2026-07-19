@@ -53,7 +53,8 @@ describe('schema', () => {
       [avId, adId],
     );
     await db.pool.query(
-      `INSERT INTO runs (id, agent_version_id, goal, status) VALUES ($1, $2, 'g', 'CREATED')`,
+      `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+       VALUES ($1, 'default', $2, 'g', 'CREATED')`,
       [runId, avId],
     );
     await db.pool.query(
@@ -84,7 +85,8 @@ describe('schema', () => {
       [avId, adId],
     );
     await db.pool.query(
-      `INSERT INTO runs (id, agent_version_id, goal, status) VALUES ($1, $2, 'g', 'CREATED')`,
+      `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+       VALUES ($1, 'default', $2, 'g', 'CREATED')`,
       [runId, avId],
     );
     await db.pool.query(

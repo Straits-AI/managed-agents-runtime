@@ -38,7 +38,7 @@ async function unpublishedCount(): Promise<number> {
 
 describe('outbox relay', () => {
   it('drains unpublished rows to the publisher and marks them published', async () => {
-    await withTransaction(db.pool, (tx) => createRun(tx, { agentVersionId, goal: 'g' }));
+    await withTransaction(db.pool, (tx) => createRun(tx, { tenantId: 'default', agentVersionId, goal: 'g' }));
     expect(await unpublishedCount()).toBeGreaterThan(0);
 
     const { pub, seen } = recorder();
@@ -59,7 +59,7 @@ describe('outbox relay', () => {
   it('never double-publishes across two concurrent relays (FOR UPDATE SKIP LOCKED)', async () => {
     // Generate a batch of fresh outbox rows.
     for (let i = 0; i < 5; i++) {
-      await withTransaction(db.pool, (tx) => createRun(tx, { agentVersionId, goal: `g${i}` }));
+      await withTransaction(db.pool, (tx) => createRun(tx, { tenantId: 'default', agentVersionId, goal: `g${i}` }));
     }
     const before = await unpublishedCount();
     expect(before).toBeGreaterThan(0);

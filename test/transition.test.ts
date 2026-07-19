@@ -30,7 +30,7 @@ afterAll(async () => {
 
 async function newRun() {
   return withTransaction(db.pool, (tx) =>
-    createRun(tx, { agentVersionId, goal: 'test goal' }),
+    createRun(tx, { tenantId: 'default', agentVersionId, goal: 'test goal' }),
   );
 }
 
