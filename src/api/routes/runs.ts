@@ -9,8 +9,8 @@ import { listAttempts } from '../../store/attempts.js';
 import { listApprovals, decideApproval, getApproval } from '../../store/approvals.js';
 import { listRevisions } from '../../store/workspaces.js';
 import { listGrants } from '../../store/grants.js';
-import { getTenant } from '../../store/tenants.js';
-import { runUsage, tenantUsage, countActiveRuns, tenantTokensToday } from '../../store/usage.js';
+import { runUsage, tenantUsage } from '../../store/usage.js';
+import { RunAdmissionRejectedError } from '../../store/admissions.js';
 import { appendEvent, transitionRun } from '../../core/transition.js';
 import { isTerminal } from '../../core/stateMachine.js';
 import type { ModelPrice } from '../../core/costs.js';
@@ -79,25 +79,18 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
     const owner = version && (await getAgentDefinition(pool, version.agent_id, req.tenantId));
     if (!version || !owner) return reply.code(404).send({ error: 'agent version not found' });
 
-    // Per-tenant quotas (Phase 2). NULL quota = unlimited.
-    const tenant = await getTenant(pool, req.tenantId);
-    if (
-      tenant?.max_concurrent_runs != null &&
-      (await countActiveRuns(pool, req.tenantId)) >= tenant.max_concurrent_runs
-    ) {
-      return reply.code(429).send({ error: 'concurrent run quota exceeded' });
+    try {
+      const run = await withTransaction(pool, (tx) =>
+        createRun(tx, { ...body, tenantId: req.tenantId }),
+      );
+      return reply.code(201).send(run);
+    } catch (err) {
+      if (err instanceof RunAdmissionRejectedError) {
+        const status = err.reason === 'tenant_unavailable' ? 403 : 429;
+        return reply.code(status).send({ error: err.message, reason: err.reason });
+      }
+      throw err;
     }
-    if (
-      tenant?.daily_token_budget != null &&
-      (await tenantTokensToday(pool, req.tenantId)) >= BigInt(tenant.daily_token_budget)
-    ) {
-      return reply.code(429).send({ error: 'daily token budget exhausted' });
-    }
-
-    const run = await withTransaction(pool, (tx) =>
-      createRun(tx, { ...body, tenantId: req.tenantId }),
-    );
-    return reply.code(201).send(run);
   });
 
   app.get<{ Params: { runId: string } }>('/v1/runs/:runId', async (req, reply) => {
@@ -391,22 +384,30 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
       maxCalls: g.max_calls ?? undefined,
     }));
 
-    const fork = await withTransaction(pool, (tx) =>
-      createRun(tx, {
-        tenantId: req.tenantId,
-        agentVersionId: source.agent_version_id,
-        goal: body.goal ?? source.goal,
-        // Strip any server-reserved keys the source's input may carry; the epoch
-        // sets the real seeds from forked_from_run_id.
-        input: stripReservedInput(body.input ?? source.input),
-        progress: source.progress as Record<string, unknown>,
-        maxSteps: body.maxSteps ?? source.max_steps,
-        tokenBudget: body.tokenBudget ?? (source.token_budget ? Number(source.token_budget) : undefined),
-        forkedFromRunId: source.id,
-        grants,
-      }),
-    );
-    return reply.code(201).send(fork);
+    try {
+      const fork = await withTransaction(pool, (tx) =>
+        createRun(tx, {
+          tenantId: req.tenantId,
+          agentVersionId: source.agent_version_id,
+          goal: body.goal ?? source.goal,
+          // Strip any server-reserved keys the source's input may carry; the epoch
+          // sets the real seeds from forked_from_run_id.
+          input: stripReservedInput(body.input ?? source.input),
+          progress: source.progress as Record<string, unknown>,
+          maxSteps: body.maxSteps ?? source.max_steps,
+          tokenBudget: body.tokenBudget ?? (source.token_budget ? Number(source.token_budget) : undefined),
+          forkedFromRunId: source.id,
+          grants,
+        }),
+      );
+      return reply.code(201).send(fork);
+    } catch (err) {
+      if (err instanceof RunAdmissionRejectedError) {
+        const status = err.reason === 'tenant_unavailable' ? 403 : 429;
+        return reply.code(status).send({ error: err.message, reason: err.reason });
+      }
+      throw err;
+    }
   });
 
   app.get<{ Params: { runId: string } }>(

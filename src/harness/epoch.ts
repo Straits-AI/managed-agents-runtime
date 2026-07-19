@@ -24,7 +24,7 @@ import type {
 } from '../providers/types.js';
 import { materializeSkills, type MaterializedSkill } from './skills.js';
 import { resolveMcpTools } from './mcp.js';
-import { withTransaction } from '../db/tx.js';
+import { withClientTransaction, withTransaction, type Tx } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { getAgentVersion, knowledgeReferenceFromConfig } from '../store/agents.js';
 import { getRun } from '../store/runs.js';
@@ -36,7 +36,7 @@ import { compileContext } from './contextCompiler.js';
 import { WorkspaceManager, WORKSPACE_DIR } from './workspace.js';
 import { dispatchTool, TOOL_DEFS, TOOL_DOCS, type ToolContext } from './toolRouter.js';
 import { verify, type VerifierPolicy } from './verifier.js';
-import { tokenBudgetExceeded } from './limits.js';
+import { limitModelInvocation, tokenBudgetExceeded } from './limits.js';
 import { maybeCrash } from './faults.js';
 import { routeModel } from './modelRouter.js';
 import {
@@ -51,6 +51,12 @@ import {
   ledgerRemaining,
   recordSupervision,
 } from './supervision.js';
+import {
+  beginModelInvocation,
+  completeModelInvocation,
+} from '../store/modelUsage.js';
+import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
+import { invocationAbortFence } from './invocationAbort.js';
 
 export interface EpochProviders {
   model: ModelProvider;
@@ -290,67 +296,132 @@ export function createRealEpoch(providers: EpochProviders) {
           return 'budget_exhausted';
         }
 
-        // Fresh dynamic context each iteration.
-        const [grants, freshRun] = await Promise.all([
-          listGrants(pool, run.id),
-          pool
-            .query<RunRow>('SELECT * FROM runs WHERE id = $1', [run.id])
-            .then((r) => r.rows[0]!),
-        ]);
-        const messages = compileContext({
-          version,
-          run: freshRun,
-          grants,
-          transcript,
-          userMessages: await unseenUserMessages(pool, run.id),
-          approvalOutcomes: await recentApprovalOutcomes(pool, run.id),
-          memories: recalledMemories,
-          skills,
-          toolDocs: TOOL_DOCS,
-        });
+        // Serialize provider calls for this logical run across lease expiry and
+        // retries. The lock is session-scoped, so process/connection loss also
+        // releases it. A retry must wait, then recompute capacity from the usage
+        // recorded by any stale completion before issuing another call.
+        const invocationClient = await pool.connect();
+        const invocationAbort = invocationAbortFence(invocationClient, signal);
+        let invocation:
+          | { kind: 'lease_lost' }
+          | { kind: 'budget_exhausted' }
+          | {
+              kind: 'completed';
+              completion: Awaited<ReturnType<ModelProvider['chat']>>;
+              freshRun: RunRow;
+              remaining: bigint | null;
+              stillOwned: boolean;
+              tokensUsed: bigint;
+            };
+        try {
+          await invocationClient.query(
+            'SELECT pg_advisory_lock(hashtextextended($1, $2))',
+            [run.id, MODEL_INVOCATION_LOCK_SEED],
+          );
+          if (signal.aborted) {
+            invocation = { kind: 'lease_lost' };
+          } else {
+            const startedRun = await withClientTransaction(invocationClient, (tx) =>
+              beginModelInvocation(tx, {
+                runId: run.id,
+                attemptId: attempt.id,
+                step,
+              }),
+            );
+            if (!startedRun) {
+              invocation = { kind: 'lease_lost' };
+            } else {
+              const grants = await listGrants(invocationClient, run.id);
+              const messages = compileContext({
+                version,
+                run: startedRun,
+                grants,
+                transcript,
+                userMessages: await unseenUserMessages(invocationClient, run.id),
+                approvalOutcomes: await recentApprovalOutcomes(invocationClient, run.id),
+                memories: recalledMemories,
+                skills,
+                toolDocs: TOOL_DOCS,
+              });
+              const invocationLimit = limitModelInvocation({
+                tokenBudget: startedRun.token_budget,
+                tokensUsed: startedRun.tokens_used,
+                messages,
+                tools: allTools,
+                requestedMaxTokens: version.model_policy.maxTokens,
+                defaultMaxTokens: cfg.MODEL_MAX_OUTPUT_TOKENS,
+              });
+              if (!invocationLimit) {
+                invocation = { kind: 'budget_exhausted' };
+              } else {
+                const completion = await providers.model.chat({
+                  // Adaptive model routing: a supervisor escalation bumps to a
+                  // stronger model for subsequent steps (memo §25).
+                  model: routeModel(
+                    version.model_policy,
+                    cfg,
+                    supervisorState.escalationLevel,
+                  ),
+                  messages,
+                  tools: allTools,
+                  maxTokens: invocationLimit.maxTokens,
+                  temperature: version.model_policy.temperature,
+                  signal: invocationAbort.signal,
+                });
+                const recorded = await withClientTransaction(invocationClient, (tx) =>
+                  completeModelInvocation(tx, {
+                    runId: run.id,
+                    attemptId: attempt.id,
+                    step,
+                    usage: completion.usage,
+                  }),
+                );
+                invocation = {
+                  kind: 'completed',
+                  completion,
+                  freshRun: startedRun,
+                  remaining: invocationLimit.remaining,
+                  stillOwned: recorded.stillOwned,
+                  tokensUsed: recorded.tokensUsed,
+                };
+              }
+            }
+          }
+        } finally {
+          if (!invocationAbort.clientLost()) {
+            await invocationClient
+              .query('SELECT pg_advisory_unlock(hashtextextended($1, $2))', [
+                run.id,
+                MODEL_INVOCATION_LOCK_SEED,
+              ])
+              .catch(() => {});
+          }
+          const clientLost = invocationAbort.clientLost();
+          invocationAbort.dispose();
+          invocationClient.release(
+            clientLost ? new Error('model invocation lock session lost') : undefined,
+          );
+        }
 
-        await withTransaction(pool, (tx) =>
-          appendEvent(
-            tx,
-            run.id,
-            { type: 'ModelInvocationStarted', payload: { step } },
-            { attemptId: attempt.id },
-          ),
-        );
-        const completion = await providers.model.chat({
-          // Adaptive model routing: a supervisor escalation bumps to a stronger
-          // model for subsequent steps (memo §25).
-          model: routeModel(version.model_policy, cfg, supervisorState.escalationLevel),
-          messages,
-          tools: allTools,
-          maxTokens: version.model_policy.maxTokens,
-          temperature: version.model_policy.temperature,
-        });
-        await withTransaction(pool, (tx) =>
-          appendEvent(
-            tx,
-            run.id,
-            {
-              type: 'ModelInvocationCompleted',
-              payload: { step, usage: completion.usage },
-            },
-            {
-              attemptId: attempt.id,
-              patch: {
-                tokens_used: String(
-                  Number(run.tokens_used) +
-                    completion.usage.inputTokens +
-                    completion.usage.outputTokens,
-                ),
-              },
-            },
-          ),
-        );
-        run.tokens_used = String(
-          Number(run.tokens_used) +
-            completion.usage.inputTokens +
-            completion.usage.outputTokens,
-        );
+        if (invocation.kind === 'lease_lost' || !('stillOwned' in invocation) || !invocation.stillOwned) {
+          if (invocation.kind === 'budget_exhausted') {
+            await saveCheckpoint();
+            await cleanup();
+            return 'budget_exhausted';
+          }
+          return 'lease_lost';
+        }
+        const { completion, freshRun } = invocation;
+        run.tokens_used = invocation.tokensUsed.toString();
+        const invocationTokens =
+          BigInt(completion.usage.inputTokens) + BigInt(completion.usage.outputTokens);
+        if (invocation.remaining !== null && invocationTokens > invocation.remaining) {
+          // A provider that ignores maxTokens has violated its kernel contract.
+          // Persist the actual metered usage above, but never issue another call.
+          await saveCheckpoint();
+          await cleanup();
+          return 'budget_exhausted';
+        }
 
         transcript.push(completion.message);
 
@@ -587,18 +658,18 @@ async function finishRun(
 }
 
 /** All user messages received so far (Phase 1: presented every epoch). */
-async function unseenUserMessages(pool: Pool, runId: string): Promise<string[]> {
-  const events = await listEvents(pool, runId, { limit: 1000 });
+async function unseenUserMessages(q: Pool | Tx, runId: string): Promise<string[]> {
+  const events = await listEvents(q, runId, { limit: 1000 });
   return events
     .filter((e) => e.type === 'UserMessageReceived')
     .map((e) => String(e.payload.message ?? ''));
 }
 
 async function recentApprovalOutcomes(
-  pool: Pool,
+  q: Pool | Tx,
   runId: string,
 ): Promise<{ action: string; decision: string }[]> {
-  const approvals = await listApprovals(pool, runId);
+  const approvals = await listApprovals(q, runId);
   return approvals
     .filter((a) => a.status !== 'PENDING')
     .map((a) => ({

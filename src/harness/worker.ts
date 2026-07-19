@@ -8,6 +8,7 @@ import { reapExpiredLeases } from '../scheduler/reaper.js';
 import { wakeReadyParents } from '../scheduler/children.js';
 import { exitAttempt, heartbeatAttempt } from '../store/attempts.js';
 import { log } from '../log.js';
+import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
 
 const wlog = log.child({ component: 'worker' });
 
@@ -125,7 +126,7 @@ export function startWorker(
  * Suspension transitions (WAITING_APPROVAL, VERIFYING→…) are written by
  * the epoch itself before it returns; this handles the generic cases.
  */
-async function settleAttempt(
+export async function settleAttempt(
   pool: Pool,
   cfg: Config,
   runId: string,
@@ -135,6 +136,13 @@ async function settleAttempt(
   if (exitReason === 'lease_lost') return; // the reaper owns this run now
 
   await withTransaction(pool, async (tx) => {
+    // Match provider completion and reaper ordering: advisory fence before the
+    // attempt row. Otherwise settlement can hold the attempt while the reaper
+    // holds the advisory lock and each waits for the other.
+    await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, $2))', [
+      runId,
+      MODEL_INVOCATION_LOCK_SEED,
+    ]);
     const owned = await exitAttempt(tx, attempt.id, exitReason);
     if (!owned) return; // lost the race to the reaper
 

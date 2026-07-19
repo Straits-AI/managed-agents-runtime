@@ -26,20 +26,24 @@ export class ModelArkProvider implements ModelProvider {
     tools?: ToolDef[];
     maxTokens?: number;
     temperature?: number;
+    signal?: AbortSignal;
   }): Promise<{
     message: ChatMessage;
     usage: { inputTokens: number; outputTokens: number };
   }> {
-    const completion = await this.client.chat.completions.create({
-      model: req.model,
-      messages: req.messages.map(toOpenAiMessage),
-      tools: req.tools?.map((t) => ({
-        type: 'function' as const,
-        function: { name: t.name, description: t.description, parameters: t.parameters },
-      })),
-      max_tokens: req.maxTokens,
-      temperature: req.temperature,
-    });
+    const completion = await this.client.chat.completions.create(
+      {
+        model: req.model,
+        messages: req.messages.map(toOpenAiMessage),
+        tools: req.tools?.map((t) => ({
+          type: 'function' as const,
+          function: { name: t.name, description: t.description, parameters: t.parameters },
+        })),
+        max_tokens: req.maxTokens,
+        temperature: req.temperature,
+      },
+      { signal: req.signal },
+    );
 
     const choice = completion.choices[0];
     if (!choice) throw new Error('ModelArk returned no choices');

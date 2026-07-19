@@ -130,6 +130,36 @@ Every run/agent is tenant-scoped; a cross-tenant id reads as **not-found** (no
 existence leak). Quotas (`max_concurrent_runs`, `daily_token_budget`) return
 `429` when exceeded. The operator `API_AUTH_TOKEN` maps to the `default` tenant.
 
+### Atomic run admission
+
+Every run enters through one tenant-row-serialized admission transaction. It
+reserves a concurrency slot and token capacity before creating the run,
+workspace, grants, or reservation record; rejection rolls the whole operation
+back. The semantics are deliberately conservative:
+
+- direct and forked runs reserve new capacity;
+- delegated children reserve new capacity while their waiting parent keeps its
+  own reservation;
+- a replacement reserves the slot released by its terminal predecessor;
+- a scheduled run holds capacity from creation, not from its future start time;
+- a retry is another attempt of the same run and does not reserve again;
+- terminal `COMPLETED`, `FAILED`, or `CANCELLED` transitions release capacity in
+  the same transaction;
+- when a tenant has a daily token quota and a run omits `tokenBudget`, admission
+  assigns the currently remaining daily capacity as that run's hard budget.
+
+Before each model invocation, the runtime reserves a conservative upper bound
+for the serialized prompt and tool definitions, then caps the provider's output
+limit to the remaining run budget and `MODEL_MAX_OUTPUT_TOKENS` (default 8192)
+when the agent version omits `maxTokens`. Actual input and output usage accumulates in
+the ledger after every call. Thus a conforming provider cannot spend beyond the
+capacity reserved at admission; a provider that violates its output ceiling is
+stopped after its metered usage is recorded.
+
+Tenants using parallel delegation should configure enough concurrent slots and
+provide explicit per-run token budgets instead of letting one run reserve all
+remaining daily capacity.
+
 ## 5. Credential broker (secrets in tool calls, never in the model)
 
 Agents call external systems without the model ever seeing the secret: the broker

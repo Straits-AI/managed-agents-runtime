@@ -29,6 +29,7 @@ export interface ModelProvider {
     tools?: ToolDef[];
     maxTokens?: number;
     temperature?: number;
+    signal?: AbortSignal;
   }): Promise<{
     message: ChatMessage;
     usage: { inputTokens: number; outputTokens: number };

@@ -313,7 +313,7 @@ describe('fork', () => {
 });
 
 describe('tenant quotas', () => {
-  it('enforces the concurrent-run quota with 429', async () => {
+  it('enforces the concurrent-run quota atomically with 429 under a burst', async () => {
     const t = await createTenant(db.pool, { name: 'Capped', quota: { maxConcurrentRuns: 1 } });
     const key = (await createApiKey(db.pool, { tenantId: t.id })).plaintext;
     const agent = (
@@ -335,10 +335,11 @@ describe('tenant quotas', () => {
         payload: { agentVersionId: ver.id, goal: 'g', input: {} },
       });
 
-    expect((await mk()).statusCode).toBe(201); // first run: within quota (stays QUEUED = active)
-    const second = await mk();
-    expect(second.statusCode).toBe(429);
-    expect(second.json().error).toMatch(/quota/i);
+    const burst = await Promise.all(Array.from({ length: 12 }, () => mk()));
+    expect(burst.filter((response) => response.statusCode === 201)).toHaveLength(1);
+    const rejected = burst.filter((response) => response.statusCode === 429);
+    expect(rejected).toHaveLength(11);
+    expect(rejected.every((response) => /quota/i.test(response.json().error))).toBe(true);
   });
 });
 

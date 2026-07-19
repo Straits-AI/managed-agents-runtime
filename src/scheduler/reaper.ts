@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { withTransaction } from '../db/tx.js';
 import { transitionRun } from '../core/transition.js';
 import type { RunAttemptRow } from '../core/types.js';
+import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
 
 export interface ReapedAttempt {
   attempt: RunAttemptRow;
@@ -22,14 +23,32 @@ export async function reapExpiredLeases(
 
   for (;;) {
     const result = await withTransaction(pool, async (tx) => {
-      const { rows } = await tx.query<RunAttemptRow>(
-        `SELECT * FROM run_attempts
+      const { rows: candidates } = await tx.query<Pick<RunAttemptRow, 'id' | 'run_id'>>(
+        `SELECT id, run_id FROM run_attempts
          WHERE state = 'ACTIVE' AND lease_expires_at < now()
-         ORDER BY lease_expires_at ASC
-         FOR UPDATE SKIP LOCKED
-         LIMIT 1`,
+         ORDER BY lease_expires_at ASC, id`,
       );
-      const attempt = rows[0];
+      let attempt: RunAttemptRow | undefined;
+      for (const candidate of candidates) {
+        // Never orphan an attempt while its provider call is still in flight.
+        // Skip an invocation-locked run and continue scanning so one slow model
+        // call cannot starve unrelated expired attempts behind it.
+        const { rows: invocationLocks } = await tx.query<{ locked: boolean }>(
+          'SELECT pg_try_advisory_xact_lock(hashtextextended($1, $2)) AS locked',
+          [candidate.run_id, MODEL_INVOCATION_LOCK_SEED],
+        );
+        if (!invocationLocks[0]?.locked) continue;
+        const { rows } = await tx.query<RunAttemptRow>(
+          `SELECT * FROM run_attempts
+           WHERE id = $1 AND state = 'ACTIVE' AND lease_expires_at < now()
+           FOR UPDATE SKIP LOCKED`,
+          [candidate.id],
+        );
+        if (rows[0]) {
+          attempt = rows[0];
+          break;
+        }
+      }
       if (!attempt) return null;
 
       await tx.query(

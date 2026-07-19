@@ -8,6 +8,7 @@ import { listEvents } from '../store/events.js';
 import { getRun } from '../store/runs.js';
 import { spawnChildren } from '../scheduler/children.js';
 import { tokenBudgetExceeded } from './limits.js';
+import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
 
 /**
  * Deterministic no-model epoch used by tests and pre-credential milestones.
@@ -211,6 +212,12 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
 
       case 'complete':
         await withTransaction(pool, async (tx) => {
+          // Preserve the atomic VERIFYING -> COMPLETED scripted fast path while
+          // taking the terminal lock before the first run-row lock.
+          await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, $2))', [
+            run.id,
+            MODEL_INVOCATION_LOCK_SEED,
+          ]);
           await transitionRun(tx, run.id, {
             expectFrom: ['RUNNING'],
             to: 'VERIFYING',
@@ -231,6 +238,10 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
 
   // Script ended without an explicit complete op.
   await withTransaction(pool, async (tx) => {
+    await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, $2))', [
+      run.id,
+      MODEL_INVOCATION_LOCK_SEED,
+    ]);
     await transitionRun(tx, run.id, {
       expectFrom: ['RUNNING'],
       to: 'VERIFYING',
