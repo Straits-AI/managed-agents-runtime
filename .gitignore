@@ -4,3 +4,4 @@ dist/
 .pgdata/
 *.log
 infra/resources.md
+release-evidence/

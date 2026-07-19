@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "gateId": "controlled-multitenant-alpha-v1",
+  "description": "Controlled multi-tenant alpha P0 boundary for the managed-agents execution runtime.",
+  "requiredRiskIds": [
+    "MAR-P0-001",
+    "MAR-P0-002",
+    "MAR-P0-003",
+    "MAR-P0-004",
+    "MAR-P0-005",
+    "MAR-P0-006"
+  ],
+  "requiredDimensions": [
+    "configuration",
+    "tenant-inheritance",
+    "quota-admission",
+    "knowledge-isolation",
+    "governed-http",
+    "governed-mcp",
+    "credentials",
+    "concurrency",
+    "crash-recovery"
+  ],
+  "providerSurfaces": [
+    {
+      "id": "agentkit-knowledge",
+      "sharedMode": "disabled-until-live-verified",
+      "guardAssertionId": "config-agentkit-knowledge-live-gate"
+    },
+    {
+      "id": "arbitrary-http-egress",
+      "sharedMode": "allowlist-or-controlled-proxy",
+      "guardAssertionId": "config-shared-egress"
+    },
+    {
+      "id": "harness-fault-injection",
+      "sharedMode": "disabled",
+      "guardAssertionId": "config-fault-injection"
+    },
+    {
+      "id": "mcp-provider-tools",
+      "sharedMode": "deny-unclassified-tools",
+      "guardAssertionId": "mcp-policy-required"
+    }
+  ],
+  "limitations": [
+    "This gate verifies the controlled multi-tenant kernel boundary against local provider contracts; it is not a live BytePlus conformance run.",
+    "AgentKit Knowledge remains unavailable to shared deployments until the deployment and each binding carry live verification evidence.",
+    "Exactly-once mutation recovery requires a provider that honors the supplied idempotency key or exposes authoritative reconciliation.",
+    "Passing this gate does not establish public-beta or production readiness; the P1 register and explicit release approval remain open."
+  ],
+  "criticalAssertions": [
+    {
+      "id": "tenant-child-inheritance",
+      "riskIds": ["MAR-P0-001"],
+      "dimensions": ["tenant-inheritance"],
+      "file": "test/childrenTenancy.test.ts",
+      "fullName": "delegated run tenancy and policy derives child ownership from the locked non-default parent"
+    },
+    {
+      "id": "tenant-delegate-negative",
+      "riskIds": ["MAR-P0-001"],
+      "dimensions": ["tenant-inheritance", "knowledge-isolation"],
+      "file": "test/childrenTenancy.test.ts",
+      "fullName": "delegated run tenancy and policy rejects a delegated agent version owned by another tenant"
+    },
+    {
+      "id": "admission-burst",
+      "riskIds": ["MAR-P0-002"],
+      "dimensions": ["quota-admission", "concurrency"],
+      "file": "test/admission.test.ts",
+      "fullName": "atomic run admission admits at most one direct run under a parallel burst and leaks no child rows"
+    },
+    {
+      "id": "admission-delegation-replacement",
+      "riskIds": ["MAR-P0-001", "MAR-P0-002"],
+      "dimensions": ["tenant-inheritance", "quota-admission", "crash-recovery"],
+      "file": "test/admission.test.ts",
+      "fullName": "atomic run admission rolls back rejected delegation and admits a replacement in the released child slot"
+    },
+    {
+      "id": "knowledge-tenant-mapping",
+      "riskIds": ["MAR-P0-003"],
+      "dimensions": ["knowledge-isolation"],
+      "file": "test/agentkitKnowledgeTenancy.test.ts",
+      "fullName": "tenant-owned AgentKit Knowledge bindings resolves the same logical name to each tenant authoritative provider mapping"
+    },
+    {
+      "id": "knowledge-cross-tenant-negative",
+      "riskIds": ["MAR-P0-003"],
+      "dimensions": ["knowledge-isolation"],
+      "file": "test/agentkitKnowledgeTenancy.test.ts",
+      "fullName": "tenant-owned AgentKit Knowledge bindings cannot address another tenant collection or an unverified binding"
+    },
+    {
+      "id": "mcp-policy-required",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["governed-mcp", "configuration"],
+      "file": "test/mcp.test.ts",
+      "fullName": "MCP toolsets fails closed when execution policy cannot classify a discovered tool"
+    },
+    {
+      "id": "mcp-remote-commit-recovery",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["governed-mcp", "crash-recovery"],
+      "file": "test/mcp.test.ts",
+      "fullName": "MCP toolsets reconciles a crash after remote MCP commit without replaying the mutation"
+    },
+    {
+      "id": "mcp-crash-boundaries",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["governed-mcp", "crash-recovery"],
+      "file": "test/mcp.test.ts",
+      "fullName": "MCP toolsets recovers crashes before dispatch and after receipt commit for idempotent MCP"
+    },
+    {
+      "id": "mcp-concurrent-recovery",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["governed-mcp", "concurrency", "crash-recovery"],
+      "file": "test/mcp.test.ts",
+      "fullName": "MCP toolsets serializes concurrent recovery so terminal not_found dispatches only once"
+    },
+    {
+      "id": "mcp-read-bounds",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["governed-mcp"],
+      "file": "test/mcp.test.ts",
+      "fullName": "MCP toolsets bounds read-only MCP latency and response size"
+    },
+    {
+      "id": "mcp-credential-scope",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["governed-mcp", "credentials"],
+      "file": "test/mcp.test.ts",
+      "fullName": "MCP toolsets passes stable idempotency and scoped credentials only to the MCP transport"
+    },
+    {
+      "id": "http-governed-dedup",
+      "riskIds": ["MAR-P0-005"],
+      "dimensions": ["governed-http", "crash-recovery"],
+      "file": "test/toolRouter.test.ts",
+      "fullName": "external.http.request executes an approval-free write exactly once and dedupes retries"
+    },
+    {
+      "id": "http-pending-retry",
+      "riskIds": ["MAR-P0-005"],
+      "dimensions": ["governed-http", "crash-recovery"],
+      "file": "test/toolRouter.test.ts",
+      "fullName": "external.http.request retries a PENDING receipt with the same idempotency key (at-least-once + dedupe)"
+    },
+    {
+      "id": "http-dns-rebinding",
+      "riskIds": ["MAR-P0-005"],
+      "dimensions": ["governed-http"],
+      "file": "test/safeHttp.test.ts",
+      "fullName": "egress address policy rejects every answer when DNS rebinding returns public then private"
+    },
+    {
+      "id": "http-metadata-negative",
+      "riskIds": ["MAR-P0-005"],
+      "dimensions": ["governed-http"],
+      "file": "test/safeHttp.test.ts",
+      "fullName": "egress address policy does not let an exact-granted hostname pivot into metadata address space"
+    },
+    {
+      "id": "http-redirect-revalidation",
+      "riskIds": ["MAR-P0-005"],
+      "dimensions": ["governed-http"],
+      "file": "test/safeHttp.test.ts",
+      "fullName": "bounded redirects and transport revalidates each redirect and denies metadata destinations"
+    },
+    {
+      "id": "http-response-bound",
+      "riskIds": ["MAR-P0-005"],
+      "dimensions": ["governed-http"],
+      "file": "test/safeHttp.test.ts",
+      "fullName": "bounded redirects and transport aborts streaming bodies beyond the response byte limit"
+    },
+    {
+      "id": "config-auth-fail-closed",
+      "riskIds": ["MAR-P0-006"],
+      "dimensions": ["configuration"],
+      "file": "test/config.test.ts",
+      "fullName": "production configuration refuses to start without an explicit non-default API token"
+    },
+    {
+      "id": "config-bind-fail-closed",
+      "riskIds": ["MAR-P0-006"],
+      "dimensions": ["configuration"],
+      "file": "test/config.test.ts",
+      "fullName": "production configuration binds the API to loopback unless an address is explicitly configured"
+    },
+    {
+      "id": "config-fault-injection",
+      "riskIds": ["MAR-P0-006"],
+      "dimensions": ["configuration"],
+      "file": "test/config.test.ts",
+      "fullName": "production configuration refuses to enable harness fault injection in production"
+    },
+    {
+      "id": "config-agentkit-knowledge-live-gate",
+      "riskIds": ["MAR-P0-003", "MAR-P0-006"],
+      "dimensions": ["configuration", "knowledge-isolation"],
+      "file": "test/config.test.ts",
+      "fullName": "production configuration keeps AgentKit Knowledge disabled in shared deployments until live verification"
+    },
+    {
+      "id": "config-shared-egress",
+      "riskIds": ["MAR-P0-005", "MAR-P0-006"],
+      "dimensions": ["configuration", "governed-http"],
+      "file": "test/config.test.ts",
+      "fullName": "production configuration requires an allowlist or controlled egress proxy for shared deployments"
+    },
+    {
+      "id": "api-error-redaction",
+      "riskIds": ["MAR-P0-006"],
+      "dimensions": ["configuration"],
+      "file": "test/apiSecurity.test.ts",
+      "fullName": "API error boundary redacts internal server failures and returns the request correlation id"
+    },
+    {
+      "id": "credential-cross-tenant-negative",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["credentials", "knowledge-isolation"],
+      "file": "test/credentials.test.ts",
+      "fullName": "credential broker does not release across tenants, callers, purposes, resources, or actions"
+    },
+    {
+      "id": "credential-one-use-concurrency",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["credentials", "concurrency"],
+      "file": "test/credentials.test.ts",
+      "fullName": "credential broker atomically enforces a one-use grant under concurrent resolution"
+    },
+    {
+      "id": "credential-lineage-default-deny",
+      "riskIds": ["MAR-P0-001", "MAR-P0-004"],
+      "dimensions": ["credentials", "tenant-inheritance"],
+      "file": "test/credentials.test.ts",
+      "fullName": "credential broker denies child and fork inheritance by default and permits each only explicitly"
+    },
+    {
+      "id": "credential-secret-free-receipts",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["credentials", "crash-recovery"],
+      "file": "test/credentials.test.ts",
+      "fullName": "credential broker records secret-free receipts and deduplicates a logical retry"
+    },
+    {
+      "id": "governed-action-concurrency",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["concurrency", "crash-recovery"],
+      "file": "test/governedAction.test.ts",
+      "fullName": "governed action pipeline serializes a pool-sized same-action recovery burst without starving the pool"
+    },
+    {
+      "id": "governed-action-uncertain-failure",
+      "riskIds": ["MAR-P0-004"],
+      "dimensions": ["crash-recovery", "governed-http", "governed-mcp"],
+      "file": "test/governedAction.test.ts",
+      "fullName": "governed action pipeline marks uncertain mutation failures for reconciliation and will not redispatch them"
+    }
+  ]
+}

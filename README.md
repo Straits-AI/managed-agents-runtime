@@ -18,6 +18,14 @@ actions.
 drive agents through the API, multi-tenancy, credentials, streaming/Kafka, and
 best practices. Cost is in [docs/COST.md](./docs/COST.md).
 
+> **Release status:** the automated
+> [controlled multi-tenant alpha gate](./docs/CONTROLLED-ALPHA-RELEASE-GATE.md)
+> passes for this source revision. It checks the full suite plus named P0
+> configuration, tenancy, admission, knowledge, HTTP/MCP, credential,
+> concurrency, and crash-recovery assertions, and retains commit-bound JSON
+> evidence in CI. This is a controlled-alpha claim only: live provider
+> conformance, the P1 register, and explicit production approval remain open.
+
 ## Architecture
 
 ```
@@ -125,9 +133,8 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
 npm install
 docker compose up -d   # local Postgres 16 on :5433
 npm run migrate
-npm test               # 104 tests: state machine, crash recovery, approvals,
-                       # exactly-once side effects, supervisor, multi-tenancy,
-                       # streaming, fork, credentials — all against local Postgres
+npm test               # full state-machine and integration suite
+npm run release:gate   # controlled-alpha P0 gate + machine-readable evidence
 ```
 
 Then read the [Usage Guide](./docs/GUIDE.md) to drive agents through the API.
@@ -223,16 +230,17 @@ artifacts. Exit code 0 = Phase 1 accepted.
 | M4 signer + preflight | ✅ built + run against live BytePlus |
 | M5–M8 real epoch, receipts, verifier | ✅ built + exercised end-to-end |
 | M9 survival benchmark | ✅ **PASSED on the live stack** (TOS + ModelArk + Cloud Sandbox via APIG), 2026-07-17 — 57-event gapless history, exactly-once external write |
+| Controlled multi-tenant alpha | ✅ automated P0 gate: fail-closed configuration, tenant inheritance, atomic admission, knowledge isolation, governed HTTP/MCP, credentials, concurrency, and crash recovery. Machine-readable evidence is retained by CI. This is not a public-beta or production-ready claim. |
 | Phase 2A: harden what we own | ✅ tool-level observability, budget-exhaustion enforcement, denied-approval, external signals + scheduled runs — all tested |
 | Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres adapter (default) behind a provider-neutral `MemoryProvider`; the AgentKit adapter (`src/providers/agentkitMemory.ts`) is proven live (next row). |
 | Phase 2 — AgentKit Memory binding | ✅ **live**: `MEMORY_PROVIDER=agentkit` writes/recalls via Viking Memory (AgentKit's memory backend) through a path-based SignerV4 client. Confirmed end-to-end (write → async AI extraction → recall). |
-| Phase 2 — Knowledge / Skills / MCP | ✅ Knowledge (RAG `knowledge_search`), Skills (version-pinned, materialized into the workspace), MCP (namespaced toolsets routed through the capability layer). Postgres/registry defaults + AgentKit adapter seams. |
+| Phase 2 — Knowledge / Skills / MCP | ✅ Postgres knowledge, registry Skills, and policy-classified registry MCP are implemented. The AgentKit Knowledge adapter is tenant-bound but remains fail-closed in shared deployments until live conformance is attested; AgentKit Skills/MCP remain adapter seams, not live-verified integrations. |
 | Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. |
 | Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). |
 | Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. |
 | Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. |
-| Productionization | ✅ multi-tenant auth (per-tenant API keys, tenant-scoped everything), per-tenant quotas, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Cost reference in [`docs/COST.md`](./docs/COST.md). |
-| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, outbox relay + `EventPublisher` with a **live-verified** Kafka adapter, and a credential broker (encrypted per-tenant secrets injected into tool calls, never the model) with **local + BytePlus KMS** ciphers. 104 tests. |
+| Controlled-alpha operations | ✅ multi-tenant auth, atomic per-tenant admission, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Public-beta and production gates remain open. Cost reference in [`docs/COST.md`](./docs/COST.md). |
+| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, outbox relay + `EventPublisher` with a **live-verified** Kafka adapter, and a credential broker (encrypted per-tenant secrets injected into tool calls, never the model) with **local + BytePlus KMS** ciphers. |
 
 Built well beyond the original Phase 1 cut: subagents (Phase 3), signals +
 scheduling, AgentKit Memory/Knowledge/Skills/MCP (Phase 2), the semantic
