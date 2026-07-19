@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import type { Config } from '../config.js';
 import type { ObjectStore } from '../providers/types.js';
@@ -34,7 +35,7 @@ export function buildServer(deps: ApiDeps): FastifyInstance {
     // Bound request bodies so a client can't OOM the API with a huge payload.
     bodyLimit: deps.cfg.API_BODY_LIMIT_BYTES,
     // Trust a correlation id from the caller if present, else generate one.
-    genReqId: (req) => (req.headers['x-request-id'] as string) ?? undefined,
+    genReqId: (req) => (req.headers['x-request-id'] as string) ?? randomUUID(),
   });
 
   const limiter = rateLimiter(deps.cfg, deps.pool);
@@ -80,8 +81,13 @@ export function buildServer(deps: ApiDeps): FastifyInstance {
       : err.statusCode ?? 500;
     if (status >= 500) {
       log.error('request error', { reqId: req.id, err: err.message, name: err.name });
+      return reply.code(status).send({
+        error: 'internal_error',
+        message: 'Internal server error',
+        requestId: req.id,
+      });
     }
-    reply.code(status).send({ error: err.name, message: err.message });
+    return reply.code(status).send({ error: err.name, message: err.message });
   });
 
   registerHealthRoutes(app, deps);

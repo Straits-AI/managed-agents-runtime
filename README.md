@@ -163,7 +163,7 @@ node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→
 Run the platform:
 
 ```bash
-npm run api         # public API (set API_PORT if 8080 is taken)
+npm run api         # API on 127.0.0.1:8080 (set API_HOST/API_PORT to override)
 npm run worker      # harness worker (WORKER_EPOCH=scripted for no-model runs)
 ```
 
