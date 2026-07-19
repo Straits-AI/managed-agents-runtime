@@ -19,6 +19,7 @@ export interface ToolDef {
   name: string;
   description: string;
   parameters: Record<string, unknown>; // JSON Schema
+  annotations?: { readOnlyHint?: boolean };
 }
 
 export interface ModelProvider {
@@ -163,6 +164,10 @@ export interface McpToolProvider {
     toolsetRef: string,
     name: string,
     args: Record<string, unknown>,
+    context: {
+      idempotencyKey: string;
+      credential: { headerName: string; headerValue: string } | null;
+    },
   ): Promise<{ content: string }>;
 }
 

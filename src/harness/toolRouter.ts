@@ -15,19 +15,11 @@ import type {
 import type { McpRouteEntry } from './mcp.js';
 import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
-import {
-  commitReceipt,
-  findReceiptByLineageKey,
-  idempotencyKey,
-  insertPendingReceipt,
-  replacementRootRunId,
-} from '../store/receipts.js';
-import { authorizeAndConsume, listGrants, patternMatches } from '../store/grants.js';
-import { insertApproval, listApprovals } from '../store/approvals.js';
 import { listEvents } from '../store/events.js';
 import { spawnChildren } from '../scheduler/children.js';
 import { WORKSPACE_DIR } from './workspace.js';
 import { maybeCrash } from './faults.js';
+import { executeGovernedAction } from './governedAction.js';
 
 export type ToolOutcome =
   | { kind: 'result'; content: string }
@@ -177,7 +169,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'external_http_request',
     description:
-      'Call an external HTTP API. Non-GET requests are external side effects: they are policy-checked, may require human approval (the run suspends until decided), and are executed exactly once per unique request.',
+      'Call an external HTTP API. Non-GET requests are policy-checked, may require human approval, and use a durable idempotency receipt. Exactly-once execution requires the remote API to honor the supplied idempotency key.',
     parameters: {
       type: 'object',
       properties: {
@@ -363,69 +355,44 @@ async function dispatchMcp(
 ): Promise<ToolOutcome> {
   const action = `mcp.${entry.toolsetRef}.${entry.originalName}`;
   const resource = entry.toolsetRef;
-  const key = idempotencyKey({ runId: ctx.run.id, action, args });
-
-  // Grant match (no consumption yet — consumption happens at execution).
-  const grants = await listGrants(ctx.pool, ctx.run.id);
-  const grant = grants.find(
-    (g) =>
-      patternMatches(g.action_pattern, action) &&
-      patternMatches(g.resource_pattern, resource) &&
-      (g.max_calls === null || g.calls_used < g.max_calls),
+  const outcome = await executeGovernedAction(
+    {
+      pool: ctx.pool,
+      run: ctx.run,
+      attempt: ctx.attempt,
+      step: ctx.step,
+      credentials: ctx.credentials,
+    },
+    {
+      connector: 'mcp',
+      action,
+      resource,
+      args,
+      classification: entry.classification,
+      requireGrant: true,
+      // MCP has no idempotency/reconciliation protocol yet. Never blindly
+      // replay an uncertain mutation. Providers receive the stable key so a
+      // transport that supports idempotency can honor it; issue #8 adds
+      // provider-level conformance and reconciliation capabilities.
+      recovery: 'reconcile',
+      dispatch: async ({ idempotencyKey, credential }) => {
+        const result = await ctx.mcp!.callTool(
+          entry.toolsetRef,
+          entry.originalName,
+          args,
+          { idempotencyKey, credential },
+        );
+        return {
+          value: result,
+        };
+      },
+    },
   );
-  if (!grant) {
-    await withTransaction(ctx.pool, (tx) =>
-      appendEvent(tx, ctx.run.id, { type: 'ActionDenied', payload: { action, resource } }, {
-        attemptId: ctx.attempt.id,
-      }),
-    );
-    return { kind: 'result', content: `error: no capability grant allows ${action} on ${resource}` };
+  if (outcome.kind === 'suspend_approval') return outcome;
+  if (outcome.kind === 'denied' || outcome.kind === 'reconciliation_required') {
+    return { kind: 'result', content: `error: ${outcome.reason}` };
   }
-
-  // Approval gate: suspend until a human decides, then replay on resume.
-  if (grant.requires_approval) {
-    const approvals = await listApprovals(ctx.pool, ctx.run.id);
-    const match = approvals.find(
-      (a) => (a.action.arguments as { __idemKey?: string }).__idemKey === key,
-    );
-    if (!match) {
-      const approvalId = await withTransaction(ctx.pool, async (tx) => {
-        const approval = await insertApproval(tx, {
-          runId: ctx.run.id,
-          attemptId: ctx.attempt.id,
-          action: { action, resource, arguments: { ...args, __idemKey: key }, risk: 'external_write' },
-        });
-        await transitionRun(tx, ctx.run.id, {
-          expectFrom: ['RUNNING'],
-          to: 'WAITING_APPROVAL',
-          event: { type: 'ApprovalRequested', payload: { approvalId: approval.id, action, resource } },
-          attemptId: ctx.attempt.id,
-        });
-        return approval.id;
-      });
-      return { kind: 'suspend_approval', approvalId };
-    }
-    if (match.status === 'DENIED') {
-      return {
-        kind: 'result',
-        content: `error: ${action} was denied by ${match.decision_by ?? 'a human'} — do not retry it`,
-      };
-    }
-    if (match.status !== 'APPROVED') {
-      return { kind: 'result', content: 'error: approval still pending' };
-    }
-  }
-
-  // Consume the grant (enforces resource, expiry, max_calls) then execute.
-  const auth = await withTransaction(ctx.pool, (tx) =>
-    authorizeAndConsume(tx, ctx.run.id, action, resource),
-  );
-  if (!auth.allowed) {
-    return { kind: 'result', content: `error: ${(auth as { reason: string }).reason}` };
-  }
-  const res = await ctx.mcp!.callTool(entry.toolsetRef, entry.originalName, args);
-  await emitToolInvoked(ctx, 'mcp', { action, resource });
-  return { kind: 'result', content: res.content };
+  return { kind: 'result', content: outcome.value.content };
 }
 
 /**
@@ -526,207 +493,81 @@ async function externalHttpRequest(
   const method = String(args.method ?? 'GET').toUpperCase();
   const url = String(args.url ?? '');
   const resource = safeOrigin(url);
-  const isWrite = method !== 'GET';
-  const idempotencyScope = await replacementRootRunId(ctx.pool, ctx.run.id);
-  const idemKey = idempotencyKey({ runId: idempotencyScope, action: ACTION_NAME, args });
+  const classification = method === 'GET' ? 'read' : 'mutation';
+  const outcome = await executeGovernedAction(
+    {
+      pool: ctx.pool,
+      run: ctx.run,
+      attempt: ctx.attempt,
+      step: ctx.step,
+      credentials: ctx.credentials,
+    },
+    {
+      connector: 'http',
+      action: ACTION_NAME,
+      resource,
+      args,
+      classification,
+      requireGrant: classification === 'mutation',
+      recovery: 'retry_with_idempotency',
+      audit: { method },
+      validate: ({ hasDeclaredGrant }) => checkUrlPolicy(url, hasDeclaredGrant),
+      beforeDispatch: () => maybeCrash(ctx.cfg, ctx.run, 'before_external_commit'),
+      afterCommit: () => maybeCrash(ctx.cfg, ctx.run, 'after_external_commit'),
+      dispatch: async ({ idempotencyKey, credential }) => {
+        // Model headers may add metadata, but reserved transport headers and
+        // credentials always win and never enter the model-visible args.
+        const headers: Record<string, string> = {};
+        for (const [name, value] of Object.entries(
+          (args.headers as Record<string, string> | undefined) ?? {},
+        )) {
+          if (!['host', 'content-length', 'transfer-encoding'].includes(name.toLowerCase())) {
+            headers[name] = String(value);
+          }
+        }
+        if (credential) headers[credential.headerName] = credential.headerValue;
+        headers['content-type'] = 'application/json';
+        headers['idempotency-key'] = idempotencyKey;
 
-  // SSRF guard: only http(s), and private/loopback/link-local hosts are
-  // reachable only when a capability grant explicitly covers the origin —
-  // GETs must not become an ungated probe into the worker's network.
-  const grants0 = await listGrants(ctx.pool, ctx.run.id);
-  const originGranted = grants0.some(
-    (g) =>
-      patternMatches(g.action_pattern, ACTION_NAME) &&
-      patternMatches(g.resource_pattern, resource),
+        const response = await fetch(url, {
+          method,
+          headers,
+          body:
+            classification === 'mutation' && args.body !== undefined
+              ? JSON.stringify(args.body)
+              : undefined,
+        });
+        const text = await response.text();
+        let parsedBody: unknown;
+        try {
+          parsedBody = JSON.parse(text);
+        } catch {
+          parsedBody = text.slice(0, 5_000);
+        }
+        const result = { status: response.status, body: parsedBody };
+        return {
+          value: result,
+          externalTxnId: response.headers.get('x-transaction-id') ?? undefined,
+          audit: { status: response.status },
+        };
+      },
+    },
   );
-  const urlPolicy = checkUrlPolicy(url, originGranted);
-  if (!urlPolicy.ok) {
-    return { kind: 'result', content: `error: ${urlPolicy.reason}` };
+  if (outcome.kind === 'suspend_approval') return outcome;
+  if (outcome.kind === 'denied' || outcome.kind === 'reconciliation_required') {
+    return { kind: 'result', content: `error: ${outcome.reason}` };
   }
-
-  // Recovery dedupe: an already-committed identical action returns its
-  // recorded result — the external effect happened exactly once.
-  const existing = await findReceiptByLineageKey(ctx.pool, ctx.run.id, idemKey);
-  if (existing?.status === 'COMMITTED') {
+  if (outcome.deduplicated) {
     return {
       kind: 'result',
       content: JSON.stringify({
         deduplicated: true,
         note: 'this action was already executed before a recovery; returning the recorded result',
-        result: existing.result,
+        result: outcome.value,
       }),
     };
   }
-  if (existing && existing.status !== 'PENDING') {
-    return {
-      kind: 'result',
-      content: `error: prior external action is ${existing.status.toLowerCase()} and requires reconciliation`,
-    };
-  }
-  const pendingRecovery = existing?.status === 'PENDING';
-
-  if (isWrite) {
-    // A PENDING receipt was created only after grant consumption and any
-    // required approval. Recovery must reuse it even when that consumption
-    // exhausted the allowance; a genuinely new action still needs capacity.
-    const grants = await listGrants(ctx.pool, ctx.run.id);
-    const grant = grants.find(
-      (g) =>
-        patternMatches(g.action_pattern, ACTION_NAME) &&
-        patternMatches(g.resource_pattern, resource) &&
-        (g.expires_at === null || g.expires_at > new Date()) &&
-        (pendingRecovery || g.max_calls === null || g.calls_used < g.max_calls),
-    );
-    if (!grant) {
-      await withTransaction(ctx.pool, (tx) =>
-        appendEvent(
-          tx,
-          ctx.run.id,
-          { type: 'ActionDenied', payload: { action: ACTION_NAME, resource } },
-          { attemptId: ctx.attempt.id },
-        ),
-      );
-      return {
-        kind: 'result',
-        content: `error: no capability grant allows ${ACTION_NAME} on ${resource}`,
-      };
-    }
-
-    if (grant.requires_approval && !pendingRecovery) {
-      const approvals = await listApprovals(ctx.pool, ctx.run.id);
-      const match = approvals.find(
-        (a) => (a.action.arguments as { __idemKey?: string }).__idemKey === idemKey,
-      );
-      if (!match) {
-        // Suspend: approval row + WAITING_APPROVAL, sandbox released by
-        // the epoch. Checkpointing happens in the epoch before returning.
-        const approvalId = await withTransaction(ctx.pool, async (tx) => {
-          const approval = await insertApproval(tx, {
-            runId: ctx.run.id,
-            attemptId: ctx.attempt.id,
-            action: {
-              action: ACTION_NAME,
-              resource,
-              arguments: { ...args, __idemKey: idemKey },
-              risk: 'external_write',
-            },
-          });
-          await transitionRun(tx, ctx.run.id, {
-            expectFrom: ['RUNNING'],
-            to: 'WAITING_APPROVAL',
-            event: {
-              type: 'ApprovalRequested',
-              payload: { approvalId: approval.id, action: ACTION_NAME, resource },
-            },
-            attemptId: ctx.attempt.id,
-          });
-          return approval.id;
-        });
-        return { kind: 'suspend_approval', approvalId };
-      }
-      if (match.status === 'DENIED') {
-        return {
-          kind: 'result',
-          content: `error: this action was denied by ${match.decision_by ?? 'a human'} — do not retry it; adapt your plan`,
-        };
-      }
-      if (match.status !== 'APPROVED') {
-        return { kind: 'result', content: 'error: approval still pending' };
-      }
-    }
-  }
-
-  // Execute with the durable receipt protocol.
-  const receipt =
-    (pendingRecovery ? existing : null) ??
-    (await withTransaction(ctx.pool, async (tx) => {
-      const auth = await authorizeAndConsume(tx, ctx.run.id, ACTION_NAME, resource);
-      if (isWrite && !auth.allowed) {
-        throw new Error(`capability disappeared: ${(auth as { reason: string }).reason}`);
-      }
-      const r = await insertPendingReceipt(tx, {
-        runId: ctx.run.id,
-        attemptId: ctx.attempt.id,
-        step: ctx.step,
-        action: ACTION_NAME,
-        args,
-        idempotencyKey: idemKey,
-        reversibility: isWrite ? 'irreversible' : 'reversible',
-      });
-      await appendEvent(
-        tx,
-        ctx.run.id,
-        {
-          type: 'ToolInvocationStarted',
-          payload: { receiptId: r.id, action: ACTION_NAME, resource, method },
-        },
-        { attemptId: ctx.attempt.id },
-      );
-      return r;
-    }));
-
-  maybeCrash(ctx.cfg, ctx.run, 'before_external_commit');
-
-  // Model-supplied headers may add auth etc., but must never override the
-  // reserved headers — the idempotency key in particular is what makes the
-  // action exactly-once, so ours are applied last.
-  const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(
-    (args.headers as Record<string, string> | undefined) ?? {},
-  )) {
-    if (!['host', 'content-length', 'transfer-encoding'].includes(k.toLowerCase())) {
-      headers[k] = String(v);
-    }
-  }
-  // Credential broker (memo §9.5): inject the tenant's scoped secret for this
-  // action+resource, applied after model headers so it wins. The secret is set
-  // on the outbound request only — it never enters tool args, the result, the
-  // receipt, or the model context.
-  if (ctx.credentials) {
-    const cred = await ctx.credentials.resolve({
-      tenantId: ctx.run.tenant_id,
-      runId: ctx.run.id,
-      action: ACTION_NAME,
-      resource,
-    });
-    if (cred) headers[cred.headerName] = cred.headerValue;
-  }
-  headers['content-type'] = 'application/json';
-  headers['idempotency-key'] = idemKey;
-
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: isWrite && args.body !== undefined ? JSON.stringify(args.body) : undefined,
-  });
-  const text = await response.text();
-  let parsedBody: unknown;
-  try {
-    parsedBody = JSON.parse(text);
-  } catch {
-    parsedBody = text.slice(0, 5_000);
-  }
-  const result = { status: response.status, body: parsedBody };
-
-  await withTransaction(ctx.pool, async (tx) => {
-    await commitReceipt(tx, receipt.id, {
-      externalTxnId: response.headers.get('x-transaction-id') ?? undefined,
-      result,
-    });
-    await appendEvent(
-      tx,
-      ctx.run.id,
-      {
-        type: 'ToolInvocationCommitted',
-        payload: { receiptId: receipt.id, status: response.status },
-      },
-      { attemptId: ctx.attempt.id },
-    );
-  });
-
-  maybeCrash(ctx.cfg, ctx.run, 'after_external_commit');
-
-  return { kind: 'result', content: JSON.stringify(result) };
+  return { kind: 'result', content: JSON.stringify(outcome.value) };
 }
 
 function safeOrigin(url: string): string {

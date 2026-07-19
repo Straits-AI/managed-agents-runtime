@@ -1,9 +1,11 @@
 import type { McpToolProvider, ToolDef } from '../providers/types.js';
+import type { ActionClassification } from './governedAction.js';
 
 /** Route entry for a resolved MCP tool: which toolset + its original name. */
 export interface McpRouteEntry {
   toolsetRef: string;
   originalName: string;
+  classification: ActionClassification;
 }
 
 const PREFIX = 'mcp__';
@@ -28,7 +30,11 @@ export async function resolveMcpTools(
     for (const t of tools) {
       const namespaced = `${PREFIX}${ref}__${t.name}`;
       defs.push({ ...t, name: namespaced });
-      route.set(namespaced, { toolsetRef: ref, originalName: t.name });
+      route.set(namespaced, {
+        toolsetRef: ref,
+        originalName: t.name,
+        classification: t.annotations?.readOnlyHint === true ? 'read' : 'mutation',
+      });
     }
   }
   return { defs, route };
