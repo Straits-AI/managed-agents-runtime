@@ -134,7 +134,7 @@ npm install
 docker compose up -d   # local Postgres 16 on :5433
 npm run migrate
 npm test               # full state-machine and integration suite
-npm run release:gate   # controlled-alpha P0 gate + machine-readable evidence
+npm run release:gate   # dependency audit + controlled-alpha P0 evidence
 ```
 
 Then read the [Usage Guide](./docs/GUIDE.md) to drive agents through the API.

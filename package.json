@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@agent-infra/sandbox": "^1.0.17",
-    "@volcengine/tos-sdk": "^2.9.1",
     "fastify": "^5.10.0",
     "kafkajs": "^2.2.4",
     "openai": "^6.47.0",

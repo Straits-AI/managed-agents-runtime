@@ -18,9 +18,20 @@ import {
   validateReleaseGateManifestBaseline,
   validateReleaseSource,
 } from '../src/releaseGate.js';
+import {
+  dependencyAuditExceptionsSha256,
+  evaluateDependencyAudit,
+  parseDependencyAuditExceptions,
+  type DependencyAuditEvaluation,
+} from '../src/dependencyAudit.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = join(root, 'release-gate', 'controlled-multitenant-alpha.v1.json');
+const dependencyExceptionsPath = join(
+  root,
+  'release-gate',
+  'dependency-audit-exceptions.v1.json',
+);
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -43,7 +54,7 @@ interface StepResult {
   command: string[];
   startedAt: string;
   finishedAt: string;
-  exitCode: number;
+  exitCode: number | null;
   signal: string | null;
   stdout: string;
   stderr: string;
@@ -68,7 +79,7 @@ function runStep(name: string, command: string, args: string[]): StepResult {
     command: [command, ...args],
     startedAt,
     finishedAt: new Date().toISOString(),
-    exitCode: result.status ?? 1,
+    exitCode: result.status,
     signal: result.signal,
     stdout: `${name}.stdout.log`,
     stderr: `${name}.stderr.log`,
@@ -162,12 +173,18 @@ if (sourceErrors.length > 0) failInitialization(sourceErrors);
 
 let manifestSource: string;
 let manifest;
+let dependencyExceptionsSource: string;
+let dependencyExceptions;
 try {
   manifestSource = readFileSync(manifestPath, 'utf8');
   manifest = parseReleaseGateManifest(JSON.parse(manifestSource) as unknown);
+  dependencyExceptionsSource = readFileSync(dependencyExceptionsPath, 'utf8');
+  dependencyExceptions = parseDependencyAuditExceptions(
+    JSON.parse(dependencyExceptionsSource) as unknown,
+  );
 } catch (error) {
   failInitialization([
-    `release gate manifest could not be loaded: ${error instanceof Error ? error.message : 'unknown error'}`,
+    `release gate policy could not be loaded: ${error instanceof Error ? error.message : 'unknown error'}`,
   ]);
 }
 const manifestSha256 = releaseGateManifestSha256(manifestSource);
@@ -177,7 +194,16 @@ writeFileSync(
   join(evidenceDir, 'manifest.snapshot.json'),
   `${JSON.stringify(manifest, null, 2)}\n`,
 );
+writeFileSync(
+  join(evidenceDir, 'dependency-audit-exceptions.snapshot.json'),
+  `${JSON.stringify(dependencyExceptions, null, 2)}\n`,
+);
 
+const dependencyAudit = runStep(
+  'dependency-audit',
+  process.platform === 'win32' ? 'npm.cmd' : 'npm',
+  ['audit', '--omit=dev', '--audit-level=high', '--json'],
+);
 const typecheck = runStep('typecheck', join(root, 'node_modules', '.bin', 'tsc'), ['--noEmit']);
 const vitestPath = join(evidenceDir, 'vitest.json');
 const vitestRawPath = join(
@@ -191,7 +217,29 @@ const tests = runStep('vitest', join(root, 'node_modules', '.bin', 'vitest'), [
 ]);
 
 let evaluation: ReleaseGateEvaluation | null = null;
+let dependencyEvaluation: DependencyAuditEvaluation | null = null;
 const errors: string[] = [];
+try {
+  const auditReport = sanitizeJson(
+    JSON.parse(readFileSync(join(evidenceDir, dependencyAudit.stdout), 'utf8')) as unknown,
+  );
+  writeFileSync(
+    join(evidenceDir, 'dependency-audit.json'),
+    `${JSON.stringify(auditReport)}\n`,
+  );
+  dependencyEvaluation = evaluateDependencyAudit(
+    auditReport,
+    dependencyExceptions,
+    dependencyAuditExceptionsSha256(dependencyExceptionsSource),
+    new Date(),
+    dependencyAudit.exitCode,
+  );
+  errors.push(...dependencyEvaluation.errors);
+} catch (error) {
+  errors.push(
+    `could not evaluate dependency audit evidence: ${error instanceof Error ? error.message : 'unknown error'}`,
+  );
+}
 if (typecheck.exitCode !== 0) errors.push('typecheck failed');
 if (tests.exitCode !== 0) errors.push('Vitest failed');
 if (!existsSync(vitestRawPath)) {
@@ -233,7 +281,8 @@ const summary = {
     architecture: process.arch,
     databaseTarget: process.env.TEST_DATABASE_URL ? 'TEST_DATABASE_URL' : 'local-default',
   },
-  steps: [typecheck, tests],
+  steps: [dependencyAudit, typecheck, tests],
+  dependencyEvaluation,
   evaluation,
   providerSurfaces: manifest.providerSurfaces,
   limitations: manifest.limitations,
@@ -242,6 +291,14 @@ const summary = {
     manifest: {
       path: 'manifest.snapshot.json',
       sha256: sha256(join(evidenceDir, 'manifest.snapshot.json')),
+    },
+    dependencyAuditExceptions: {
+      path: 'dependency-audit-exceptions.snapshot.json',
+      sha256: sha256(join(evidenceDir, 'dependency-audit-exceptions.snapshot.json')),
+    },
+    dependencyAudit: {
+      path: 'dependency-audit.json',
+      sha256: sha256(join(evidenceDir, 'dependency-audit.json')),
     },
     vitest: {
       path: 'vitest.json',

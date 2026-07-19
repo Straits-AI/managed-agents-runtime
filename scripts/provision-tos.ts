@@ -4,8 +4,8 @@
  *
  *   node --env-file=.env --import tsx scripts/provision-tos.ts
  */
-import { TosClient, TosServerError } from '@volcengine/tos-sdk';
 import { loadConfig, requireConfig } from '../src/config.js';
+import { TosObjectStore } from '../src/providers/tosObjectStore.js';
 
 const cfg = loadConfig();
 const required = requireConfig(cfg, [
@@ -13,42 +13,23 @@ const required = requireConfig(cfg, [
   'BYTEPLUS_SECRET_ACCESS_KEY',
   'TOS_BUCKET',
 ]);
+const store = new TosObjectStore(cfg);
 
-const client = new TosClient({
-  accessKeyId: required.BYTEPLUS_ACCESS_KEY_ID,
-  accessKeySecret: required.BYTEPLUS_SECRET_ACCESS_KEY,
-  stsToken: cfg.BYTEPLUS_SESSION_TOKEN,
-  region: cfg.TOS_REGION,
-  endpoint: cfg.TOS_ENDPOINT,
-});
-const bucket = required.TOS_BUCKET;
-
-async function bucketExists(): Promise<boolean> {
-  try {
-    await client.headBucket(bucket);
-    return true;
-  } catch (err) {
-    if (err instanceof TosServerError && err.statusCode === 404) return false;
-    throw err;
-  }
-}
-
-if (await bucketExists()) {
-  console.log(`bucket ${bucket} already exists — reusing`);
+if (await store.bucketExists()) {
+  console.log(`bucket ${required.TOS_BUCKET} already exists — reusing`);
 } else {
-  await client.createBucket({ bucket }); // private ACL by default
-  console.log(`bucket ${bucket} created (private, ${cfg.TOS_REGION})`);
+  await store.createBucket(); // private ACL by default
+  console.log(`bucket ${required.TOS_BUCKET} created (private, ${cfg.TOS_REGION})`);
 }
 
 // Fresh-read verification: control plane + data plane roundtrip.
-await client.headBucket(bucket);
+if (!await store.bucketExists()) throw new Error('bucket was not visible after creation');
 const key = '_smoke/roundtrip.txt';
-const payload = `smoke ${new Date().toISOString()}`;
-await client.putObject({ bucket, key, body: Buffer.from(payload) });
-const got = await client.getObjectV2({ bucket, key, dataType: 'buffer' });
-const roundtrip = (got.data.content as Buffer).toString('utf8');
-if (roundtrip !== payload) {
-  throw new Error(`roundtrip mismatch: ${roundtrip}`);
+const payload = Buffer.from(`smoke ${new Date().toISOString()}`);
+await store.put(key, payload);
+const roundtrip = await store.get(key);
+if (!roundtrip.equals(payload)) {
+  throw new Error(`roundtrip mismatch: ${roundtrip.toString('utf8')}`);
 }
-await client.deleteObject({ bucket, key });
+await store.delete(key);
 console.log('verified: head + put/get/delete roundtrip OK');

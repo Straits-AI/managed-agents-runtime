@@ -161,5 +161,11 @@ describe('production configuration', () => {
     expect(cfg.MCP_MAX_RESPONSE_BYTES).toBe(1_048_576);
     expect(cfg.MCP_MAX_EXTERNAL_TXN_ID_BYTES).toBe(1_024);
     expect(cfg.HTTP_MAX_EXTERNAL_TXN_ID_BYTES).toBe(1_024);
+    expect(cfg.TOS_REQUEST_TIMEOUT_MS).toBe(120_000);
+    expect(cfg.TOS_MAX_ATTEMPTS).toBe(3);
+    expect(cfg.TOS_MAX_OBJECT_BYTES).toBe(512 * 1024 * 1024);
+    expect(() => loadConfig({ TOS_MAX_ATTEMPTS: '11' })).toThrow();
+    expect(() => loadConfig({ TOS_REQUEST_TIMEOUT_MS: '999' })).toThrow();
+    expect(() => loadConfig({ TOS_MAX_OBJECT_BYTES: '2147483649' })).toThrow();
   });
 });

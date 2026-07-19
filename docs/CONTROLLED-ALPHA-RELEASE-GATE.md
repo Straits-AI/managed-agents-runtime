@@ -6,8 +6,9 @@ The controlled multi-tenant alpha is admitted by one versioned command:
 npm run release:gate
 ```
 
-The command is not a shorthand for “the tests looked green.” It runs TypeScript
-checking and the complete Vitest integration suite, then validates the emitted
+The command is not a shorthand for “the tests looked green.” It audits
+production dependencies, runs TypeScript checking and the complete Vitest
+integration suite, then validates the emitted
 Vitest JSON against
 [`controlled-multitenant-alpha.v1.json`](../release-gate/controlled-multitenant-alpha.v1.json).
 That manifest names the tests that must continue to prove:
@@ -27,6 +28,13 @@ v1 manifest is frozen by an expected SHA-256 digest and assertion count, and the
 full suite cannot fall below its reviewed minimum test count, so shrinking
 coverage cannot self-attest as an equivalent v1 gate. A future manifest revision
 must update that reviewed baseline explicitly.
+
+The dependency step fails high or critical production advisories unless an
+exact advisory/package/severity tuple has a reviewed, owned, reasoned, unexpired entry in
+the frozen exception registry. It validates audit schema, severity propagation,
+metadata consistency, and process completion before applying those exceptions.
+The v1 registry is empty. See
+[`TOS-DEPENDENCY-HARDENING.md`](./TOS-DEPENDENCY-HARDENING.md).
 
 ## Clean local run
 
@@ -54,6 +62,10 @@ Each run retains:
 release-evidence/<run>/
 ├── summary.json
 ├── manifest.snapshot.json
+├── dependency-audit-exceptions.snapshot.json
+├── dependency-audit.json
+├── dependency-audit.stdout.log
+├── dependency-audit.stderr.log
 ├── vitest.json
 ├── typecheck.stdout.log
 ├── typecheck.stderr.log
@@ -62,8 +74,9 @@ release-evidence/<run>/
 ```
 
 `summary.json` records the gate version, result, exact commit, runtime, step exit
-codes, every critical assertion, provider-surface policy, limitations, and
-SHA-256 digests for the manifest and Vitest evidence. The test processes receive
+codes, dependency findings and exceptions, every critical assertion,
+provider-surface policy, limitations, and SHA-256 digests for policy and test
+evidence. The child processes receive
 a minimal environment without cloud/provider credentials, and every retained
 diagnostic and Vitest string is redacted before upload. The summary records only
 the database variable name, never connection strings or credentials. When CI
