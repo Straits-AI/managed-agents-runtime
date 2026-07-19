@@ -7,7 +7,7 @@ import { listApprovals, decideApproval } from '../src/store/approvals.js';
 import { transitionRun } from '../src/core/transition.js';
 import { dispatchTool, type ToolContext } from '../src/harness/toolRouter.js';
 import { RegistryMcpProvider } from '../src/providers/registryMcp.js';
-import { resolveMcpTools } from '../src/harness/mcp.js';
+import { resolveMcpTools, type McpRouteEntry } from '../src/harness/mcp.js';
 import { loadConfig } from '../src/config.js';
 import { newId } from '../src/ids.js';
 import type { RunAttemptRow, RunRow } from '../src/core/types.js';
@@ -20,6 +20,15 @@ const mcp = new RegistryMcpProvider().registerToolset('crm', [
   {
     def: { name: 'lookup_customer', description: 'find a customer', parameters: { type: 'object', properties: { id: { type: 'string' } } } },
     handler: (args) => JSON.stringify({ id: args.id, name: 'Acme Corp' }),
+  },
+  {
+    def: {
+      name: 'get_customer',
+      description: 'read a customer',
+      parameters: { type: 'object', properties: { id: { type: 'string' } } },
+      annotations: { readOnlyHint: true },
+    },
+    handler: (args) => JSON.stringify({ id: args.id, name: 'Read Only Corp' }),
   },
 ]);
 
@@ -55,7 +64,7 @@ async function runningRun(
   return { run: running, attempt: rows[0]! };
 }
 
-function ctx(run: RunRow, attempt: RunAttemptRow, route: Map<string, { toolsetRef: string; originalName: string }>): ToolContext {
+function ctx(run: RunRow, attempt: RunAttemptRow, route: Map<string, McpRouteEntry>): ToolContext {
   return {
     pool: db.pool, cfg, run, attempt,
     sandbox: {} as ToolContext['sandbox'],
@@ -68,8 +77,16 @@ function ctx(run: RunRow, attempt: RunAttemptRow, route: Map<string, { toolsetRe
 describe('MCP toolsets', () => {
   it('namespaces toolset tools into the model tool list', async () => {
     const { defs, route } = await resolveMcpTools(mcp, ['crm']);
-    expect(defs.map((d) => d.name)).toEqual(['mcp__crm__lookup_customer']);
-    expect(route.get('mcp__crm__lookup_customer')).toEqual({ toolsetRef: 'crm', originalName: 'lookup_customer' });
+    expect(defs.map((d) => d.name)).toEqual([
+      'mcp__crm__lookup_customer',
+      'mcp__crm__get_customer',
+    ]);
+    expect(route.get('mcp__crm__lookup_customer')).toEqual({
+      toolsetRef: 'crm',
+      originalName: 'lookup_customer',
+      classification: 'mutation',
+    });
+    expect(route.get('mcp__crm__get_customer')?.classification).toBe('read');
   });
 
   it('routes a granted MCP call through the provider', async () => {
@@ -78,10 +95,17 @@ describe('MCP toolsets', () => {
     const outcome = await dispatchTool(ctx(run, attempt, route), 'mcp__crm__lookup_customer', { id: 'C-1' });
     expect((outcome as { content: string }).content).toContain('Acme Corp');
     const { rows } = await db.pool.query(
-      `SELECT 1 FROM run_events WHERE run_id = $1 AND type = 'ToolInvoked' AND payload->>'tool' = 'mcp'`,
+      `SELECT 1 FROM run_events
+       WHERE run_id = $1 AND type = 'ToolInvocationCommitted'
+         AND payload->>'connector' = 'mcp'`,
       [run.id],
     );
     expect(rows).toHaveLength(1);
+    const { rows: receipts } = await db.pool.query<{ status: string; reversibility: string }>(
+      'SELECT status, reversibility FROM tool_receipts WHERE run_id = $1',
+      [run.id],
+    );
+    expect(receipts).toEqual([{ status: 'COMMITTED', reversibility: 'irreversible' }]);
   });
 
   it('denies an ungranted MCP call and records ActionDenied', async () => {

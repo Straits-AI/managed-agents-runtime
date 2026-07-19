@@ -8,6 +8,7 @@ import { createRun, getRun } from '../src/store/runs.js';
 import { transitionRun } from '../src/core/transition.js';
 import { decideApproval, listApprovals } from '../src/store/approvals.js';
 import { findReceiptByKey, idempotencyKey } from '../src/store/receipts.js';
+import { listEvents } from '../src/store/events.js';
 import { dispatchTool, type ToolContext } from '../src/harness/toolRouter.js';
 import { newId } from '../src/ids.js';
 import type { RunAttemptRow, RunRow } from '../src/core/types.js';
@@ -145,6 +146,23 @@ describe('external.http.request', () => {
     const receipt = await findReceiptByKey(db.pool, run.id, key);
     expect(receipt!.status).toBe('COMMITTED');
     expect(receipt!.external_txn_id).toBeTruthy();
+
+    const events = await listEvents(db.pool, run.id);
+    const started = events.find((event) => event.type === 'ToolInvocationStarted');
+    const committed = events.find((event) => event.type === 'ToolInvocationCommitted');
+    expect(started?.payload).toMatchObject({
+      connector: 'http',
+      action: 'external.http.request',
+      classification: 'mutation',
+      method: 'POST',
+    });
+    expect(committed?.payload).toMatchObject({
+      connector: 'http',
+      action: 'external.http.request',
+      classification: 'mutation',
+      method: 'POST',
+      status: 201,
+    });
   });
 
   it('retries a PENDING receipt with the same idempotency key (at-least-once + dedupe)', async () => {
