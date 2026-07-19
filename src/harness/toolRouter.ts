@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
-import type { Config } from '../config.js';
+import { parseHttpEgressAllowlist, type Config } from '../config.js';
+import { isIP } from 'node:net';
 import type { RunAttemptRow, RunRow, ProgressLedger } from '../core/types.js';
 import type {
   CredentialProvider,
@@ -21,6 +22,7 @@ import { spawnChildren } from '../scheduler/children.js';
 import { WORKSPACE_DIR } from './workspace.js';
 import { maybeCrash } from './faults.js';
 import { executeGovernedAction } from './governedAction.js';
+import { SafeHttpClient, assertPublicAddress } from '../net/safeHttp.js';
 
 export type ToolOutcome =
   | { kind: 'result'; content: string }
@@ -49,6 +51,8 @@ export interface ToolContext {
   mcpRoute?: Map<string, McpRouteEntry>;
   /** Credential broker: injects scoped secrets into outbound calls (memo §9.5). */
   credentials?: CredentialProvider;
+  /** Bounded outbound transport; injectable for connector conformance tests. */
+  http?: Pick<SafeHttpClient, 'request'>;
 }
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -496,6 +500,20 @@ async function externalHttpRequest(
   const url = String(args.url ?? '');
   const resource = safeOrigin(url);
   const classification = method === 'GET' ? 'read' : 'mutation';
+  const http = ctx.http ?? new SafeHttpClient({
+    allowedOrigins:
+      ctx.cfg.HTTP_EGRESS_MODE === 'allowlist' || ctx.cfg.HTTP_EGRESS_MODE === 'proxy'
+        ? parseHttpEgressAllowlist(ctx.cfg.HTTP_EGRESS_ALLOWLIST)
+        : [],
+    proxyUrl: ctx.cfg.HTTP_EGRESS_MODE === 'proxy'
+      ? ctx.cfg.HTTP_EGRESS_PROXY_URL ?? null
+      : null,
+    connectTimeoutMs: ctx.cfg.HTTP_CONNECT_TIMEOUT_MS,
+    totalTimeoutMs: ctx.cfg.HTTP_TOTAL_TIMEOUT_MS,
+    maxRedirects: ctx.cfg.HTTP_MAX_REDIRECTS,
+    maxResponseBytes: ctx.cfg.HTTP_MAX_RESPONSE_BYTES,
+  });
+  let privateOrigins: string[] = [];
   const outcome = await executeGovernedAction(
     {
       pool: ctx.pool,
@@ -512,9 +530,15 @@ async function externalHttpRequest(
       args,
       classification,
       requireGrant: classification === 'mutation',
+      preferExactResourceGrant: true,
       recovery: 'retry_with_idempotency',
       audit: { method },
-      validate: ({ hasDeclaredGrant }) => checkUrlPolicy(url, hasDeclaredGrant),
+      validate: ({ usableGrantResourcePatterns }) => {
+        privateOrigins = usableGrantResourcePatterns.filter(
+          (pattern) => pattern === resource,
+        );
+        return checkUrlPolicy(url, privateOrigins.length > 0);
+      },
       beforeDispatch: () => maybeCrash(ctx.cfg, ctx.run, 'before_external_commit'),
       afterCommit: () => maybeCrash(ctx.cfg, ctx.run, 'after_external_commit'),
       dispatch: async ({ idempotencyKey, credential }) => {
@@ -524,33 +548,51 @@ async function externalHttpRequest(
         for (const [name, value] of Object.entries(
           (args.headers as Record<string, string> | undefined) ?? {},
         )) {
-          if (!['host', 'content-length', 'transfer-encoding'].includes(name.toLowerCase())) {
+          if (![
+            'host',
+            'content-length',
+            'transfer-encoding',
+            'authorization',
+            'proxy-authorization',
+            'cookie',
+            'idempotency-key',
+            'x-managed-agents-target-url',
+            'x-managed-agents-target-address',
+            'x-managed-agents-target-family',
+          ].includes(name.toLowerCase())) {
             headers[name] = String(value);
           }
         }
-        if (credential) headers[credential.headerName] = credential.headerValue;
-        headers['content-type'] = 'application/json';
-        headers['idempotency-key'] = idempotencyKey;
+        const setHeader = (name: string, value: string) => {
+          for (const existing of Object.keys(headers)) {
+            if (existing.toLowerCase() === name.toLowerCase()) delete headers[existing];
+          }
+          headers[name] = value;
+        };
+        if (credential) setHeader(credential.headerName, credential.headerValue);
+        setHeader('content-type', 'application/json');
+        setHeader('idempotency-key', idempotencyKey);
 
-        const response = await fetch(url, {
+        const response = await http.request({
+          url,
           method,
           headers,
           body:
             classification === 'mutation' && args.body !== undefined
               ? JSON.stringify(args.body)
               : undefined,
+          privateOrigins,
         });
-        const text = await response.text();
         let parsedBody: unknown;
         try {
-          parsedBody = JSON.parse(text);
+          parsedBody = JSON.parse(response.body);
         } catch {
-          parsedBody = text.slice(0, 5_000);
+          parsedBody = response.body.slice(0, 5_000);
         }
         const result = { status: response.status, body: parsedBody };
         return {
           value: result,
-          externalTxnId: response.headers.get('x-transaction-id') ?? undefined,
+          externalTxnId: response.headers['x-transaction-id'],
           audit: { status: response.status },
         };
       },
@@ -581,13 +623,10 @@ function safeOrigin(url: string): string {
   }
 }
 
-const PRIVATE_HOST_RE =
-  /^(localhost|.*\.local|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[?::1\]?|\[?fe80:.*|\[?f[cd][0-9a-f]{2}:.*)$/i;
-
 /**
- * Hostname-level SSRF policy (a pragmatic prototype guard — it does not
- * defend against DNS rebinding): http(s) only, and private/loopback/
- * link-local hosts require an explicit capability grant for the origin.
+ * Synchronous validation rejects malformed URLs and obvious private literals
+ * before a receipt exists. SafeHttpClient performs authoritative all-answer
+ * DNS validation and pins the selected address at dispatch time.
  */
 function checkUrlPolicy(
   url: string,
@@ -602,10 +641,25 @@ function checkUrlPolicy(
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { ok: false, reason: `scheme ${parsed.protocol} is not allowed` };
   }
-  if (PRIVATE_HOST_RE.test(parsed.hostname) && !originGranted) {
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: 'URL userinfo is not allowed' };
+  }
+  const hostname = parsed.hostname.startsWith('[')
+    ? parsed.hostname.slice(1, -1)
+    : parsed.hostname;
+  let privateHost = hostname === 'localhost' || hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local');
+  if (isIP(hostname)) {
+    try {
+      assertPublicAddress(hostname);
+    } catch {
+      privateHost = true;
+    }
+  }
+  if (privateHost && !originGranted) {
     return {
       ok: false,
-      reason: `requests to private host ${parsed.hostname} require an explicit capability grant for ${parsed.origin}`,
+      reason: `requests to private host ${parsed.hostname} require an exact-origin capability grant for ${parsed.origin}`,
     };
   }
   return { ok: true };

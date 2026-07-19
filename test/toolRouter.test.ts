@@ -122,9 +122,36 @@ describe('external.http.request', () => {
     }
   });
 
-  it('executes an approval-free write exactly once and dedupes retries', async () => {
+  it('does not let a wildcard capability grant authorize private-network egress', async () => {
     const { run, attempt } = await runningRun([
       { action: 'external.http.*', resource: '*' },
+    ]);
+    const outcome = await dispatchTool(ctx(run, attempt), 'external_http_request', {
+      method: 'GET',
+      url: `${external.url}/status`,
+    });
+    expect((outcome as { content: string }).content).toMatch(
+      /private host|not permitted|exact origin/i,
+    );
+  });
+
+  it('does not let an exhausted exact grant authorize private-network egress', async () => {
+    const { run, attempt } = await runningRun([
+      { action: 'external.http.*', resource: '*' },
+      { action: 'external.http.*', resource: external.url, maxCalls: 0 },
+    ]);
+    const outcome = await dispatchTool(ctx(run, attempt), 'external_http_request', {
+      method: 'GET',
+      url: `${external.url}/status`,
+    });
+    expect((outcome as { content: string }).content).toMatch(
+      /private host|not permitted|exact origin/i,
+    );
+  });
+
+  it('executes an approval-free write exactly once and dedupes retries', async () => {
+    const { run, attempt } = await runningRun([
+      { action: 'external.http.*', resource: external.url },
     ]);
     const args = { method: 'POST', url: `${external.url}/orders`, body: { sku: 'a1' } };
 
@@ -165,9 +192,33 @@ describe('external.http.request', () => {
     });
   });
 
-  it('retries a PENDING receipt with the same idempotency key (at-least-once + dedupe)', async () => {
+  it('consumes the exact-origin grant instead of a wildcard for private egress', async () => {
     const { run, attempt } = await runningRun([
       { action: 'external.http.*', resource: '*' },
+      { action: 'external.http.*', resource: external.url },
+    ]);
+    const outcome = await dispatchTool(ctx(run, attempt), 'external_http_request', {
+      method: 'GET',
+      url: `${external.url}/status`,
+    });
+    expect((outcome as { content: string }).content).toContain('"ok":true');
+    const { rows } = await db.pool.query<{
+      resource_pattern: string;
+      calls_used: number;
+    }>(
+      `SELECT resource_pattern, calls_used FROM capability_grants
+       WHERE run_id = $1 ORDER BY resource_pattern`,
+      [run.id],
+    );
+    expect(Object.fromEntries(rows.map((row) => [row.resource_pattern, row.calls_used]))).toEqual({
+      '*': 0,
+      [external.url]: 1,
+    });
+  });
+
+  it('retries a PENDING receipt with the same idempotency key (at-least-once + dedupe)', async () => {
+    const { run, attempt } = await runningRun([
+      { action: 'external.http.*', resource: external.url },
     ]);
     const args = { method: 'POST', url: `${external.url}/payments`, body: { amount: 5 } };
 
@@ -197,7 +248,7 @@ describe('external.http.request', () => {
 
   it('suspends for approval, then executes exactly once after approve', async () => {
     const { run, attempt } = await runningRun([
-      { action: 'external.http.*', resource: '*', requiresApproval: true },
+      { action: 'external.http.*', resource: external.url, requiresApproval: true },
     ]);
     const args = { method: 'POST', url: `${external.url}/deploys`, body: { env: 'prod' } };
 
@@ -250,7 +301,7 @@ describe('external.http.request', () => {
 
   it('reports a denial to the model without executing', async () => {
     const { run, attempt } = await runningRun([
-      { action: 'external.http.*', resource: '*', requiresApproval: true },
+      { action: 'external.http.*', resource: external.url, requiresApproval: true },
     ]);
     const args = { method: 'DELETE', url: `${external.url}/databases/prod` };
 
@@ -289,7 +340,7 @@ describe('external.http.request', () => {
 
   it('allows granted GET reads and records a reversible receipt', async () => {
     const { run, attempt } = await runningRun([
-      { action: 'external.http.*', resource: '*' },
+      { action: 'external.http.*', resource: external.url },
     ]);
     const args = { method: 'GET', url: `${external.url}/status` };
     const outcome = await dispatchTool(ctx(run, attempt), 'external_http_request', args);
