@@ -151,11 +151,7 @@ export async function executeGovernedAction<T>(
   }
 
   let approvalId: string | null = existing?.approval_id ?? null;
-  if (
-    spec.classification === 'mutation' &&
-    usableGrant?.requires_approval &&
-    !pendingRecovery
-  ) {
+  if (usableGrant?.requires_approval && !pendingRecovery) {
     const approvals = await listApprovals(ctx.pool, ctx.run.id);
     const approval = approvals.find(
       (candidate) =>

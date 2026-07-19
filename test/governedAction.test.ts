@@ -173,6 +173,34 @@ describe('governed action pipeline', () => {
     expect(receipts).toEqual([]);
   });
 
+  it('honors an explicit approval grant even for a classified read', async () => {
+    const { run, attempt } = await runningRun([
+      {
+        action: 'connector.records.read',
+        resource: 'records',
+        requiresApproval: true,
+      },
+    ]);
+    let dispatched = false;
+    const result = await executeGovernedAction(context(run, attempt), {
+      connector: 'test',
+      action: 'connector.records.read',
+      resource: 'records',
+      args: { id: 'R-sensitive' },
+      classification: 'read',
+      requireGrant: true,
+      recovery: 'retry_with_idempotency',
+      dispatch: async () => {
+        dispatched = true;
+        return { value: {}, receiptResult: {} };
+      },
+    });
+
+    expect(result.kind).toBe('suspend_approval');
+    expect(dispatched).toBe(false);
+    expect(await listApprovals(db.pool, run.id, 'PENDING')).toHaveLength(1);
+  });
+
   it('marks uncertain mutation failures for reconciliation and will not redispatch them', async () => {
     const { run, attempt } = await runningRun([
       { action: 'connector.records.write', resource: 'records' },
