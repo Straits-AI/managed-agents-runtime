@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -235,6 +235,36 @@ describe('delegated run tenancy and policy', () => {
         result: { status: 201, body: { id: 42 } },
       });
     });
+    const pendingArgs = {
+      method: 'POST',
+      url: 'https://api.example.com/items',
+      body: { id: 43 },
+    };
+    const finalConsumption = await withTransaction(db.pool, (tx) =>
+      authorizeAndConsume(
+        tx,
+        childId,
+        'external.http.request',
+        'https://api.example.com',
+      ),
+    );
+    expect(finalConsumption.allowed).toBe(true);
+    const pendingKey = idempotencyKey({
+      runId: originalScope,
+      action: 'external.http.request',
+      args: pendingArgs,
+    });
+    const pendingReceipt = await withTransaction(db.pool, (tx) =>
+      insertPendingReceipt(tx, {
+        runId: childId,
+        attemptId: claimed!.attempt.id,
+        step: 2,
+        action: 'external.http.request',
+        args: pendingArgs,
+        idempotencyKey: pendingKey,
+        reversibility: 'irreversible',
+      }),
+    );
 
     await withTransaction(db.pool, async (tx) => {
       await exitAttempt(tx, claimed!.attempt.id, 'test failure');
@@ -273,7 +303,7 @@ describe('delegated run tenancy and policy', () => {
       action_pattern: 'external.http.request',
       resource_pattern: 'https://api.example.com',
       requires_approval: true,
-      max_calls: 1,
+      max_calls: 0,
       calls_used: 0,
       expires_at: grantExpiry,
     });
@@ -308,6 +338,39 @@ describe('delegated run tenancy and policy', () => {
       deduplicated: true,
       result: { status: 201, body: { id: 42 } },
     });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 43 }), {
+        status: 201,
+        headers: { 'content-type': 'application/json', 'x-transaction-id': 'txn-recovered' },
+      }),
+    );
+    try {
+      const recovered = await dispatchTool(
+        {
+          pool: db.pool,
+          cfg,
+          run: runningReplacement,
+          attempt: replacementClaim!.attempt,
+          sandbox: { sandboxId: 'unused', baseUrl: 'unused' },
+          sandboxProvider: sandbox,
+          objectStore,
+          step: 2,
+        },
+        'external_http_request',
+        pendingArgs,
+      );
+      expect(recovered).toMatchObject({ kind: 'result' });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const requestHeaders = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
+      expect(requestHeaders['idempotency-key']).toBe(pendingKey);
+      const { rows: recoveredReceipts } = await db.pool.query<{ status: string }>(
+        'SELECT status FROM tool_receipts WHERE id = $1',
+        [pendingReceipt.id],
+      );
+      expect(recoveredReceipts[0]?.status).toBe('COMMITTED');
+    } finally {
+      fetchSpy.mockRestore();
+    }
 
     const foreignTenant = await createTenant(db.pool, { name: 'Foreign reader' });
     const ownerKey = (await createApiKey(db.pool, { tenantId: tenant.id })).plaintext;

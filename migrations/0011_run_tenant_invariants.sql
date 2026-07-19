@@ -20,7 +20,8 @@ BEGIN
            agent_versions AS version,
            agent_definitions AS definition
      WHERE child.parent_run_id = parent.id
-       AND child.tenant_id <> parent.tenant_id
+       AND child.tenant_id = 'default'
+       AND parent.tenant_id <> 'default'
        AND version.id = child.agent_version_id
        AND definition.id = version.agent_id
        AND definition.tenant_id = parent.tenant_id;
