@@ -155,6 +155,31 @@ gets the credential injected (verified by tenant + action + resource + expiry +
 call-limit). The secret is stored encrypted (AES-256-GCM locally, or KMS
 ciphertext) and never enters model context, tool results, or the audit ledger.
 
+### Tenant-bound AgentKit Knowledge
+
+Agent versions select only an operator-registered logical binding. Provider
+project and collection identifiers remain server-side and are resolved using
+the authenticated run tenant:
+
+```bash
+npm run admin knowledge bind <tenantId> \
+  --name company-handbook \
+  --project <agentkit-project> \
+  --collection <agentkit-collection>
+
+# Makes a real signed retrieval call; only success records live_verified_at.
+npm run admin knowledge verify <tenantId> \
+  --name company-handbook \
+  --query "verification probe"
+```
+
+Set `knowledgeConfig: { "binding": "company-handbook" }` on the agent
+version. Arbitrary collection/project fields are rejected. Production and
+externally exposed deployments refuse `KNOWLEDGE_PROVIDER=agentkit` unless
+`AGENTKIT_KNOWLEDGE_LIVE_VERIFIED=1`; only set it after verifying the live
+request shape and cross-tenant isolation, and mark each verified binding with
+the `knowledge verify` command.
+
 ## 6. Event fan-out (Kafka)
 
 The transactional outbox records every event; the `relay` process drains it to a

@@ -13,6 +13,7 @@ export type IdPrefix =
   | 'cap'  // capability grant
   | 'mem'  // agent memory
   | 'kdoc' // knowledge document
+  | 'kbnd' // tenant-owned knowledge binding
   | 'tnt'  // tenant
   | 'key'  // api key
   | 'cred'; // credential

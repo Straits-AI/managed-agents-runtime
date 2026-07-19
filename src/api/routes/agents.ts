@@ -7,6 +7,7 @@ import {
   createAgentVersion,
   getAgentDefinition,
 } from '../../store/agents.js';
+import { getKnowledgeBinding } from '../../store/knowledgeBindings.js';
 
 const createAgentBody = z.object({
   name: z.string().min(1).max(200),
@@ -32,7 +33,9 @@ const createVersionBody = z.object({
   }).optional(),
   contextStrategy: z.record(z.string(), z.unknown()).optional(),
   verifierPolicy: z.record(z.string(), z.unknown()).optional(),
-  knowledgeConfig: z.record(z.string(), z.unknown()).optional(),
+  knowledgeConfig: z.object({
+    binding: z.string().min(1).max(200),
+  }).strict().optional(),
 });
 
 export function registerAgentRoutes(app: FastifyInstance, deps: ApiDeps): void {
@@ -50,6 +53,20 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ApiDeps): void {
       if (!agent) return reply.code(404).send({ error: 'agent not found' });
 
       const body = createVersionBody.parse(req.body);
+      if (deps.cfg.KNOWLEDGE_PROVIDER === 'agentkit' && body.knowledgeConfig?.binding) {
+        const binding = await getKnowledgeBinding(
+          deps.pool,
+          req.tenantId,
+          body.knowledgeConfig.binding,
+        );
+        if (
+          !binding ||
+          (deps.cfg.AGENTKIT_KNOWLEDGE_LIVE_VERIFIED === 1 &&
+            binding.live_verified_at === null)
+        ) {
+          return reply.code(400).send({ error: 'knowledge binding is unavailable' });
+        }
+      }
       const version = await withTransaction(deps.pool, (tx) =>
         createAgentVersion(tx, { agentId: agent.id, ...body }),
       );

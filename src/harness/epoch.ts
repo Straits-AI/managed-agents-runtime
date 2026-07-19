@@ -202,8 +202,7 @@ export function createRealEpoch(providers: EpochProviders) {
         memory: providers.memory,
         memoryScope,
         knowledge: providers.knowledge,
-        knowledgeBaseId: (version.knowledge_config as { knowledgeBaseId?: string })
-          ?.knowledgeBaseId,
+        knowledgeBaseId: version.knowledge_config.binding,
         mcp: providers.mcp,
         mcpRoute: mcp.route,
         credentials: providers.credentials,

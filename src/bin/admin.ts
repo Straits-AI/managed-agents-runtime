@@ -5,6 +5,8 @@
  *        [--max-concurrent 10] [--daily-tokens 5000000] [--id acme]
  *   node --env-file=.env --import tsx src/bin/admin.ts key create <tenantId> [--name "ci"]
  *   node --env-file=.env --import tsx src/bin/admin.ts tenant list
+ *   node --env-file=.env --import tsx src/bin/admin.ts knowledge bind <tenantId>
+ *        --name <logical> --project <providerProject> --collection <providerCollection>
  *
  * A minted key's plaintext is printed exactly once — it is never stored or
  * recoverable. Store it somewhere safe immediately.
@@ -119,6 +121,68 @@ async function main(): Promise<void> {
       const { revokeCredential } = await import('../store/credentials.js');
       const ok = await revokeCredential(pool, id, tenantId);
       process.stdout.write(ok ? `revoked ${id}\n` : `not found: ${id}\n`);
+    } else if (resource === 'knowledge' && action === 'bind') {
+      const tenantId = rest.find((a) => !a.startsWith('--'));
+      const name = flag(rest, 'name');
+      const project = flag(rest, 'project');
+      const collection = flag(rest, 'collection');
+      if (!tenantId || !name || !project || !collection) {
+        throw new Error(
+          'usage: knowledge bind <tenantId> --name X --project X --collection X',
+        );
+      }
+      const { createKnowledgeBinding } = await import('../store/knowledgeBindings.js');
+      const binding = await createKnowledgeBinding(pool, {
+        tenantId,
+        name,
+        provider: 'agentkit',
+        providerProject: project,
+        providerCollection: collection,
+      });
+      process.stdout.write(`knowledge binding created: ${binding.name} for tenant ${tenantId}\n`);
+    } else if (resource === 'knowledge' && action === 'verify') {
+      const tenantId = rest.find((a) => !a.startsWith('--'));
+      const name = flag(rest, 'name');
+      if (!tenantId || !name) {
+        throw new Error('usage: knowledge verify <tenantId> --name X [--query X]');
+      }
+      const { requireConfig } = await import('../config.js');
+      const req = requireConfig(cfg, [
+        'BYTEPLUS_ACCESS_KEY_ID',
+        'BYTEPLUS_SECRET_ACCESS_KEY',
+      ]);
+      const { AgentKitKnowledgeProvider } = await import(
+        '../providers/agentkitKnowledge.js'
+      );
+      const provider = new AgentKitKnowledgeProvider(pool, {
+        accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
+        secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
+        sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
+        requireLiveVerified: false,
+      });
+      await provider.retrieve(name, flag(rest, 'query') ?? 'contract verification', 1, tenantId);
+      const { markKnowledgeBindingVerified } = await import(
+        '../store/knowledgeBindings.js'
+      );
+      if (!(await markKnowledgeBindingVerified(pool, tenantId, name))) {
+        throw new Error('knowledge binding is unavailable');
+      }
+      process.stdout.write(`knowledge binding live-verified: ${name} for tenant ${tenantId}\n`);
+    } else if (resource === 'knowledge' && action === 'list') {
+      const tenantId = rest.find((a) => !a.startsWith('--'));
+      if (!tenantId) throw new Error('usage: knowledge list <tenantId>');
+      const { listKnowledgeBindings } = await import('../store/knowledgeBindings.js');
+      process.stdout.write(
+        JSON.stringify(await listKnowledgeBindings(pool, tenantId), null, 2) + '\n',
+      );
+    } else if (resource === 'knowledge' && action === 'disable') {
+      const [tenantId, name] = rest.filter((a) => !a.startsWith('--'));
+      if (!tenantId || !name) {
+        throw new Error('usage: knowledge disable <tenantId> <name>');
+      }
+      const { disableKnowledgeBinding } = await import('../store/knowledgeBindings.js');
+      const ok = await disableKnowledgeBinding(pool, tenantId, name);
+      process.stdout.write(ok ? `disabled ${name}\n` : `not found: ${name}\n`);
     } else {
       process.stderr.write(
         'usage:\n' +
@@ -127,7 +191,11 @@ async function main(): Promise<void> {
           '  key create <tenantId> [--name X]\n' +
           '  credential create <tenantId> --name X --action <pattern> --header <H> --value <secret> [--resource <pattern>] [--max-uses N] [--expires <ISO>]\n' +
           '  credential list <tenantId>\n' +
-          '  credential revoke <credentialId> <tenantId>\n',
+          '  credential revoke <credentialId> <tenantId>\n' +
+          '  knowledge bind <tenantId> --name X --project X --collection X\n' +
+          '  knowledge verify <tenantId> --name X [--query X]\n' +
+          '  knowledge list <tenantId>\n' +
+          '  knowledge disable <tenantId> <name>\n',
       );
       process.exitCode = 2;
     }

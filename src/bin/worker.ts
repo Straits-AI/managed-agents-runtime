@@ -45,11 +45,15 @@ if (epochMode === 'scripted') {
     const { AgentKitKnowledgeProvider } = await import('../providers/agentkitKnowledge.js');
     const { requireConfig } = await import('../config.js');
     const req = requireConfig(cfg, ['BYTEPLUS_ACCESS_KEY_ID', 'BYTEPLUS_SECRET_ACCESS_KEY']);
-    knowledge = new AgentKitKnowledgeProvider({
-      accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
-      secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
-      sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
-    });
+    knowledge = new AgentKitKnowledgeProvider(
+      pool,
+      {
+        accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
+        secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
+        sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
+        requireLiveVerified: cfg.AGENTKIT_KNOWLEDGE_LIVE_VERIFIED === 1,
+      },
+    );
   } else if (cfg.KNOWLEDGE_PROVIDER !== 'none') {
     const { PgKnowledgeProvider } = await import('../providers/pgKnowledge.js');
     knowledge = new PgKnowledgeProvider(pool);

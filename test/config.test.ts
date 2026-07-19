@@ -70,4 +70,24 @@ describe('production configuration', () => {
       'Unsafe exposed API configuration: HARNESS_ENABLE_FAULTS must be disabled',
     );
   });
+
+  it('keeps AgentKit Knowledge disabled in shared deployments until live verification', () => {
+    const shared = {
+      NODE_ENV: 'production',
+      API_AUTH_TOKEN: 'k'.repeat(32),
+      KNOWLEDGE_PROVIDER: 'agentkit',
+    };
+    expect(() => loadConfig(shared)).toThrow(/AgentKit Knowledge.*live.*verified/i);
+    expect(
+      loadConfig({ ...shared, AGENTKIT_KNOWLEDGE_LIVE_VERIFIED: '1' })
+        .KNOWLEDGE_PROVIDER,
+    ).toBe('agentkit');
+    expect(() =>
+      loadConfig({
+        API_HOST: '0.0.0.0',
+        API_AUTH_TOKEN: 'k'.repeat(32),
+        KNOWLEDGE_PROVIDER: 'agentkit',
+      }),
+    ).toThrow(/AgentKit Knowledge.*live.*verified/i);
+  });
 });

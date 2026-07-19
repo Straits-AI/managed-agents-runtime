@@ -35,7 +35,7 @@ export interface AgentVersionRow {
   };
   context_strategy: Record<string, unknown>;
   verifier_policy: Record<string, unknown>;
-  knowledge_config: { knowledgeBaseId?: string } & Record<string, unknown>;
+  knowledge_config: { binding?: string };
   created_at: Date;
 }
 
@@ -78,7 +78,7 @@ export async function createAgentVersion(
     sandboxSpec?: AgentVersionRow['sandbox_spec'];
     contextStrategy?: Record<string, unknown>;
     verifierPolicy?: Record<string, unknown>;
-    knowledgeConfig?: Record<string, unknown>;
+    knowledgeConfig?: AgentVersionRow['knowledge_config'];
   },
 ): Promise<AgentVersionRow> {
   // Serialize version allocation per agent.
