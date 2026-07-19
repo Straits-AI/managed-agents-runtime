@@ -17,9 +17,10 @@ import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import {
   commitReceipt,
-  findReceiptByKey,
+  findReceiptByLineageKey,
   idempotencyKey,
   insertPendingReceipt,
+  replacementRootRunId,
 } from '../store/receipts.js';
 import { authorizeAndConsume, listGrants, patternMatches } from '../store/grants.js';
 import { insertApproval, listApprovals } from '../store/approvals.js';
@@ -526,7 +527,8 @@ async function externalHttpRequest(
   const url = String(args.url ?? '');
   const resource = safeOrigin(url);
   const isWrite = method !== 'GET';
-  const idemKey = idempotencyKey({ runId: ctx.run.id, action: ACTION_NAME, args });
+  const idempotencyScope = await replacementRootRunId(ctx.pool, ctx.run.id);
+  const idemKey = idempotencyKey({ runId: idempotencyScope, action: ACTION_NAME, args });
 
   // SSRF guard: only http(s), and private/loopback/link-local hosts are
   // reachable only when a capability grant explicitly covers the origin —
@@ -544,7 +546,7 @@ async function externalHttpRequest(
 
   // Recovery dedupe: an already-committed identical action returns its
   // recorded result — the external effect happened exactly once.
-  const existing = await findReceiptByKey(ctx.pool, ctx.run.id, idemKey);
+  const existing = await findReceiptByLineageKey(ctx.pool, ctx.run.id, idemKey);
   if (existing?.status === 'COMMITTED') {
     return {
       kind: 'result',

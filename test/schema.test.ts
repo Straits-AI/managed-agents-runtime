@@ -107,3 +107,48 @@ describe('schema', () => {
     await expect(insertReceipt(newId('rcpt'))).rejects.toThrow(/duplicate key/);
   });
 });
+
+describe('tenant-lineage migration', () => {
+  it('repairs children created by the historical default-tenant bug before validation', async () => {
+    const legacy = await createTestDb({ through: '0010_credentials.sql' });
+    try {
+      await legacy.pool.query(
+        `INSERT INTO tenants (id, name) VALUES ('tenant_upgrade', 'Upgrade tenant')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_definitions (id, tenant_id, name)
+         VALUES ('ad_upgrade', 'tenant_upgrade', 'upgrade-agent')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+         VALUES ('av_upgrade', 'ad_upgrade', 1, 'x', '{}')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+         VALUES ('run_upgrade_parent', 'tenant_upgrade', 'av_upgrade', 'parent', 'QUEUED')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs
+           (id, tenant_id, agent_version_id, parent_run_id, goal, status)
+         VALUES
+           ('run_upgrade_child', 'default', 'av_upgrade', 'run_upgrade_parent', 'child', 'FAILED'),
+           ('run_upgrade_grandchild', 'default', 'av_upgrade', 'run_upgrade_child', 'grandchild', 'FAILED')`,
+      );
+
+      await expect(legacy.applyRemainingMigrations()).resolves.toContain(
+        '0011_run_tenant_invariants.sql',
+      );
+      const { rows } = await legacy.pool.query<{ tenant_id: string }>(
+        `SELECT tenant_id FROM runs
+         WHERE id IN ('run_upgrade_child', 'run_upgrade_grandchild')
+         ORDER BY id`,
+      );
+      expect(rows.map((row) => row.tenant_id)).toEqual([
+        'tenant_upgrade',
+        'tenant_upgrade',
+      ]);
+    } finally {
+      await legacy.drop();
+    }
+  });
+});

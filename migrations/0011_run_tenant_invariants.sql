@@ -4,6 +4,31 @@
 
 ALTER TABLE runs ALTER COLUMN tenant_id DROP DEFAULT;
 
+-- Repair only the historical scheduler signature: a child whose agent version
+-- belongs to the parent's tenant but whose run was silently assigned another
+-- tenant. Repeat because an affected child may itself have affected children.
+-- Ambiguous/caller-created mismatches are deliberately left for validation to
+-- reject rather than guessing ownership.
+DO $$
+DECLARE
+  repaired BIGINT;
+BEGIN
+  LOOP
+    UPDATE runs AS child
+       SET tenant_id = parent.tenant_id
+      FROM runs AS parent,
+           agent_versions AS version,
+           agent_definitions AS definition
+     WHERE child.parent_run_id = parent.id
+       AND child.tenant_id <> parent.tenant_id
+       AND version.id = child.agent_version_id
+       AND definition.id = version.agent_id
+       AND definition.tenant_id = parent.tenant_id;
+    GET DIAGNOSTICS repaired = ROW_COUNT;
+    EXIT WHEN repaired = 0;
+  END LOOP;
+END $$;
+
 ALTER TABLE runs
   ADD CONSTRAINT runs_tenant_fk
   FOREIGN KEY (tenant_id) REFERENCES tenants(id),

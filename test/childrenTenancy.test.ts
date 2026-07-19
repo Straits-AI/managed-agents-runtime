@@ -1,13 +1,32 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createTestDb, type TestDb } from './helpers/db.js';
 import { withTransaction } from '../src/db/tx.js';
-import { createTenant } from '../src/store/tenants.js';
+import { createTenant, createApiKey } from '../src/store/tenants.js';
 import { createAgentDefinition, createAgentVersion } from '../src/store/agents.js';
 import { createRun, getRun } from '../src/store/runs.js';
 import { transitionRun } from '../src/core/transition.js';
 import { spawnChildren, wakeReadyParents } from '../src/scheduler/children.js';
-import { listGrants } from '../src/store/grants.js';
-import { tenantUsage } from '../src/store/usage.js';
+import { authorizeAndConsume, listGrants } from '../src/store/grants.js';
+import { claimRun } from '../src/scheduler/claim.js';
+import { exitAttempt } from '../src/store/attempts.js';
+import { listEvents } from '../src/store/events.js';
+import { WorkspaceManager } from '../src/harness/workspace.js';
+import { createRealEpoch } from '../src/harness/epoch.js';
+import { LocalSandboxProvider } from '../src/providers/local/localSandbox.js';
+import { FsObjectStore } from '../src/providers/local/fsObjectStore.js';
+import type { ModelProvider } from '../src/providers/types.js';
+import { loadConfig } from '../src/config.js';
+import { buildServer } from '../src/api/server.js';
+import { dispatchTool } from '../src/harness/toolRouter.js';
+import {
+  commitReceipt,
+  idempotencyKey,
+  insertPendingReceipt,
+  replacementRootRunId,
+} from '../src/store/receipts.js';
 
 let db: TestDb;
 
@@ -22,6 +41,10 @@ afterAll(async () => {
 describe('delegated run tenancy and policy', () => {
   it('derives child ownership from the locked non-default parent', async () => {
     const grantExpiry = new Date(Date.now() + 60_000);
+    const storeDir = mkdtempSync(join(tmpdir(), 'ma-child-tenant-'));
+    const objectStore = new FsObjectStore(storeDir);
+    const sandbox = new LocalSandboxProvider();
+    await objectStore.start();
     const tenant = await createTenant(db.pool, { name: 'Delegation tenant' });
     const definition = await createAgentDefinition(db.pool, {
       tenantId: tenant.id,
@@ -41,6 +64,21 @@ describe('delegated run tenancy and policy', () => {
         goal: 'parent objective',
       }),
     );
+
+    const workspaces = new WorkspaceManager(db.pool, sandbox, objectStore);
+    const parentSandbox = await sandbox.create({ runId: parent.id, timeoutMinutes: 1 });
+    await workspaces.restore(parentSandbox, {
+      runId: parent.id,
+      attemptId: 'att_parent_seed',
+      workspaceId: parent.workspace_id!,
+      seedFiles: { 'tenant-seed.txt': 'owned-seed' },
+    });
+    const parentRevisionId = await workspaces.checkpoint(parentSandbox, {
+      runId: parent.id,
+      attemptId: 'att_parent_seed',
+      workspaceId: parent.workspace_id!,
+    });
+    await sandbox.terminate(parentSandbox);
 
     const childId = await withTransaction(db.pool, async (tx) => {
       await transitionRun(tx, parent.id, {
@@ -91,12 +129,6 @@ describe('delegated run tenancy and policy', () => {
     });
     expect(child!.workspace_id).not.toBe(parent.workspace_id);
     expect(await getRun(db.pool, childId, 'default')).toBeNull();
-    const workspaceSeed = await getRun(
-      db.pool,
-      child!.parent_run_id!,
-      child!.tenant_id,
-    );
-    expect(workspaceSeed?.workspace_id).toBe(parent.workspace_id);
 
     const grants = await listGrants(db.pool, childId);
     expect(grants).toHaveLength(1);
@@ -109,14 +141,110 @@ describe('delegated run tenancy and policy', () => {
       expires_at: grantExpiry,
     });
 
-    await withTransaction(db.pool, (tx) =>
+    const claimed = await claimRun(db.pool, 'workspace-seed-test', 30_000);
+    expect(claimed?.run.id).toBe(childId);
+    const runningChild = await withTransaction(db.pool, (tx) =>
       transitionRun(tx, childId, {
-        expectFrom: ['QUEUED'],
+        expectFrom: ['STARTING'],
+        to: 'RUNNING',
+        event: { type: 'AttemptStarted', payload: { phase: 'running' } },
+        attemptId: claimed!.attempt.id,
+      }),
+    );
+    let modelObservedSeed = false;
+    let modelCalls = 0;
+    const model: ModelProvider = {
+      async chat(req) {
+        modelCalls += 1;
+        const toolMessage = req.messages.findLast((message) => message.role === 'tool');
+        if (toolMessage) {
+          modelObservedSeed = toolMessage.content === 'owned-seed';
+          throw new Error('workspace seed proof complete');
+        }
+        return {
+          message: {
+            role: 'assistant',
+            content: null,
+            toolCalls: [
+              {
+                id: 'read-seed',
+                name: 'file_read',
+                arguments: { path: 'tenant-seed.txt' },
+              },
+            ],
+          },
+          usage: { inputTokens: 1, outputTokens: 1 },
+        };
+      },
+    };
+    const cfg = loadConfig({
+      ...process.env,
+      DATABASE_URL: db.url,
+      API_AUTH_TOKEN: 'delegation-test-token',
+      SUPERVISOR_ENABLED: '0',
+    });
+    await expect(
+      createRealEpoch({ model, sandbox, objectStore })({
+        pool: db.pool,
+        cfg,
+        run: runningChild,
+        attempt: claimed!.attempt,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('workspace seed proof complete');
+    expect(modelCalls).toBe(2);
+    expect(modelObservedSeed).toBe(true);
+    const restored = (await listEvents(db.pool, childId)).find(
+      (event) => event.type === 'WorkspaceRestored',
+    );
+    expect(restored?.payload.fromRevision).toBe(parentRevisionId);
+
+    const consumed = await withTransaction(db.pool, (tx) =>
+      authorizeAndConsume(
+        tx,
+        childId,
+        'external.http.request',
+        'https://api.example.com',
+      ),
+    );
+    expect(consumed.allowed).toBe(true);
+    const externalArgs = {
+      method: 'POST',
+      url: 'https://api.example.com/items',
+      body: { id: 42 },
+    };
+    const originalScope = await replacementRootRunId(db.pool, childId);
+    expect(originalScope).toBe(childId);
+    const originalKey = idempotencyKey({
+      runId: originalScope,
+      action: 'external.http.request',
+      args: externalArgs,
+    });
+    await withTransaction(db.pool, async (tx) => {
+      const receipt = await insertPendingReceipt(tx, {
+        runId: childId,
+        attemptId: claimed!.attempt.id,
+        step: 1,
+        action: 'external.http.request',
+        args: externalArgs,
+        idempotencyKey: originalKey,
+        reversibility: 'irreversible',
+      });
+      await commitReceipt(tx, receipt.id, {
+        externalTxnId: 'txn-original',
+        result: { status: 201, body: { id: 42 } },
+      });
+    });
+
+    await withTransaction(db.pool, async (tx) => {
+      await exitAttempt(tx, claimed!.attempt.id, 'test failure');
+      await transitionRun(tx, childId, {
+        expectFrom: ['RUNNING'],
         to: 'FAILED',
         event: { type: 'RunFailed', payload: { reason: 'test failure' } },
         reason: 'test failure',
-      }),
-    );
+      });
+    });
 
     const wake = await wakeReadyParents(db.pool, 1);
     expect(wake.woken).toEqual([]);
@@ -145,25 +273,86 @@ describe('delegated run tenancy and policy', () => {
       action_pattern: 'external.http.request',
       resource_pattern: 'https://api.example.com',
       requires_approval: true,
-      max_calls: 2,
+      max_calls: 1,
       calls_used: 0,
       expires_at: grantExpiry,
     });
+    expect(await replacementRootRunId(db.pool, replacement!.id)).toBe(childId);
 
-    const usage = await tenantUsage(
-      db.pool,
-      tenant.id,
-      { inputPerMTok: 0, outputPerMTok: 0 },
-      new Date(0).toISOString(),
+    const replacementClaim = await claimRun(db.pool, 'replacement-test', 30_000);
+    expect(replacementClaim?.run.id).toBe(replacement!.id);
+    const runningReplacement = await withTransaction(db.pool, (tx) =>
+      transitionRun(tx, replacement!.id, {
+        expectFrom: ['STARTING'],
+        to: 'RUNNING',
+        event: { type: 'AttemptStarted', payload: { phase: 'running' } },
+        attemptId: replacementClaim!.attempt.id,
+      }),
     );
-    expect(usage.runs).toBe(3);
-    const defaultUsage = await tenantUsage(
-      db.pool,
-      'default',
-      { inputPerMTok: 0, outputPerMTok: 0 },
-      new Date(0).toISOString(),
+    const deduplicated = await dispatchTool(
+      {
+        pool: db.pool,
+        cfg,
+        run: runningReplacement,
+        attempt: replacementClaim!.attempt,
+        sandbox: { sandboxId: 'unused', baseUrl: 'unused' },
+        sandboxProvider: sandbox,
+        objectStore,
+        step: 1,
+      },
+      'external_http_request',
+      externalArgs,
     );
-    expect(defaultUsage.runs).toBe(0);
+    expect(deduplicated).toMatchObject({ kind: 'result' });
+    expect(JSON.parse((deduplicated as { content: string }).content)).toMatchObject({
+      deduplicated: true,
+      result: { status: 201, body: { id: 42 } },
+    });
+
+    const foreignTenant = await createTenant(db.pool, { name: 'Foreign reader' });
+    const ownerKey = (await createApiKey(db.pool, { tenantId: tenant.id })).plaintext;
+    const foreignKey = (await createApiKey(db.pool, { tenantId: foreignTenant.id })).plaintext;
+    const app = buildServer({ pool: db.pool, cfg });
+    try {
+      for (const runId of [parent.id, childId, replacement!.id]) {
+        expect(
+          (
+            await app.inject({
+              method: 'GET',
+              url: `/v1/runs/${runId}`,
+              headers: { authorization: `Bearer ${ownerKey}` },
+            })
+          ).statusCode,
+        ).toBe(200);
+        for (const key of [foreignKey, 'delegation-test-token']) {
+          expect(
+            (
+              await app.inject({
+                method: 'GET',
+                url: `/v1/runs/${runId}`,
+                headers: { authorization: `Bearer ${key}` },
+              })
+            ).statusCode,
+          ).toBe(404);
+        }
+      }
+      const ownerUsage = await app.inject({
+        method: 'GET',
+        url: '/v1/usage',
+        headers: { authorization: `Bearer ${ownerKey}` },
+      });
+      expect(ownerUsage.json()).toMatchObject({ tenantId: tenant.id, runs: 3 });
+      const foreignUsage = await app.inject({
+        method: 'GET',
+        url: '/v1/usage',
+        headers: { authorization: `Bearer ${foreignKey}` },
+      });
+      expect(foreignUsage.json()).toMatchObject({ tenantId: foreignTenant.id, runs: 0 });
+    } finally {
+      await app.close();
+      await objectStore.close();
+      rmSync(storeDir, { recursive: true, force: true });
+    }
   });
 
   it('rejects a delegated agent version owned by another tenant', async () => {

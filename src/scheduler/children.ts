@@ -166,7 +166,10 @@ export async function wakeReadyParents(
               action: grant.action_pattern,
               resource: grant.resource_pattern,
               requiresApproval: grant.requires_approval,
-              maxCalls: grant.max_calls ?? undefined,
+              maxCalls:
+                grant.max_calls === null
+                  ? undefined
+                  : Math.max(0, grant.max_calls - grant.calls_used),
               expiresAt: grant.expires_at ?? undefined,
             })),
           });

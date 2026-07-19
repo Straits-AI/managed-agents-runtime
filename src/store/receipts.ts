@@ -72,6 +72,53 @@ export async function findReceiptByKey(
   return rows[0] ?? null;
 }
 
+/**
+ * Replacement runs are fresh attempts at the same logical subtask. External
+ * idempotency must therefore be rooted at the first run in the replacement
+ * lineage rather than reset whenever a new run id is allocated.
+ */
+export async function replacementRootRunId(q: Q, runId: string): Promise<string> {
+  const { rows } = await q.query<{ id: string }>(
+    `WITH RECURSIVE lineage AS (
+       SELECT id, replaces_run_id FROM runs WHERE id = $1
+       UNION
+       SELECT r.id, r.replaces_run_id
+       FROM runs r
+       JOIN lineage l ON r.id = l.replaces_run_id
+     )
+     SELECT id FROM lineage WHERE replaces_run_id IS NULL LIMIT 1`,
+    [runId],
+  );
+  return rows[0]?.id ?? runId;
+}
+
+/** Find a receipt created by this run or any predecessor it replaces. */
+export async function findReceiptByLineageKey(
+  q: Q,
+  runId: string,
+  key: string,
+): Promise<ToolReceiptRow | null> {
+  const { rows } = await q.query<ToolReceiptRow>(
+    `WITH RECURSIVE lineage AS (
+       SELECT id, replaces_run_id FROM runs WHERE id = $1
+       UNION
+       SELECT r.id, r.replaces_run_id
+       FROM runs r
+       JOIN lineage l ON r.id = l.replaces_run_id
+     )
+     SELECT receipt.*
+     FROM tool_receipts receipt
+     JOIN lineage ON lineage.id = receipt.run_id
+     WHERE receipt.idempotency_key = $2
+     ORDER BY
+       CASE receipt.status WHEN 'COMMITTED' THEN 0 WHEN 'PENDING' THEN 1 ELSE 2 END,
+       receipt.started_at DESC
+     LIMIT 1`,
+    [runId, key],
+  );
+  return rows[0] ?? null;
+}
+
 export async function insertPendingReceipt(
   tx: Tx,
   input: {
