@@ -65,6 +65,7 @@ async function runningRun(
       to: 'STARTING',
       event: { type: 'AttemptStarted' },
       attemptId,
+      patch: { current_attempt_id: attemptId },
     });
     return transitionRun(tx, run.id, {
       expectFrom: ['STARTING'],
@@ -332,6 +333,86 @@ describe('governed action pipeline', () => {
     }
   });
 
+  it('revalidates grant expiry after credential resolution at dispatch boundary', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write',
+      resource: 'records',
+      expiresAt: new Date(Date.now() + 60_000),
+    }]);
+    const baseSpec = {
+      connector: 'test', action: 'connector.records.write', resource: 'records',
+      args: { id: 'R-grant-toctou' }, classification: 'mutation' as const,
+      requireGrant: true, recovery: 'reconcile' as const,
+      dispatch: async () => ({ value: { changed: true } }),
+      afterDispatch: () => { throw new Error('crash after remote commit'); },
+    };
+    await expect(executeGovernedAction(context(run, attempt), baseSpec))
+      .rejects.toThrow('crash after remote commit');
+    let dispatched = false;
+    const result = await executeGovernedAction(
+      context(run, attempt, {
+        resolve: async () => {
+          await db.pool.query(
+            `UPDATE capability_grants
+             SET expires_at = clock_timestamp() - interval '1 second'
+             WHERE run_id = $1`,
+            [run.id],
+          );
+          return null;
+        },
+      }),
+      {
+        ...baseSpec,
+        afterDispatch: undefined,
+        reconcile: async () => ({ status: 'not_found' as const, terminal: true as const }),
+        dispatch: async () => {
+          dispatched = true;
+          return { value: { changed: true } };
+        },
+      },
+    );
+    expect(result).toEqual({
+      kind: 'denied',
+      reason: 'capability grant expired before dispatch for connector.records.write',
+    });
+    expect(dispatched).toBe(false);
+    const { rows } = await db.pool.query<{ status: string }>(
+      'SELECT status FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(rows).toEqual([{ status: 'FAILED' }]);
+  });
+
+  it('fails a fresh undispatched receipt when its grant expires at the final boundary', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records',
+      expiresAt: new Date(Date.now() + 60_000),
+    }]);
+    let dispatched = false;
+    const result = await executeGovernedAction(context(run, attempt), {
+      connector: 'test', action: 'connector.records.write', resource: 'records',
+      args: { id: 'R-fresh-grant-expiry' }, classification: 'mutation',
+      requireGrant: true, recovery: 'retry_with_idempotency',
+      beforeDispatch: async () => {
+        await db.pool.query(
+          `UPDATE capability_grants
+           SET expires_at = clock_timestamp() - interval '1 second'
+           WHERE run_id = $1`,
+          [run.id],
+        );
+      },
+      dispatch: async () => {
+        dispatched = true;
+        return { value: { changed: true } };
+      },
+    });
+    expect(result.kind).toBe('denied');
+    expect(dispatched).toBe(false);
+    const { rows } = await db.pool.query<{ status: string }>(
+      'SELECT status FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(rows).toEqual([{ status: 'FAILED' }]);
+  });
+
   it('suspends an approval-gated mutation before credentials, receipt, or dispatch', async () => {
     const { run, attempt } = await runningRun([
       {
@@ -407,6 +488,17 @@ describe('governed action pipeline', () => {
       `UPDATE approvals SET status = 'EXPIRED', decided_at = now() WHERE id = $1`,
       [approval!.id],
     );
+    await withTransaction(db.pool, async (tx) => {
+      await transitionRun(tx, run.id, {
+        expectFrom: ['WAITING_APPROVAL'], to: 'QUEUED', event: { type: 'ApprovalReceived' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' },
+      });
+    });
     const expired = await executeGovernedAction(context(run, attempt), {
       connector: 'test',
       action: 'connector.records.read',
@@ -434,6 +526,482 @@ describe('governed action pipeline', () => {
       stage: 'approval',
       reason: 'approval expired for connector.records.read',
     });
+  });
+
+  it('rejects an APPROVED decision that expired by the database clock', async () => {
+    const { run, attempt } = await runningRun([
+      {
+        action: 'connector.records.write',
+        resource: 'records',
+        requiresApproval: true,
+      },
+    ]);
+    const spec = {
+      connector: 'test',
+      action: 'connector.records.write',
+      resource: 'records',
+      args: { id: 'R-expired-approved' },
+      classification: 'mutation' as const,
+      requireGrant: true,
+      recovery: 'retry_with_idempotency' as const,
+      dispatch: async () => ({ value: { changed: true } }),
+    };
+    const suspended = await executeGovernedAction(context(run, attempt), spec);
+    expect(suspended.kind).toBe('suspend_approval');
+    const [approval] = await listApprovals(db.pool, run.id, 'PENDING');
+    await db.pool.query(
+      `UPDATE approvals
+       SET status = 'APPROVED', decided_at = clock_timestamp(),
+           expires_at = clock_timestamp() - interval '1 second'
+       WHERE id = $1`,
+      [approval!.id],
+    );
+    await withTransaction(db.pool, async (tx) => {
+      await transitionRun(tx, run.id, {
+        expectFrom: ['WAITING_APPROVAL'], to: 'QUEUED', event: { type: 'ApprovalReceived' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' },
+      });
+    });
+
+    let dispatched = false;
+    const result = await executeGovernedAction(context(run, attempt), {
+      ...spec,
+      dispatch: async () => {
+        dispatched = true;
+        return { value: { changed: true } };
+      },
+    });
+    expect(result).toEqual({
+      kind: 'denied',
+      reason: 'approval expired for connector.records.write',
+    });
+    expect(dispatched).toBe(false);
+    expect((await listApprovals(db.pool, run.id))[0]?.status).toBe('EXPIRED');
+  });
+
+  it('revalidates approval after slow credential resolution before dispatch', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records', requiresApproval: true,
+    }]);
+    const args = { id: 'R-approval-toctou' };
+    const spec = {
+      connector: 'test', action: 'connector.records.write', resource: 'records', args,
+      classification: 'mutation' as const, requireGrant: true,
+      recovery: 'retry_with_idempotency' as const,
+      dispatch: async () => ({ value: { changed: true } }),
+    };
+    expect((await executeGovernedAction(context(run, attempt), spec)).kind)
+      .toBe('suspend_approval');
+    const [approval] = await listApprovals(db.pool, run.id, 'PENDING');
+    await db.pool.query(
+      `UPDATE approvals SET status = 'APPROVED', decided_at = clock_timestamp(),
+         expires_at = clock_timestamp() + interval '1 minute' WHERE id = $1`,
+      [approval!.id],
+    );
+    await withTransaction(db.pool, async (tx) => {
+      await transitionRun(tx, run.id, {
+        expectFrom: ['WAITING_APPROVAL'], to: 'QUEUED', event: { type: 'ApprovalReceived' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' },
+      });
+    });
+    let dispatched = false;
+    const result = await executeGovernedAction(
+      context(run, attempt, {
+        resolve: async () => {
+          await db.pool.query(
+            `UPDATE approvals SET expires_at = clock_timestamp() - interval '1 second'
+             WHERE id = $1`,
+            [approval!.id],
+          );
+          return { headerName: 'authorization', headerValue: 'scoped' };
+        },
+      }),
+      { ...spec, dispatch: async () => {
+        dispatched = true;
+        return { value: { changed: true } };
+      } },
+    );
+    expect(result).toEqual({
+      kind: 'denied', reason: 'approval expired for connector.records.write',
+    });
+    expect(dispatched).toBe(false);
+  });
+
+  it('rechecks approval after receipt creation and requests fresh authority if expired', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records', requiresApproval: true,
+    }]);
+    const args = { id: 'R-final-approval-boundary' };
+    const baseSpec = {
+      connector: 'test', action: 'connector.records.write', resource: 'records', args,
+      classification: 'mutation' as const, requireGrant: true,
+      recovery: 'retry_with_idempotency' as const,
+      dispatch: async () => ({ value: { changed: true } }),
+    };
+    expect((await executeGovernedAction(context(run, attempt), baseSpec)).kind)
+      .toBe('suspend_approval');
+    const [firstApproval] = await listApprovals(db.pool, run.id, 'PENDING');
+    await db.pool.query(
+      `UPDATE approvals SET status = 'APPROVED', decided_at = clock_timestamp(),
+         expires_at = clock_timestamp() + interval '1 minute' WHERE id = $1`,
+      [firstApproval!.id],
+    );
+    await withTransaction(db.pool, async (tx) => {
+      await transitionRun(tx, run.id, {
+        expectFrom: ['WAITING_APPROVAL'], to: 'QUEUED', event: { type: 'ApprovalReceived' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' },
+      });
+    });
+    let dispatched = false;
+    const result = await executeGovernedAction(context(run, attempt), {
+      ...baseSpec,
+      beforeDispatch: async () => {
+        await db.pool.query(
+          `UPDATE approvals SET expires_at = clock_timestamp() - interval '1 second'
+           WHERE id = $1`,
+          [firstApproval!.id],
+        );
+      },
+      dispatch: async () => {
+        dispatched = true;
+        return { value: { changed: true } };
+      },
+    });
+    expect(result.kind).toBe('suspend_approval');
+    expect(dispatched).toBe(false);
+    const approvals = await listApprovals(db.pool, run.id);
+    expect(approvals.map((approval) => approval.status)).toEqual(['EXPIRED', 'PENDING']);
+    const { rows: receipts } = await db.pool.query<{ approval_id: string; status: string }>(
+      'SELECT approval_id, status FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(receipts).toEqual([{
+      approval_id: (result as { kind: 'suspend_approval'; approvalId: string }).approvalId,
+      status: 'PENDING',
+    }]);
+  });
+
+  it('refreshes approval that expires during credentials after terminal not_found', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records', requiresApproval: true,
+    }]);
+    const args = { id: 'R-recovery-credential-expiry' };
+    const baseSpec = {
+      connector: 'test', action: 'connector.records.write', resource: 'records', args,
+      classification: 'mutation' as const, requireGrant: true,
+      recovery: 'reconcile' as const,
+      dispatch: async () => ({ value: { changed: true } }),
+    };
+    expect((await executeGovernedAction(context(run, attempt), baseSpec)).kind)
+      .toBe('suspend_approval');
+    const [approval] = await listApprovals(db.pool, run.id, 'PENDING');
+    await db.pool.query(
+      `UPDATE approvals SET status = 'APPROVED', decision_by = 'reviewer',
+         decided_at = clock_timestamp(), expires_at = clock_timestamp() + interval '1 minute'
+       WHERE id = $1`,
+      [approval!.id],
+    );
+    await withTransaction(db.pool, async (tx) => {
+      await transitionRun(tx, run.id, {
+        expectFrom: ['WAITING_APPROVAL'], to: 'QUEUED', event: { type: 'ApprovalReceived' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' },
+      });
+    });
+    await expect(executeGovernedAction(context(run, attempt), {
+      ...baseSpec,
+      afterDispatch: () => { throw new Error('crash after remote commit'); },
+    })).rejects.toThrow('crash after remote commit');
+
+    const refreshed = await executeGovernedAction(
+      context(run, attempt, {
+        resolve: async () => {
+          await db.pool.query(
+            `UPDATE approvals SET expires_at = clock_timestamp() - interval '1 second'
+             WHERE id = $1`,
+            [approval!.id],
+          );
+          return null;
+        },
+      }),
+      {
+        ...baseSpec,
+        reconcile: async () => ({ status: 'not_found' as const, terminal: true as const }),
+      },
+    );
+    expect(refreshed.kind).toBe('suspend_approval');
+    const approvals = await listApprovals(db.pool, run.id);
+    expect(approvals.map((row) => row.status)).toEqual(['EXPIRED', 'PENDING']);
+    const { rows } = await db.pool.query<{ status: string; approval_id: string }>(
+      'SELECT status, approval_id FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(rows).toEqual([{
+      status: 'PENDING',
+      approval_id: (refreshed as { kind: 'suspend_approval'; approvalId: string }).approvalId,
+    }]);
+  });
+
+  it('refreshes approval that expires during credentials for an idempotent retry', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records', requiresApproval: true,
+    }]);
+    const args = { id: 'R-idempotent-credential-expiry' };
+    const baseSpec = {
+      connector: 'test', action: 'connector.records.write', resource: 'records', args,
+      classification: 'mutation' as const, requireGrant: true,
+      recovery: 'retry_with_idempotency' as const,
+      dispatch: async () => ({ value: { changed: true } }),
+    };
+    expect((await executeGovernedAction(context(run, attempt), baseSpec)).kind)
+      .toBe('suspend_approval');
+    const [approval] = await listApprovals(db.pool, run.id, 'PENDING');
+    await db.pool.query(
+      `UPDATE approvals SET status = 'APPROVED', decision_by = 'reviewer',
+         decided_at = clock_timestamp(), expires_at = clock_timestamp() + interval '1 minute'
+       WHERE id = $1`,
+      [approval!.id],
+    );
+    await withTransaction(db.pool, async (tx) => {
+      await transitionRun(tx, run.id, {
+        expectFrom: ['WAITING_APPROVAL'], to: 'QUEUED', event: { type: 'ApprovalReceived' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' },
+      });
+    });
+    let dispatches = 0;
+    await expect(executeGovernedAction(context(run, attempt), {
+      ...baseSpec,
+      dispatch: async () => {
+        dispatches += 1;
+        return { value: { changed: true } };
+      },
+      afterDispatch: () => { throw new Error('crash after remote commit'); },
+    })).rejects.toThrow('crash after remote commit');
+
+    const refreshed = await executeGovernedAction(
+      context(run, attempt, {
+        resolve: async () => {
+          await db.pool.query(
+            `UPDATE approvals SET expires_at = clock_timestamp() - interval '1 second'
+             WHERE id = $1`,
+            [approval!.id],
+          );
+          return null;
+        },
+      }),
+      {
+        ...baseSpec,
+        dispatch: async () => {
+          dispatches += 1;
+          return { value: { changed: true } };
+        },
+      },
+    );
+    expect(refreshed.kind).toBe('suspend_approval');
+    expect(dispatches).toBe(1);
+    const approvals = await listApprovals(db.pool, run.id);
+    expect(approvals.map((row) => row.status)).toEqual(['EXPIRED', 'PENDING']);
+    const { rows } = await db.pool.query<{ status: string; approval_id: string }>(
+      'SELECT status, approval_id FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(rows).toEqual([{
+      status: 'PENDING',
+      approval_id: (refreshed as { kind: 'suspend_approval'; approvalId: string }).approvalId,
+    }]);
+  });
+
+  it('fails a fresh undispatched receipt when final approval is denied', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records', requiresApproval: true,
+    }]);
+    const args = { id: 'R-final-approval-denial' };
+    const baseSpec = {
+      connector: 'test', action: 'connector.records.write', resource: 'records', args,
+      classification: 'mutation' as const, requireGrant: true,
+      recovery: 'retry_with_idempotency' as const,
+      dispatch: async () => ({ value: { changed: true } }),
+    };
+    expect((await executeGovernedAction(context(run, attempt), baseSpec)).kind)
+      .toBe('suspend_approval');
+    const [approval] = await listApprovals(db.pool, run.id, 'PENDING');
+    await db.pool.query(
+      `UPDATE approvals SET status = 'APPROVED', decision_by = 'reviewer',
+         decided_at = clock_timestamp() WHERE id = $1`,
+      [approval!.id],
+    );
+    await withTransaction(db.pool, async (tx) => {
+      await transitionRun(tx, run.id, {
+        expectFrom: ['WAITING_APPROVAL'], to: 'QUEUED', event: { type: 'ApprovalReceived' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['QUEUED'], to: 'STARTING', event: { type: 'AttemptStarted' },
+      });
+      await transitionRun(tx, run.id, {
+        expectFrom: ['STARTING'], to: 'RUNNING', event: { type: 'AttemptStarted' },
+      });
+    });
+    let dispatched = false;
+    const result = await executeGovernedAction(context(run, attempt), {
+      ...baseSpec,
+      beforeDispatch: async () => {
+        await db.pool.query(
+          `UPDATE approvals SET status = 'DENIED', decision_by = 'reviewer',
+             decided_at = clock_timestamp() WHERE id = $1`,
+          [approval!.id],
+        );
+      },
+      dispatch: async () => {
+        dispatched = true;
+        return { value: { changed: true } };
+      },
+    });
+    expect(result).toEqual({
+      kind: 'denied', reason: 'connector.records.write was denied by reviewer',
+    });
+    expect(dispatched).toBe(false);
+    const { rows } = await db.pool.query<{ status: string }>(
+      'SELECT status FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(rows).toEqual([{ status: 'FAILED' }]);
+  });
+
+  it('does not commit a remote result after the current attempt loses ownership', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records',
+    }]);
+    await expect(executeGovernedAction(context(run, attempt), {
+      connector: 'test', action: 'connector.records.write', resource: 'records',
+      args: { id: 'R-stale-after-dispatch' }, classification: 'mutation',
+      requireGrant: true, recovery: 'retry_with_idempotency',
+      dispatch: async () => {
+        await db.pool.query(
+          `UPDATE run_attempts SET state = 'SUPERSEDED' WHERE id = $1`,
+          [attempt.id],
+        );
+        return { value: { changed: true } };
+      },
+    })).rejects.toThrow(/no longer current/);
+    const { rows: receipts } = await db.pool.query<{ status: string }>(
+      'SELECT status FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(receipts).toEqual([{ status: 'PENDING' }]);
+    const { rows: committed } = await db.pool.query(
+      `SELECT 1 FROM run_events WHERE run_id = $1 AND type = 'ToolInvocationCommitted'`,
+      [run.id],
+    );
+    expect(committed).toEqual([]);
+  });
+
+  it('does not dispatch after an async pre-dispatch hook loses ownership', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records',
+    }]);
+    let dispatched = false;
+    await expect(executeGovernedAction(context(run, attempt), {
+      connector: 'test', action: 'connector.records.write', resource: 'records',
+      args: { id: 'R-stale-before-dispatch' }, classification: 'mutation',
+      requireGrant: true, recovery: 'retry_with_idempotency',
+      beforeDispatch: async () => {
+        await db.pool.query(
+          `UPDATE run_attempts SET state = 'SUPERSEDED' WHERE id = $1`, [attempt.id],
+        );
+      },
+      dispatch: async () => {
+        dispatched = true;
+        return { value: { changed: true } };
+      },
+    })).rejects.toThrow(/no longer current/);
+    expect(dispatched).toBe(false);
+    const { rows } = await db.pool.query<{ status: string }>(
+      'SELECT status FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(rows).toEqual([{ status: 'PENDING' }]);
+  });
+
+  it('does not terminalize reconciliation after ownership is lost', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records',
+    }]);
+    const baseSpec = {
+      connector: 'test', action: 'connector.records.write', resource: 'records',
+      args: { id: 'R-stale-reconcile' }, classification: 'mutation' as const,
+      requireGrant: true, recovery: 'reconcile' as const,
+      dispatch: async () => ({ value: { changed: true } }),
+      afterDispatch: () => { throw new Error('crash after remote commit'); },
+    };
+    await expect(executeGovernedAction(context(run, attempt), baseSpec))
+      .rejects.toThrow('crash after remote commit');
+    await expect(executeGovernedAction(context(run, attempt), {
+      ...baseSpec,
+      afterDispatch: undefined,
+      reconcile: async () => {
+        await db.pool.query(
+          `UPDATE run_attempts SET state = 'SUPERSEDED' WHERE id = $1`, [attempt.id],
+        );
+        return { status: 'unknown' as const };
+      },
+    })).rejects.toThrow(/no longer current/);
+    const { rows } = await db.pool.query<{ status: string }>(
+      'SELECT status FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(rows).toEqual([{ status: 'PENDING' }]);
+  });
+
+  it('serializes a pool-sized same-action recovery burst without starving the pool', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records',
+    }]);
+    let dispatches = 0;
+    const spec = {
+      connector: 'test', action: 'connector.records.write', resource: 'records',
+      args: { id: 'R-pool-fence' }, classification: 'mutation' as const,
+      requireGrant: true, recovery: 'retry_with_idempotency' as const,
+      dispatch: async () => {
+        dispatches += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { value: { changed: true } };
+      },
+    };
+    const dbBackedCredentials: CredentialProvider = {
+      resolve: async () => {
+        await db.pool.query('SELECT 1');
+        return null;
+      },
+    };
+    const outcomes = await Promise.race([
+      Promise.all(Array.from({ length: db.pool.options.max ?? 10 }, () =>
+        executeGovernedAction(context(run, attempt, dbBackedCredentials), spec))),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error('pool starvation timeout')), 2_000)),
+    ]);
+    expect(outcomes).toHaveLength(db.pool.options.max ?? 10);
+    expect(dispatches).toBe(1);
+    expect(outcomes.filter((outcome) =>
+      outcome.kind === 'completed' && outcome.deduplicated)).toHaveLength(
+      (db.pool.options.max ?? 10) - 1,
+    );
   });
 
   it('marks uncertain mutation failures for reconciliation and will not redispatch them', async () => {
@@ -464,5 +1032,31 @@ describe('governed action pipeline', () => {
 
     const again = await executeGovernedAction(context(run, attempt), spec);
     expect(again).toMatchObject({ kind: 'reconciliation_required' });
+  });
+
+  it('fails an authoritatively absent recovered receipt on validation denial', async () => {
+    const { run, attempt } = await runningRun([{
+      action: 'connector.records.write', resource: 'records',
+    }]);
+    const baseSpec = {
+      connector: 'test', action: 'connector.records.write', resource: 'records',
+      args: { id: 'R-validation-after-not-found' }, classification: 'mutation' as const,
+      requireGrant: true, recovery: 'reconcile' as const,
+      dispatch: async () => ({ value: { changed: true } }),
+      afterDispatch: () => { throw new Error('crash after remote commit'); },
+    };
+    await expect(executeGovernedAction(context(run, attempt), baseSpec))
+      .rejects.toThrow('crash after remote commit');
+    const result = await executeGovernedAction(context(run, attempt), {
+      ...baseSpec,
+      afterDispatch: undefined,
+      reconcile: async () => ({ status: 'not_found' as const, terminal: true as const }),
+      validate: () => ({ ok: false as const, reason: 'connector policy changed' }),
+    });
+    expect(result).toEqual({ kind: 'denied', reason: 'connector policy changed' });
+    const { rows } = await db.pool.query<{ status: string }>(
+      'SELECT status FROM tool_receipts WHERE run_id = $1', [run.id],
+    );
+    expect(rows).toEqual([{ status: 'FAILED' }]);
   });
 });

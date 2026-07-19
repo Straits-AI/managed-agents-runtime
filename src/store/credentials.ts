@@ -371,28 +371,48 @@ export async function consumeCredential(
     for (const candidate of candidates) {
       if (candidate.requires_approval && !validatedApprovalId) continue;
       const { rows: prior } = await tx.query<{
+        id: string;
+        approval_id: string | null;
         caller: string;
         purpose: string;
         action: string;
         resource: string;
       }>(
-        `SELECT caller, purpose, action, resource FROM credential_use_receipts
+        `SELECT id, approval_id, caller, purpose, action, resource
+         FROM credential_use_receipts
          WHERE grant_id = $1 AND run_id = $2 AND idempotency_key = $3`,
         [candidate.id, input.runId, input.idempotencyKey],
       );
       if (prior[0]) {
         if (
-          prior[0].caller !== input.caller ||
-          prior[0].purpose !== input.purpose ||
-          prior[0].action !== input.action ||
-          prior[0].resource !== input.resource
+          prior.some((receipt) =>
+            receipt.caller !== input.caller ||
+            receipt.purpose !== input.purpose ||
+            receipt.action !== input.action ||
+            receipt.resource !== input.resource)
         ) {
           return null;
         }
         const headerValue = await openWhileStillAuthorized(candidate);
-        return headerValue === null
-          ? null
-          : { headerName: candidate.header_name, headerValue };
+        if (headerValue === null) return null;
+        const sameApproval = prior.some(
+          (receipt) => receipt.approval_id === validatedApprovalId,
+        );
+        if (!sameApproval) {
+          await tx.query(
+            `INSERT INTO credential_use_receipts
+               (id, grant_id, credential_id, tenant_id, run_id, attempt_id,
+                approval_id, idempotency_key, caller, purpose, action, resource)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            [
+              newId('cuse'), candidate.id, candidate.credential_id,
+              input.tenantId, input.runId, input.attemptId, validatedApprovalId,
+              input.idempotencyKey, input.caller, input.purpose, input.action,
+              input.resource,
+            ],
+          );
+        }
+        return { headerName: candidate.header_name, headerValue };
       }
     }
 

@@ -212,6 +212,7 @@ export function createRealEpoch(providers: EpochProviders) {
         mcp: providers.mcp,
         mcpRoute: mcp.route,
         credentials: providers.credentials,
+        signal,
       };
 
       // Recall long-term memory once per epoch (stable within a run): the most

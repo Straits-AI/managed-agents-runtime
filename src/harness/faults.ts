@@ -9,6 +9,9 @@ import type { RunRow } from '../core/types.js';
 export type FaultPoint =
   | 'after_external_commit'
   | 'before_external_commit'
+  | 'before_mcp_dispatch'
+  | 'after_mcp_remote_commit'
+  | 'after_mcp_receipt_commit'
   | 'after_checkpoint';
 
 export function maybeCrash(cfg: Config, run: RunRow, point: FaultPoint): void {

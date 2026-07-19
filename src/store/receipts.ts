@@ -158,7 +158,7 @@ export async function commitReceipt(
   receiptId: string,
   result: { externalTxnId?: string; result: Record<string, unknown> },
 ): Promise<void> {
-  await tx.query(
+  const { rowCount } = await tx.query(
     `UPDATE tool_receipts
      SET status = 'COMMITTED', external_txn_id = $2, result = $3,
          result_digest = $4, completed_at = now()
@@ -170,6 +170,25 @@ export async function commitReceipt(
       sha256(canonicalJson(result.result)),
     ],
   );
+  if ((rowCount ?? 0) !== 1) {
+    throw new Error(`receipt ${receiptId} is no longer pending`);
+  }
+}
+
+/** Bind fresh, current-run approval authority to a recovered pending action. */
+export async function setPendingReceiptApproval(
+  tx: Tx,
+  receiptId: string,
+  approvalId: string,
+): Promise<void> {
+  const { rowCount } = await tx.query(
+    `UPDATE tool_receipts SET approval_id = $2
+     WHERE id = $1 AND status = 'PENDING'`,
+    [receiptId, approvalId],
+  );
+  if ((rowCount ?? 0) !== 1) {
+    throw new Error(`receipt ${receiptId} is no longer pending`);
+  }
 }
 
 export async function failReceipt(
