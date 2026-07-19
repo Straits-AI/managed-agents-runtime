@@ -71,6 +71,12 @@ describe('controlled-alpha GitHub Actions supply chain', () => {
     expect(workflowSources.join('\n')).not.toMatch(/image:\s+postgres:16\s*$/m);
   });
 
+  it('keeps container health smoke inside the isolated Docker network', () => {
+    expect(containerSmoke).toContain("['exec', container, 'node', '--input-type=module'");
+    expect(containerSmoke).not.toContain("'-p', '127.0.0.1::8080'");
+    expect(containerSmoke).not.toContain('http://127.0.0.1:${port}');
+  });
+
   it('keeps validation read-only and publishes only a verified annotated main tag', () => {
     expect(publishAlpha).toContain('validate:');
     expect(publishAlpha).toContain('permissions:\n      actions: read\n      contents: read');

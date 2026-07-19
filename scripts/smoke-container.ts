@@ -56,12 +56,25 @@ async function waitForPostgres(): Promise<void> {
   throw new Error('PostgreSQL did not become ready');
 }
 
-async function waitForUrl(url: string, expected: unknown): Promise<void> {
+async function waitForContainerUrl(
+  container: string,
+  path: string,
+  expected: unknown,
+): Promise<void> {
+  const url = `http://127.0.0.1:8080${path}`;
+  const probe = [
+    'const response = await fetch(process.argv[1]);',
+    'const body = await response.json();',
+    'process.stdout.write(JSON.stringify({ ok: response.ok, body }));',
+  ].join('');
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
-      const response = await fetch(url);
-      const body = await response.json();
-      if (response.ok && JSON.stringify(body) === JSON.stringify(expected)) return;
+      const output = await docker(
+        ['exec', container, 'node', '--input-type=module', '-e', probe, url],
+        true,
+      );
+      const result = JSON.parse(output) as { ok?: boolean; body?: unknown };
+      if (result.ok && JSON.stringify(result.body) === JSON.stringify(expected)) return;
     } catch {
       // The API container may still be starting.
     }
@@ -118,13 +131,10 @@ try {
 
   await docker([
     'run', '-d', '--name', api, '--network', network,
-    '-p', '127.0.0.1::8080', ...environment(), image, 'api',
+    ...environment(), image, 'api',
   ]);
-  const mapping = await docker(['port', api, '8080/tcp']);
-  const port = mapping.match(/:(\d+)$/)?.[1];
-  if (!port) throw new Error(`could not parse published API port: ${mapping}`);
-  await waitForUrl(`http://127.0.0.1:${port}/healthz`, { status: 'ok' });
-  await waitForUrl(`http://127.0.0.1:${port}/readyz`, { status: 'ready' });
+  await waitForContainerUrl(api, '/healthz', { status: 'ok' });
+  await waitForContainerUrl(api, '/readyz', { status: 'ready' });
 
   await docker([
     'run', '-d', '--name', worker, '--network', network,
