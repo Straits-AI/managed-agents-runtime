@@ -91,6 +91,22 @@ The GitHub workflow runs the same command with a clean dependency install and a
 fresh PostgreSQL service. It uploads the evidence directory even when the gate
 fails, retaining the artifact for 30 days.
 
+### GitHub Action provenance
+
+The workflow pins each third-party action to a full commit SHA. The reviewed
+Node.js 24-native action tags resolve in their official repositories as follows:
+
+| Action | Official tag | Immutable commit SHA | Runtime |
+| --- | --- | --- | --- |
+| [`actions/checkout`](https://github.com/actions/checkout/releases/tag/v7.0.0) | `v7.0.0` | `9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0` | `node24` |
+| [`actions/setup-node`](https://github.com/actions/setup-node/releases/tag/v7.0.0) | `v7.0.0` | `820762786026740c76f36085b0efc47a31fe5020` | `node24` |
+| [`actions/upload-artifact`](https://github.com/actions/upload-artifact/releases/tag/v7.0.1) | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | `node24` |
+
+These mappings were resolved through GitHub's official tag refs and the
+`runs.using` field in each tagged `action.yml`. The repository test suite freezes
+the action references so a version alias, shortened SHA, or undocumented action
+cannot silently re-enter the release gate.
+
 ## Provider boundary and limitations
 
 This gate certifies the kernel's controlled multi-tenant boundary against local
