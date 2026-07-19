@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import type { RunAttemptRow, RunRow, SemanticAction } from '../core/types.js';
+import type { CredentialProvider } from '../providers/types.js';
 import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { insertApproval, listApprovals } from '../store/approvals.js';
@@ -22,6 +23,7 @@ export interface GovernedActionContext {
   run: RunRow;
   attempt: RunAttemptRow;
   step: number;
+  credentials?: CredentialProvider;
 }
 
 export interface GovernedDispatchInput {
@@ -29,7 +31,7 @@ export interface GovernedDispatchInput {
   credential: ResolvedCredential;
 }
 
-export interface GovernedActionSpec<T> {
+export interface GovernedActionSpec<T extends Record<string, unknown>> {
   connector: string;
   action: string;
   resource: string;
@@ -41,18 +43,16 @@ export interface GovernedActionSpec<T> {
   audit?: Record<string, unknown>;
   /** Connector-specific validation that cannot execute the action. */
   validate?: (input: { hasDeclaredGrant: boolean }) => { ok: true } | { ok: false; reason: string };
-  resolveCredential?: () => Promise<ResolvedCredential>;
   beforeDispatch?: () => void;
   afterCommit?: () => void;
   dispatch: (input: GovernedDispatchInput) => Promise<{
     value: T;
-    receiptResult: Record<string, unknown>;
     externalTxnId?: string;
     audit?: Record<string, unknown>;
   }>;
 }
 
-export type GovernedActionResult<T> =
+export type GovernedActionResult<T extends Record<string, unknown>> =
   | { kind: 'completed'; value: T; deduplicated: boolean }
   | { kind: 'suspend_approval'; approvalId: string }
   | { kind: 'denied'; reason: string }
@@ -62,13 +62,48 @@ function riskFor(classification: ActionClassification): SemanticAction['risk'] {
   return classification === 'read' ? 'read' : 'external_write';
 }
 
+function actionAudit<T extends Record<string, unknown>>(
+  spec: GovernedActionSpec<T>,
+): Record<string, unknown> {
+  return {
+    connector: spec.connector,
+    action: spec.action,
+    resource: spec.resource,
+    classification: spec.classification,
+  };
+}
+
+async function auditDenial<T extends Record<string, unknown>>(
+  ctx: GovernedActionContext,
+  spec: GovernedActionSpec<T>,
+  reason: string,
+  stage: 'validation' | 'policy' | 'approval',
+): Promise<void> {
+  await withTransaction(ctx.pool, (tx) =>
+    appendEvent(
+      tx,
+      ctx.run.id,
+      {
+        type: 'ActionDenied',
+        payload: {
+          ...spec.audit,
+          stage,
+          reason,
+          ...actionAudit(spec),
+        },
+      },
+      { attemptId: ctx.attempt.id },
+    ),
+  );
+}
+
 /**
  * Normative execution contract for every governed connector action:
- * classify → validate → policy → approval → receipt → credentials → dispatch
+ * classify → validate → policy → approval → credentials → receipt → dispatch
  * → commit/reconcile → audit. Connector handlers supply only validation and
  * transport behavior.
  */
-export async function executeGovernedAction<T>(
+export async function executeGovernedAction<T extends Record<string, unknown>>(
   ctx: GovernedActionContext,
   spec: GovernedActionSpec<T>,
 ): Promise<GovernedActionResult<T>> {
@@ -83,6 +118,7 @@ export async function executeGovernedAction<T>(
 
   const validation = spec.validate?.({ hasDeclaredGrant: declaredGrant !== undefined });
   if (validation && !validation.ok) {
+    await auditDenial(ctx, spec, validation.reason, 'validation');
     return { kind: 'denied', reason: validation.reason };
   }
 
@@ -103,13 +139,10 @@ export async function executeGovernedAction<T>(
         {
           type: 'ToolInvocationFailed',
           payload: {
-            receiptId: existing.id,
-            connector: spec.connector,
-            action: spec.action,
-            resource: spec.resource,
-            classification: spec.classification,
             ...spec.audit,
+            receiptId: existing.id,
             reconciliationRequired: true,
+            ...actionAudit(spec),
           },
         },
         { attemptId: ctx.attempt.id },
@@ -136,17 +169,11 @@ export async function executeGovernedAction<T>(
   );
 
   if (spec.requireGrant && !usableGrant) {
-    await withTransaction(ctx.pool, (tx) =>
-      appendEvent(
-        tx,
-        ctx.run.id,
-        { type: 'ActionDenied', payload: { action: spec.action, resource: spec.resource } },
-        { attemptId: ctx.attempt.id },
-      ),
-    );
+    const reason = `no capability grant allows ${spec.action} on ${spec.resource}`;
+    await auditDenial(ctx, spec, reason, 'policy');
     return {
       kind: 'denied',
-      reason: `no capability grant allows ${spec.action} on ${spec.resource}`,
+      reason,
     };
   }
 
@@ -184,14 +211,45 @@ export async function executeGovernedAction<T>(
     }
     approvalId = approval.id;
     if (approval.status === 'DENIED') {
+      const reason = `${spec.action} was denied by ${approval.decision_by ?? 'a human'}`;
+      await auditDenial(ctx, spec, reason, 'approval');
       return {
         kind: 'denied',
-        reason: `${spec.action} was denied by ${approval.decision_by ?? 'a human'}`,
+        reason,
       };
     }
     if (approval.status !== 'APPROVED') {
       return { kind: 'denied', reason: 'approval still pending' };
     }
+  }
+
+  let credential: ResolvedCredential = null;
+  try {
+    credential =
+      (await ctx.credentials?.resolve({
+        tenantId: ctx.run.tenant_id,
+        runId: ctx.run.id,
+        action: spec.action,
+        resource: spec.resource,
+      })) ?? null;
+  } catch {
+    await withTransaction(ctx.pool, (tx) =>
+      appendEvent(
+        tx,
+        ctx.run.id,
+        {
+          type: 'ToolInvocationFailed',
+          payload: {
+            ...spec.audit,
+            stage: 'credential',
+            reconciliationRequired: false,
+            ...actionAudit(spec),
+          },
+        },
+        { attemptId: ctx.attempt.id },
+      ),
+    );
+    throw new Error(`credential resolution failed for ${spec.action}`);
   }
 
   const receipt =
@@ -224,12 +282,9 @@ export async function executeGovernedAction<T>(
         {
           type: 'ToolInvocationStarted',
           payload: {
-            receiptId: row.id,
-            connector: spec.connector,
-            action: spec.action,
-            resource: spec.resource,
-            classification: spec.classification,
             ...spec.audit,
+            receiptId: row.id,
+            ...actionAudit(spec),
           },
         },
         { attemptId: ctx.attempt.id },
@@ -237,14 +292,13 @@ export async function executeGovernedAction<T>(
       return row;
     }));
 
-  const credential = await spec.resolveCredential?.() ?? null;
   try {
     spec.beforeDispatch?.();
     const dispatched = await spec.dispatch({ idempotencyKey: key, credential });
     await withTransaction(ctx.pool, async (tx) => {
       await commitReceipt(tx, receipt.id, {
         externalTxnId: dispatched.externalTxnId,
-        result: dispatched.receiptResult,
+        result: dispatched.value,
       });
       await appendEvent(
         tx,
@@ -252,13 +306,10 @@ export async function executeGovernedAction<T>(
         {
           type: 'ToolInvocationCommitted',
           payload: {
-            receiptId: receipt.id,
-            connector: spec.connector,
-            action: spec.action,
-            resource: spec.resource,
-            classification: spec.classification,
             ...spec.audit,
             ...dispatched.audit,
+            receiptId: receipt.id,
+            ...actionAudit(spec),
           },
         },
         { attemptId: ctx.attempt.id },
@@ -276,13 +327,10 @@ export async function executeGovernedAction<T>(
           {
             type: 'ToolInvocationFailed',
             payload: {
-              receiptId: receipt.id,
-              connector: spec.connector,
-              action: spec.action,
-              resource: spec.resource,
-              classification: spec.classification,
               ...spec.audit,
+              receiptId: receipt.id,
               reconciliationRequired: true,
+              ...actionAudit(spec),
             },
           },
           { attemptId: ctx.attempt.id },

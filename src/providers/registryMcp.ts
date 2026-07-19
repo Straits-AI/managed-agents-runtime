@@ -1,8 +1,16 @@
 import type { McpToolProvider, ToolDef } from './types.js';
 
+export interface McpCallContext {
+  idempotencyKey: string;
+  credential: { headerName: string; headerValue: string } | null;
+}
+
 export interface RegisteredMcpTool {
   def: ToolDef;
-  handler: (args: Record<string, unknown>) => Promise<string> | string;
+  handler: (
+    args: Record<string, unknown>,
+    context: McpCallContext,
+  ) => Promise<string> | string;
 }
 
 /**
@@ -26,9 +34,10 @@ export class RegistryMcpProvider implements McpToolProvider {
     toolsetRef: string,
     name: string,
     args: Record<string, unknown>,
+    context: McpCallContext,
   ): Promise<{ content: string }> {
     const tool = (this.toolsets.get(toolsetRef) ?? []).find((t) => t.def.name === name);
     if (!tool) return { content: `error: MCP tool ${name} not found in toolset ${toolsetRef}` };
-    return { content: String(await tool.handler(args)) };
+    return { content: String(await tool.handler(args, context)) };
   }
 }

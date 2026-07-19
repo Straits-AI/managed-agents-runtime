@@ -6,6 +6,7 @@ import { createRun } from '../src/store/runs.js';
 import { transitionRun } from '../src/core/transition.js';
 import { newId } from '../src/ids.js';
 import type { RunAttemptRow, RunRow } from '../src/core/types.js';
+import type { CredentialProvider } from '../src/providers/types.js';
 import {
   executeGovernedAction,
   type GovernedActionContext,
@@ -74,8 +75,12 @@ async function runningRun(
   return { run: running, attempt: rows[0]! };
 }
 
-function context(run: RunRow, attempt: RunAttemptRow): GovernedActionContext {
-  return { pool: db.pool, run, attempt, step: 3 };
+function context(
+  run: RunRow,
+  attempt: RunAttemptRow,
+  credentials?: CredentialProvider,
+): GovernedActionContext {
+  return { pool: db.pool, run, attempt, step: 3, credentials };
 }
 
 describe('governed action pipeline', () => {
@@ -84,7 +89,11 @@ describe('governed action pipeline', () => {
       { action: 'connector.records.read', resource: 'records', maxCalls: 1 },
     ]);
     const seen: Record<string, unknown> = {};
-    const result = await executeGovernedAction(context(run, attempt), {
+    const result = await executeGovernedAction(
+      context(run, attempt, {
+        resolve: async () => ({ headerName: 'authorization', headerValue: 'secret' }),
+      }),
+      {
       connector: 'test',
       action: 'connector.records.read',
       resource: 'records',
@@ -92,16 +101,23 @@ describe('governed action pipeline', () => {
       classification: 'read',
       requireGrant: true,
       recovery: 'retry_with_idempotency',
-      resolveCredential: async () => ({ headerName: 'authorization', headerValue: 'secret' }),
+      audit: {
+        connector: 'forged',
+        action: 'forged',
+        classification: 'mutation',
+        receiptId: 'forged',
+        method: 'GET',
+      },
       dispatch: async (input) => {
         Object.assign(seen, input);
         return {
           value: { record: 'R-1' },
-          receiptResult: { record: 'R-1' },
           externalTxnId: 'read-1',
+          audit: { connector: 'also-forged', status: 200 },
         };
       },
-    });
+      },
+    );
 
     expect(result).toMatchObject({
       kind: 'completed',
@@ -114,10 +130,11 @@ describe('governed action pipeline', () => {
     expect(String(seen.idempotencyKey)).toHaveLength(64);
     expect((await listGrants(db.pool, run.id))[0]?.calls_used).toBe(1);
     const { rows: receipts } = await db.pool.query<{
+      id: string;
       status: string;
       reversibility: string;
-    }>('SELECT status, reversibility FROM tool_receipts WHERE run_id = $1', [run.id]);
-    expect(receipts).toEqual([{ status: 'COMMITTED', reversibility: 'reversible' }]);
+    }>('SELECT id, status, reversibility FROM tool_receipts WHERE run_id = $1', [run.id]);
+    expect(receipts).toMatchObject([{ status: 'COMMITTED', reversibility: 'reversible' }]);
     const { rows: events } = await db.pool.query<{ type: string; payload: Record<string, unknown> }>(
       `SELECT type, payload FROM run_events
        WHERE run_id = $1 AND type LIKE 'ToolInvocation%'
@@ -129,9 +146,95 @@ describe('governed action pipeline', () => {
       'ToolInvocationCommitted',
     ]);
     expect(events[0]?.payload).toMatchObject({
+      receiptId: receipts[0]?.id,
       connector: 'test',
+      action: 'connector.records.read',
       classification: 'read',
+      method: 'GET',
     });
+    expect(events[1]?.payload).toMatchObject({
+      receiptId: receipts[0]?.id,
+      connector: 'test',
+      action: 'connector.records.read',
+      classification: 'read',
+      status: 200,
+    });
+  });
+
+  it('audits validation denials through the same canonical envelope', async () => {
+    const { run, attempt } = await runningRun([]);
+    const result = await executeGovernedAction(context(run, attempt), {
+      connector: 'test',
+      action: 'connector.records.read',
+      resource: 'records',
+      args: {},
+      classification: 'read',
+      requireGrant: false,
+      recovery: 'retry_with_idempotency',
+      audit: { connector: 'forged', reason: 'forged' },
+      validate: () => ({ ok: false, reason: 'resource is outside policy' }),
+      dispatch: async () => ({ value: {} }),
+    });
+
+    expect(result).toEqual({ kind: 'denied', reason: 'resource is outside policy' });
+    const { rows } = await db.pool.query<{ payload: Record<string, unknown> }>(
+      `SELECT payload FROM run_events
+       WHERE run_id = $1 AND type = 'ActionDenied'`,
+      [run.id],
+    );
+    expect(rows[0]?.payload).toMatchObject({
+      connector: 'test',
+      action: 'connector.records.read',
+      classification: 'read',
+      stage: 'validation',
+      reason: 'resource is outside policy',
+    });
+  });
+
+  it('audits credential failures before receipt creation and allows a clean retry', async () => {
+    const { run, attempt } = await runningRun([
+      { action: 'connector.records.write', resource: 'records', maxCalls: 1 },
+    ]);
+    const spec = {
+      connector: 'test',
+      action: 'connector.records.write',
+      resource: 'records',
+      args: { id: 'R-credential' },
+      classification: 'mutation' as const,
+      requireGrant: true,
+      recovery: 'reconcile' as const,
+      dispatch: async () => ({ value: { ok: true } }),
+    };
+
+    await expect(
+      executeGovernedAction(
+        context(run, attempt, {
+          resolve: async () => {
+            throw new Error('kms secret must not leak');
+          },
+        }),
+        spec,
+      ),
+    ).rejects.toThrow('credential resolution failed for connector.records.write');
+    expect((await listGrants(db.pool, run.id))[0]?.calls_used).toBe(0);
+    const { rows: receipts } = await db.pool.query(
+      'SELECT id FROM tool_receipts WHERE run_id = $1',
+      [run.id],
+    );
+    expect(receipts).toEqual([]);
+    const { rows: failures } = await db.pool.query<{ payload: Record<string, unknown> }>(
+      `SELECT payload FROM run_events
+       WHERE run_id = $1 AND type = 'ToolInvocationFailed'`,
+      [run.id],
+    );
+    expect(failures[0]?.payload).toMatchObject({
+      stage: 'credential',
+      reconciliationRequired: false,
+    });
+    expect(JSON.stringify(failures)).not.toContain('kms secret');
+
+    const retry = await executeGovernedAction(context(run, attempt), spec);
+    expect(retry).toMatchObject({ kind: 'completed', value: { ok: true } });
   });
 
   it('suspends an approval-gated mutation before credentials, receipt, or dispatch', async () => {
@@ -144,7 +247,14 @@ describe('governed action pipeline', () => {
     ]);
     let credentialsResolved = false;
     let dispatched = false;
-    const result = await executeGovernedAction(context(run, attempt), {
+    const result = await executeGovernedAction(
+      context(run, attempt, {
+        resolve: async () => {
+          credentialsResolved = true;
+          return null;
+        },
+      }),
+      {
       connector: 'test',
       action: 'connector.records.write',
       resource: 'records',
@@ -152,15 +262,12 @@ describe('governed action pipeline', () => {
       classification: 'mutation',
       requireGrant: true,
       recovery: 'reconcile',
-      resolveCredential: async () => {
-        credentialsResolved = true;
-        return null;
-      },
       dispatch: async () => {
         dispatched = true;
-        return { value: {}, receiptResult: {} };
+        return { value: {} };
       },
-    });
+      },
+    );
 
     expect(result.kind).toBe('suspend_approval');
     expect(credentialsResolved).toBe(false);
@@ -192,7 +299,7 @@ describe('governed action pipeline', () => {
       recovery: 'retry_with_idempotency',
       dispatch: async () => {
         dispatched = true;
-        return { value: {}, receiptResult: {} };
+        return { value: {} };
       },
     });
 

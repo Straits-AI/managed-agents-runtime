@@ -6,20 +6,28 @@ import { createRun, getRun } from '../src/store/runs.js';
 import { listApprovals, decideApproval } from '../src/store/approvals.js';
 import { transitionRun } from '../src/core/transition.js';
 import { dispatchTool, type ToolContext } from '../src/harness/toolRouter.js';
-import { RegistryMcpProvider } from '../src/providers/registryMcp.js';
+import {
+  RegistryMcpProvider,
+  type McpCallContext,
+} from '../src/providers/registryMcp.js';
 import { resolveMcpTools, type McpRouteEntry } from '../src/harness/mcp.js';
 import { loadConfig } from '../src/config.js';
 import { newId } from '../src/ids.js';
 import type { RunAttemptRow, RunRow } from '../src/core/types.js';
+import type { CredentialProvider } from '../src/providers/types.js';
 
 let db: TestDb;
 let agentVersionId: string;
+let observedCallContext: McpCallContext | null = null;
 const cfg = loadConfig();
 
 const mcp = new RegistryMcpProvider().registerToolset('crm', [
   {
     def: { name: 'lookup_customer', description: 'find a customer', parameters: { type: 'object', properties: { id: { type: 'string' } } } },
-    handler: (args) => JSON.stringify({ id: args.id, name: 'Acme Corp' }),
+    handler: (args, context) => {
+      observedCallContext = context;
+      return JSON.stringify({ id: args.id, name: 'Acme Corp' });
+    },
   },
   {
     def: {
@@ -64,13 +72,18 @@ async function runningRun(
   return { run: running, attempt: rows[0]! };
 }
 
-function ctx(run: RunRow, attempt: RunAttemptRow, route: Map<string, McpRouteEntry>): ToolContext {
+function ctx(
+  run: RunRow,
+  attempt: RunAttemptRow,
+  route: Map<string, McpRouteEntry>,
+  credentials?: CredentialProvider,
+): ToolContext {
   return {
     pool: db.pool, cfg, run, attempt,
     sandbox: {} as ToolContext['sandbox'],
     sandboxProvider: {} as ToolContext['sandboxProvider'],
     objectStore: {} as ToolContext['objectStore'],
-    step: 1, mcp, mcpRoute: route,
+    step: 1, mcp, mcpRoute: route, credentials,
   };
 }
 
@@ -106,6 +119,44 @@ describe('MCP toolsets', () => {
       [run.id],
     );
     expect(receipts).toEqual([{ status: 'COMMITTED', reversibility: 'irreversible' }]);
+  });
+
+  it('passes stable idempotency and scoped credentials only to the MCP transport', async () => {
+    observedCallContext = null;
+    const { route } = await resolveMcpTools(mcp, ['crm']);
+    const { run, attempt } = await runningRun([{ action: 'mcp.crm.*' }]);
+    const credentials: CredentialProvider = {
+      resolve: async (input) => {
+        expect(input).toMatchObject({
+          tenantId: 'default',
+          runId: run.id,
+          action: 'mcp.crm.lookup_customer',
+          resource: 'crm',
+        });
+        return { headerName: 'authorization', headerValue: 'transport-secret' };
+      },
+    };
+
+    await dispatchTool(
+      ctx(run, attempt, route, credentials),
+      'mcp__crm__lookup_customer',
+      { id: 'C-secret' },
+    );
+
+    const callContext = observedCallContext as McpCallContext | null;
+    expect(callContext).toMatchObject({
+      credential: { headerName: 'authorization', headerValue: 'transport-secret' },
+    });
+    expect(callContext?.idempotencyKey).toHaveLength(64);
+    const { rows } = await db.pool.query(
+      `SELECT semantic_action AS label, result AS data
+       FROM tool_receipts WHERE run_id = $1
+       UNION ALL
+       SELECT type AS label, payload AS data
+       FROM run_events WHERE run_id = $1`,
+      [run.id],
+    );
+    expect(JSON.stringify(rows)).not.toContain('transport-secret');
   });
 
   it('denies an ungranted MCP call and records ActionDenied', async () => {

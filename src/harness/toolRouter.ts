@@ -169,7 +169,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'external_http_request',
     description:
-      'Call an external HTTP API. Non-GET requests are external side effects: they are policy-checked, may require human approval (the run suspends until decided), and are executed exactly once per unique request.',
+      'Call an external HTTP API. Non-GET requests are policy-checked, may require human approval, and use a durable idempotency receipt. Exactly-once execution requires the remote API to honor the supplied idempotency key.',
     parameters: {
       type: 'object',
       properties: {
@@ -356,7 +356,13 @@ async function dispatchMcp(
   const action = `mcp.${entry.toolsetRef}.${entry.originalName}`;
   const resource = entry.toolsetRef;
   const outcome = await executeGovernedAction(
-    { pool: ctx.pool, run: ctx.run, attempt: ctx.attempt, step: ctx.step },
+    {
+      pool: ctx.pool,
+      run: ctx.run,
+      attempt: ctx.attempt,
+      step: ctx.step,
+      credentials: ctx.credentials,
+    },
     {
       connector: 'mcp',
       action,
@@ -365,13 +371,19 @@ async function dispatchMcp(
       classification: entry.classification,
       requireGrant: true,
       // MCP has no idempotency/reconciliation protocol yet. Never blindly
-      // replay an uncertain mutation; issue #8 extends this transport seam.
+      // replay an uncertain mutation. Providers receive the stable key so a
+      // transport that supports idempotency can honor it; issue #8 adds
+      // provider-level conformance and reconciliation capabilities.
       recovery: 'reconcile',
-      dispatch: async () => {
-        const result = await ctx.mcp!.callTool(entry.toolsetRef, entry.originalName, args);
+      dispatch: async ({ idempotencyKey, credential }) => {
+        const result = await ctx.mcp!.callTool(
+          entry.toolsetRef,
+          entry.originalName,
+          args,
+          { idempotencyKey, credential },
+        );
         return {
           value: result,
-          receiptResult: { content: result.content },
         };
       },
     },
@@ -483,7 +495,13 @@ async function externalHttpRequest(
   const resource = safeOrigin(url);
   const classification = method === 'GET' ? 'read' : 'mutation';
   const outcome = await executeGovernedAction(
-    { pool: ctx.pool, run: ctx.run, attempt: ctx.attempt, step: ctx.step },
+    {
+      pool: ctx.pool,
+      run: ctx.run,
+      attempt: ctx.attempt,
+      step: ctx.step,
+      credentials: ctx.credentials,
+    },
     {
       connector: 'http',
       action: ACTION_NAME,
@@ -494,15 +512,6 @@ async function externalHttpRequest(
       recovery: 'retry_with_idempotency',
       audit: { method },
       validate: ({ hasDeclaredGrant }) => checkUrlPolicy(url, hasDeclaredGrant),
-      resolveCredential: ctx.credentials
-        ? () =>
-            ctx.credentials!.resolve({
-              tenantId: ctx.run.tenant_id,
-              runId: ctx.run.id,
-              action: ACTION_NAME,
-              resource,
-            })
-        : undefined,
       beforeDispatch: () => maybeCrash(ctx.cfg, ctx.run, 'before_external_commit'),
       afterCommit: () => maybeCrash(ctx.cfg, ctx.run, 'after_external_commit'),
       dispatch: async ({ idempotencyKey, credential }) => {
@@ -538,7 +547,6 @@ async function externalHttpRequest(
         const result = { status: response.status, body: parsedBody };
         return {
           value: result,
-          receiptResult: result,
           externalTxnId: response.headers.get('x-transaction-id') ?? undefined,
           audit: { status: response.status },
         };

@@ -164,6 +164,10 @@ export interface McpToolProvider {
     toolsetRef: string,
     name: string,
     args: Record<string, unknown>,
+    context: {
+      idempotencyKey: string;
+      credential: { headerName: string; headerValue: string } | null;
+    },
   ): Promise<{ content: string }>;
 }
 

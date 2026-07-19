@@ -202,6 +202,11 @@ partition.
   "done" means acceptance criteria met, not just the model claiming so.
 - **Secrets via the broker, not the prompt.** Never put credentials in
   instructions or tool arguments; register them with the broker.
+- **Treat exactly-once as a connector contract.** The runtime records a durable
+  receipt and supplies a stable idempotency key, but exactly-once external
+  effects require the connector to honor that key or expose authoritative
+  reconciliation. MCP transports without either are not replayed after an
+  uncertain outcome; their receipt is marked for operator reconciliation.
 - **Tenant isolation.** One API key per tenant; never share the operator token
   externally. Set quotas per tenant.
 - **Durability, not memory.** Recovery restores from the ledger + checkpoints —
