@@ -4,7 +4,7 @@ export const CONTROLLED_ALPHA_GATE_ID = 'controlled-multitenant-alpha-v1';
 export const CONTROLLED_ALPHA_MANIFEST_SHA256 =
   '58585c84eea1afeeabbe9bfd7f0d8609b442cb0d49ed7e3ba87d50fc131d24c6';
 export const CONTROLLED_ALPHA_ASSERTION_COUNT = 30;
-export const CONTROLLED_ALPHA_MINIMUM_TEST_COUNT = 286;
+export const CONTROLLED_ALPHA_MINIMUM_TEST_COUNT = 287;
 
 export interface ReleaseGateAssertion {
   id: string;
