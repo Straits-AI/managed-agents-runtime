@@ -63,6 +63,51 @@ and disables harness fault injection even if `NODE_ENV` was not set to
 the request correlation ID; internal provider and database details remain in
 structured logs.
 
+### Outbound HTTP boundary
+
+`external_http_request` does not use an unrestricted process-global HTTP
+client. The runtime resolves and validates every destination and redirect,
+rejects any DNS answer in loopback, private, link-local, metadata, multicast,
+documentation, or other reserved ranges, and pins the validated address for
+the connection. It also enforces connect and whole-request deadlines, a
+redirect limit, and a streamed response-byte limit. Credentials are removed
+when a redirect crosses origins.
+
+Development defaults to `HTTP_EGRESS_MODE=open`, which means public Internet
+origins are permitted but non-public addresses are still denied. A private
+RFC1918/ULA origin requires a capability grant whose resource is that **exact
+origin**; wildcard grants do not authorize private-network access. Loopback,
+link-local, shared-address metadata, and other reserved ranges additionally
+require the granted origin itself to use the literal IP address, preventing an
+authorized internal hostname from pivoting to runtime-local or metadata
+services after DNS changes.
+
+Production and any non-loopback API deployment fail closed unless outbound
+HTTP uses one of these modes:
+
+```bash
+# Exact origins and optional wildcard subdomains
+HTTP_EGRESS_MODE=allowlist
+HTTP_EGRESS_ALLOWLIST=https://api.example.com,https://*.trusted.example
+
+# Or a deployment-controlled forward proxy
+HTTP_EGRESS_MODE=proxy
+HTTP_EGRESS_PROXY_URL=https://egress-proxy.internal/v1/forward
+```
+
+The controlled proxy receives `x-managed-agents-target-url` plus the
+runtime-validated `x-managed-agents-target-address` and
+`x-managed-agents-target-family`. Its security contract is strict: connect to
+that pinned address without resolving the hostname again, while preserving the
+target URL host and TLS SNI. Target redirects are returned to the runtime and
+validated as new hops. The proxy endpoint must reject untrusted direct callers.
+Shared deployments require an HTTPS proxy; plain HTTP is accepted only for an
+explicit loopback sidecar.
+At connection time, every address returned for a plaintext sidecar must itself
+be loopback; trusting the configured `localhost` name alone is insufficient.
+Tune the bounds with `HTTP_CONNECT_TIMEOUT_MS`, `HTTP_TOTAL_TIMEOUT_MS`,
+`HTTP_MAX_REDIRECTS`, and `HTTP_MAX_RESPONSE_BYTES`.
+
 ## 3. Drive an agent through the API
 
 All requests need `Authorization: Bearer <token>`. The configured

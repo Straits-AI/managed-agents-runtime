@@ -15,6 +15,10 @@ export interface CapabilityGrantRow {
   created_at: Date;
 }
 
+export interface CapabilityGrantEligibilityRow extends CapabilityGrantRow {
+  is_unexpired: boolean;
+}
+
 /** Glob-lite matching: '*' wildcard segments, e.g. 'external.http.*'. */
 export function patternMatches(pattern: string, value: string): boolean {
   const re = new RegExp(
@@ -35,6 +39,19 @@ export async function listGrants(q: Q, runId: string): Promise<CapabilityGrantRo
   return rows;
 }
 
+/** Grant snapshot whose expiry decision comes from the database clock. */
+export async function listGrantsWithEligibility(
+  q: Q,
+  runId: string,
+): Promise<CapabilityGrantEligibilityRow[]> {
+  const { rows } = await q.query<CapabilityGrantEligibilityRow>(
+    `SELECT *, (expires_at IS NULL OR expires_at > clock_timestamp()) AS is_unexpired
+     FROM capability_grants WHERE run_id = $1`,
+    [runId],
+  );
+  return rows;
+}
+
 export type GrantDecision =
   | { allowed: false; reason: string }
   | { allowed: true; grant: CapabilityGrantRow; requiresApproval: boolean };
@@ -49,19 +66,24 @@ export async function authorizeAndConsume(
   runId: string,
   action: string,
   resource: string,
+  requiredGrantId?: string,
 ): Promise<GrantDecision> {
-  const { rows } = await tx.query<CapabilityGrantRow>(
-    `SELECT * FROM capability_grants WHERE run_id = $1
+  const { rows } = await tx.query<CapabilityGrantEligibilityRow>(
+    `SELECT *, (expires_at IS NULL OR expires_at > clock_timestamp()) AS is_unexpired
+     FROM capability_grants WHERE run_id = $1
      ORDER BY created_at ASC FOR UPDATE`,
     [runId],
   );
-  const grant = rows.find(
+  const matching = rows.filter(
     (g) =>
       patternMatches(g.action_pattern, action) &&
       patternMatches(g.resource_pattern, resource) &&
-      (g.expires_at === null || g.expires_at > new Date()) &&
+      g.is_unexpired &&
       (g.max_calls === null || g.calls_used < g.max_calls),
   );
+  const grant = requiredGrantId
+    ? matching.find((candidate) => candidate.id === requiredGrantId)
+    : matching[0];
   if (!grant) {
     return { allowed: false, reason: `no capability grant matches ${action} on ${resource}` };
   }

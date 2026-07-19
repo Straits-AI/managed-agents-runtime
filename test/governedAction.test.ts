@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createTestDb, type TestDb } from './helpers/db.js';
 import { withTransaction } from '../src/db/tx.js';
 import { createAgentDefinition, createAgentVersion } from '../src/store/agents.js';
@@ -40,6 +40,7 @@ async function runningRun(
     resource?: string;
     requiresApproval?: boolean;
     maxCalls?: number;
+    expiresAt?: Date;
   }[],
 ): Promise<{ run: RunRow; attempt: RunAttemptRow }> {
   const run = await withTransaction(db.pool, (tx) =>
@@ -249,6 +250,86 @@ describe('governed action pipeline', () => {
 
     const retry = await executeGovernedAction(context(run, attempt), spec);
     expect(retry).toMatchObject({ kind: 'completed', value: { ok: true } });
+  });
+
+  it('does not fall back to a broader grant when the selected grant is exhausted concurrently', async () => {
+    const { run, attempt } = await runningRun([
+      { action: 'connector.records.read', resource: '*' },
+      { action: 'connector.records.read', resource: 'private-records', maxCalls: 1 },
+    ]);
+    let dispatched = false;
+    await expect(executeGovernedAction(
+      context(run, attempt, {
+        resolve: async () => {
+          await db.pool.query(
+            `UPDATE capability_grants SET calls_used = max_calls
+             WHERE run_id = $1 AND resource_pattern = 'private-records'`,
+            [run.id],
+          );
+          return null;
+        },
+      }),
+      {
+        connector: 'test',
+        action: 'connector.records.read',
+        resource: 'private-records',
+        args: {},
+        classification: 'read',
+        requireGrant: false,
+        preferExactResourceGrant: true,
+        recovery: 'retry_with_idempotency',
+        dispatch: async () => {
+          dispatched = true;
+          return { value: { ok: true } };
+        },
+      },
+    )).rejects.toThrow(/capability disappeared/);
+    expect(dispatched).toBe(false);
+    const { rows } = await db.pool.query(
+      'SELECT id FROM tool_receipts WHERE run_id = $1',
+      [run.id],
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it('uses the database clock when deciding whether a grant is expired', async () => {
+    const NativeDate = Date;
+    const { run, attempt } = await runningRun([
+      {
+        action: 'connector.records.read',
+        resource: 'records',
+        expiresAt: new NativeDate('2025-01-01T00:00:00Z'),
+      },
+    ]);
+    class SkewedDate extends NativeDate {
+      constructor(value?: string | number | Date) {
+        super(value === undefined ? '2000-01-01T00:00:00Z' : value);
+      }
+      static override now() {
+        return NativeDate.parse('2000-01-01T00:00:00Z');
+      }
+    }
+    vi.stubGlobal('Date', SkewedDate);
+    let dispatched = false;
+    try {
+      const result = await executeGovernedAction(context(run, attempt), {
+        connector: 'test',
+        action: 'connector.records.read',
+        resource: 'records',
+        args: {},
+        classification: 'read',
+        requireGrant: true,
+        recovery: 'retry_with_idempotency',
+        dispatch: async () => {
+          dispatched = true;
+          return { value: { ok: true } };
+        },
+      });
+      expect(result).toMatchObject({ kind: 'denied' });
+      expect(dispatched).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('suspends an approval-gated mutation before credentials, receipt, or dispatch', async () => {

@@ -21,6 +21,7 @@ import type { ModelProvider } from '../src/providers/types.js';
 import { loadConfig } from '../src/config.js';
 import { buildServer } from '../src/api/server.js';
 import { dispatchTool } from '../src/harness/toolRouter.js';
+import type { SafeHttpRequest } from '../src/net/safeHttp.js';
 import {
   commitReceipt,
   idempotencyKey,
@@ -340,39 +341,36 @@ describe('delegated run tenancy and policy', () => {
       deduplicated: true,
       result: { status: 201, body: { id: 42 } },
     });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ id: 43 }), {
-        status: 201,
-        headers: { 'content-type': 'application/json', 'x-transaction-id': 'txn-recovered' },
-      }),
+    const httpRequest = vi.fn(async (_input: SafeHttpRequest) => ({
+      status: 201,
+      headers: { 'content-type': 'application/json', 'x-transaction-id': 'txn-recovered' },
+      body: JSON.stringify({ id: 43 }),
+      redirects: 0,
+    }));
+    const recovered = await dispatchTool(
+      {
+        pool: db.pool,
+        cfg,
+        run: runningReplacement,
+        attempt: replacementClaim!.attempt,
+        sandbox: { sandboxId: 'unused', baseUrl: 'unused' },
+        sandboxProvider: sandbox,
+        objectStore,
+        http: { request: httpRequest },
+        step: 2,
+      },
+      'external_http_request',
+      pendingArgs,
     );
-    try {
-      const recovered = await dispatchTool(
-        {
-          pool: db.pool,
-          cfg,
-          run: runningReplacement,
-          attempt: replacementClaim!.attempt,
-          sandbox: { sandboxId: 'unused', baseUrl: 'unused' },
-          sandboxProvider: sandbox,
-          objectStore,
-          step: 2,
-        },
-        'external_http_request',
-        pendingArgs,
-      );
-      expect(recovered).toMatchObject({ kind: 'result' });
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const requestHeaders = fetchSpy.mock.calls[0]?.[1]?.headers as Record<string, string>;
-      expect(requestHeaders['idempotency-key']).toBe(pendingKey);
-      const { rows: recoveredReceipts } = await db.pool.query<{ status: string }>(
-        'SELECT status FROM tool_receipts WHERE id = $1',
-        [pendingReceipt.id],
-      );
-      expect(recoveredReceipts[0]?.status).toBe('COMMITTED');
-    } finally {
-      fetchSpy.mockRestore();
-    }
+    expect(recovered).toMatchObject({ kind: 'result' });
+    expect(httpRequest).toHaveBeenCalledTimes(1);
+    const requestHeaders = httpRequest.mock.calls[0]?.[0].headers as Record<string, string>;
+    expect(requestHeaders['idempotency-key']).toBe(pendingKey);
+    const { rows: recoveredReceipts } = await db.pool.query<{ status: string }>(
+      'SELECT status FROM tool_receipts WHERE id = $1',
+      [pendingReceipt.id],
+    );
+    expect(recoveredReceipts[0]?.status).toBe('COMMITTED');
 
     const foreignTenant = await createTenant(db.pool, { name: 'Foreign reader' });
     const ownerKey = (await createApiKey(db.pool, { tenantId: tenant.id })).plaintext;

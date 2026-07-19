@@ -4,7 +4,11 @@ import type { CredentialProvider } from '../providers/types.js';
 import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { insertApproval, listApprovals } from '../store/approvals.js';
-import { authorizeAndConsume, listGrants, patternMatches } from '../store/grants.js';
+import {
+  authorizeAndConsume,
+  listGrantsWithEligibility,
+  patternMatches,
+} from '../store/grants.js';
 import {
   commitReceipt,
   failReceipt,
@@ -41,10 +45,16 @@ export interface GovernedActionSpec<T extends Record<string, unknown>> {
   classification: ActionClassification;
   /** Public reads may opt out; mutations and MCP calls require a grant. */
   requireGrant: boolean;
+  /** Prefer and consume an exact resource grant when one is available. */
+  preferExactResourceGrant?: boolean;
   recovery: RecoveryPolicy;
   audit?: Record<string, unknown>;
   /** Connector-specific validation that cannot execute the action. */
-  validate?: (input: { hasDeclaredGrant: boolean }) => { ok: true } | { ok: false; reason: string };
+  validate?: (input: {
+    hasDeclaredGrant: boolean;
+    declaredGrantResourcePatterns: string[];
+    usableGrantResourcePatterns: string[];
+  }) => { ok: true } | { ok: false; reason: string };
   beforeDispatch?: () => void;
   afterCommit?: () => void;
   dispatch: (input: GovernedDispatchInput) => Promise<{
@@ -111,18 +121,12 @@ export async function executeGovernedAction<T extends Record<string, unknown>>(
 ): Promise<GovernedActionResult<T>> {
   const scopeRunId = await replacementRootRunId(ctx.pool, ctx.run.id);
   const key = idempotencyKey({ runId: scopeRunId, action: spec.action, args: spec.args });
-  const grants = await listGrants(ctx.pool, ctx.run.id);
-  const declaredGrant = grants.find(
+  const grants = await listGrantsWithEligibility(ctx.pool, ctx.run.id);
+  const declaredGrants = grants.filter(
     (grant) =>
       patternMatches(grant.action_pattern, spec.action) &&
       patternMatches(grant.resource_pattern, spec.resource),
   );
-
-  const validation = spec.validate?.({ hasDeclaredGrant: declaredGrant !== undefined });
-  if (validation && !validation.ok) {
-    await auditDenial(ctx, spec, validation.reason, 'validation');
-    return { kind: 'denied', reason: validation.reason };
-  }
 
   const existing = await findReceiptByLineageKey(ctx.pool, ctx.run.id, key);
   if (existing?.status === 'COMMITTED') {
@@ -162,13 +166,27 @@ export async function executeGovernedAction<T extends Record<string, unknown>>(
     };
   }
   const pendingRecovery = existing?.status === 'PENDING';
-  const usableGrant = grants.find(
+  const usableGrants = declaredGrants.filter(
     (grant) =>
-      patternMatches(grant.action_pattern, spec.action) &&
-      patternMatches(grant.resource_pattern, spec.resource) &&
-      (grant.expires_at === null || grant.expires_at > new Date()) &&
+      grant.is_unexpired &&
       (pendingRecovery || grant.max_calls === null || grant.calls_used < grant.max_calls),
   );
+  if (spec.preferExactResourceGrant) {
+    usableGrants.sort((left, right) =>
+      Number(right.resource_pattern === spec.resource) -
+      Number(left.resource_pattern === spec.resource));
+  }
+  const usableGrant = usableGrants[0];
+
+  const validation = spec.validate?.({
+    hasDeclaredGrant: declaredGrants.length > 0,
+    declaredGrantResourcePatterns: declaredGrants.map((grant) => grant.resource_pattern),
+    usableGrantResourcePatterns: usableGrants.map((grant) => grant.resource_pattern),
+  });
+  if (validation && !validation.ok) {
+    await auditDenial(ctx, spec, validation.reason, 'validation');
+    return { kind: 'denied', reason: validation.reason };
+  }
 
   if (spec.requireGrant && !usableGrant) {
     const reason = `no capability grant allows ${spec.action} on ${spec.resource}`;
@@ -273,8 +291,9 @@ export async function executeGovernedAction<T extends Record<string, unknown>>(
           ctx.run.id,
           spec.action,
           spec.resource,
+          usableGrant.id,
         );
-        if (!authorized.allowed && spec.requireGrant) {
+        if (!authorized.allowed) {
           throw new Error(`capability disappeared: ${authorized.reason}`);
         }
       }

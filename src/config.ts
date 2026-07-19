@@ -29,6 +29,17 @@ const configSchema = z.object({
   // Max time to drain in-flight work on SIGTERM/SIGINT before forcing exit.
   SHUTDOWN_TIMEOUT_MS: intFromEnv(15_000),
 
+  // Outbound tool HTTP. Public destinations are DNS-validated and pinned even
+  // in open development mode. Shared deployments must choose an origin
+  // allowlist or a controlled forwarding proxy.
+  HTTP_EGRESS_MODE: z.enum(['open', 'allowlist', 'proxy']).default('open'),
+  HTTP_EGRESS_ALLOWLIST: z.string().default(''),
+  HTTP_EGRESS_PROXY_URL: z.string().optional(),
+  HTTP_CONNECT_TIMEOUT_MS: intFromEnv(5_000),
+  HTTP_TOTAL_TIMEOUT_MS: intFromEnv(30_000),
+  HTTP_MAX_REDIRECTS: z.coerce.number().int().min(0).default(3),
+  HTTP_MAX_RESPONSE_BYTES: intFromEnv(1_048_576),
+
   ARK_API_KEY: z.string().optional(),
   ARK_BASE_URL: z.string().default('https://ark.ap-southeast.bytepluses.com/api/v3'),
   ARK_MODEL: z.string().optional(),
@@ -140,10 +151,55 @@ function isLoopbackHost(host: string): boolean {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
 }
 
+export function parseHttpEgressAllowlist(value: string): string[] {
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const wildcard = entry.includes('://*.');
+      let parsed: URL;
+      try {
+        parsed = new URL(wildcard ? entry.replace('://*.', '://wildcard.') : entry);
+      } catch {
+        throw new Error(`Invalid HTTP egress allowlist origin: ${entry}`);
+      }
+      if (
+        !['http:', 'https:'].includes(parsed.protocol) ||
+        parsed.username || parsed.password ||
+        parsed.pathname !== '/' || parsed.search || parsed.hash ||
+        (wildcard && !parsed.hostname.startsWith('wildcard.'))
+      ) {
+        throw new Error(`Invalid HTTP egress allowlist origin: ${entry}`);
+      }
+      if (!wildcard) return parsed.origin;
+      return `${parsed.protocol}//*.${parsed.hostname.slice('wildcard.'.length)}` +
+        (parsed.port ? `:${parsed.port}` : '');
+    });
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = configSchema.safeParse(env);
   if (!parsed.success) {
     throw new Error(`Invalid configuration: ${parsed.error.message}`);
+  }
+  const allowedOrigins = parseHttpEgressAllowlist(parsed.data.HTTP_EGRESS_ALLOWLIST);
+  if (parsed.data.HTTP_EGRESS_MODE === 'allowlist' && allowedOrigins.length === 0) {
+    throw new Error('HTTP egress allowlist mode requires at least one origin');
+  }
+  let proxy: URL | undefined;
+  if (parsed.data.HTTP_EGRESS_MODE === 'proxy') {
+    try {
+      proxy = new URL(parsed.data.HTTP_EGRESS_PROXY_URL ?? '');
+    } catch {
+      throw new Error('HTTP egress proxy mode requires a valid proxy URL');
+    }
+    if (!['http:', 'https:'].includes(proxy.protocol) || proxy.username || proxy.password) {
+      throw new Error('HTTP egress proxy mode requires a valid proxy URL');
+    }
+    if (proxy.protocol !== 'https:' && !isLoopbackHost(proxy.hostname)) {
+      throw new Error('HTTP egress proxy must use HTTPS or a loopback sidecar');
+    }
   }
   const isProduction = parsed.data.NODE_ENV === 'production';
   const isExposed = !isLoopbackHost(parsed.data.API_HOST);
@@ -171,6 +227,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ) {
       throw new Error(
         `Unsafe ${boundary} configuration: AgentKit Knowledge must remain disabled until its live request and tenant-isolation contract is verified`,
+      );
+    }
+    if (parsed.data.HTTP_EGRESS_MODE === 'open') {
+      throw new Error(
+        `Unsafe ${boundary} configuration: outbound HTTP requires an allowlist or controlled egress proxy`,
       );
     }
   }
