@@ -355,8 +355,8 @@ executes a side effect.
   `/home/gem/workspace`. `python3`, `node`, and shell tools are present;
   `pytest` is not (Lesson 5).
 - **Where the pieces live.** Runner: [`scenarios/runner.ts`](../scenarios/runner.ts).
-  Cases: [`scenarios/cases.ts`](../scenarios/cases.ts). Provisioned cloud
-  resources + teardown: [`infra/resources.md`](../infra/resources.md).
+  Cases: [`scenarios/cases.ts`](../scenarios/cases.ts). Keep provisioned cloud
+  resource IDs and teardown state in the deployment's private operator inventory.
 - **Suggested course arc.** Lesson 1 (loop) → 4 (workload-agnostic) → 2 (verify)
   → 5 (verify failure) → 3 (governance) → 6 (durability). Build to durability;
   it's the payoff that justifies the architecture.

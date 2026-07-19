@@ -97,16 +97,19 @@ and caller-selected windows; use identical semantics for reporting and admission
 
 ### MAR-P1-005 — reproducible deployable release
 
-**Status:** partial — [Issue #25](https://github.com/Straits-AI/managed-agents-runtime/issues/25)  
+**Status:** release candidate; merge and tag pending — [Issue #25](https://github.com/Straits-AI/managed-agents-runtime/issues/25)
 **Owner:** runtime/repository
 
-Exact-commit CI, dependency policy, TypeScript, tests, and retained evidence are
-present. Missing release foundations include a versioned OCI image, migration and
-rollback procedure, reproducible image smoke test, coverage/lint policy, and
-verified protected-main settings.
+The candidate adds a versioned non-root OCI image, real-container
+migration/process/probe smoke testing, CycloneDX plus registry attestation
+evidence, and an explicit migration/application rollback runbook. The package,
+changelog, image label, and proposed tag agree on `v0.1.0-alpha.1`. Closure still
+requires the PR and exact post-merge `main` gates, current live provider evidence
+for every release claim, the immutable registry digest, and the final tag.
 
-**Closure:** publish and verify a pinned deployment artifact with SBOM/digests;
-document forward/rollback operations; enforce the agreed repository checks.
+**Closure:** publish and verify the pinned deployment artifact and tag; attach
+SBOM/provenance and digest evidence; preserve the documented forward/rollback
+operations and agreed repository checks.
 
 ### MAR-P1-006 — provider claims and live conformance
 

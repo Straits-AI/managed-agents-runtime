@@ -316,7 +316,9 @@ export async function executeGovernedAction<T extends Record<string, unknown>>(
     ]);
     locked = true;
     if (abortFence.signal.aborted) {
-      throw new Error('governed action cancelled before execution');
+      throw abortFence.signal.reason instanceof Error
+        ? abortFence.signal.reason
+        : new Error('governed action cancelled before execution');
     }
     return await executeGovernedActionFenced(ctx, spec, key, client, abortFence.signal);
   } finally {

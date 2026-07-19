@@ -687,6 +687,24 @@ describe('MCP toolsets', () => {
     expect(upsertCalls).toBe(callsBefore);
   });
 
+  it('preserves an existing cancellation reason before governed execution starts', async () => {
+    const { route } = await resolveMcpTools(mcp, ['crm']);
+    const { run, attempt } = await runningRun([{
+      action: 'mcp.crm.upsert_customer', resource: 'crm',
+    }]);
+    const controller = new AbortController();
+    controller.abort(new Error('replacement already owns recovery'));
+    const callsBefore = upsertCalls;
+
+    await expect(dispatchTool({
+      ...ctx(run, attempt, route),
+      signal: controller.signal,
+    }, 'mcp__crm__upsert_customer', {
+      id: 'cancel-before-governed-execution',
+    })).rejects.toThrow('replacement already owns recovery');
+    expect(upsertCalls).toBe(callsBefore);
+  });
+
   it('leaves reconciliation pending when the current worker is cancelled', async () => {
     const provider: McpToolProvider = {
       listTools: async () => [{
