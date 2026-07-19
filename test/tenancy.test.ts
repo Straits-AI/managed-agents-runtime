@@ -178,6 +178,25 @@ describe('multi-tenancy & auth', () => {
     expect(owned.statusCode, owned.body).toBe(201);
     expect(owned.json().knowledge_config).toEqual({ binding: 'tenant-handbook' });
 
+    await createKnowledgeBinding(db.pool, {
+      tenantId: tenantAId,
+      name: 'unverified-handbook',
+      provider: 'agentkit',
+      providerProject: 'private-project-unverified',
+      providerCollection: 'private-collection-unverified',
+    });
+    const unverified = await agentkitApp.inject({
+      method: 'POST',
+      url: `/v1/agents/${agentA.id}/versions`,
+      headers: bearer(keyA),
+      payload: {
+        instructions: 'must not use unverified binding',
+        modelPolicy: {},
+        knowledgeConfig: { binding: 'unverified-handbook' },
+      },
+    });
+    expect(unverified.statusCode).toBe(400);
+
     const crossTenant = await agentkitApp.inject({
       method: 'POST',
       url: `/v1/agents/${agentB.id}/versions`,

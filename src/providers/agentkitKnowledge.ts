@@ -21,7 +21,7 @@ export interface AgentKitKnowledgeConfig {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken?: string;
-  requireLiveVerified?: boolean;
+  requireLiveVerified: boolean;
 }
 
 export type AgentKitKnowledgeCall = <T>(input: SignV4Input) => Promise<T>;

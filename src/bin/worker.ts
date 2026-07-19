@@ -51,7 +51,9 @@ if (epochMode === 'scripted') {
         accessKeyId: req.BYTEPLUS_ACCESS_KEY_ID,
         secretAccessKey: req.BYTEPLUS_SECRET_ACCESS_KEY,
         sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
-        requireLiveVerified: cfg.AGENTKIT_KNOWLEDGE_LIVE_VERIFIED === 1,
+        // The admin verification probe is the only path that may use an
+        // unverified binding. Normal workers always fail closed per binding.
+        requireLiveVerified: true,
       },
     );
   } else if (cfg.KNOWLEDGE_PROVIDER !== 'none') {

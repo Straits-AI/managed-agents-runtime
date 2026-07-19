@@ -59,11 +59,7 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ApiDeps): void {
           req.tenantId,
           body.knowledgeConfig.binding,
         );
-        if (
-          !binding ||
-          (deps.cfg.AGENTKIT_KNOWLEDGE_LIVE_VERIFIED === 1 &&
-            binding.live_verified_at === null)
-        ) {
+        if (!binding || binding.live_verified_at === null) {
           return reply.code(400).send({ error: 'knowledge binding is unavailable' });
         }
       }
