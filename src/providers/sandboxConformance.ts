@@ -92,6 +92,7 @@ export async function runSandboxConformance(
 }
 
 function safeSandboxFailure(message: string): string {
+  if (message === 'Private sandbox Ready response was incomplete') return message;
   return /^Sandbox conformance (startup failed|startup timed out|execution failed|file roundtrip failed)$/.test(message)
     ? message
     : 'Sandbox conformance failed';

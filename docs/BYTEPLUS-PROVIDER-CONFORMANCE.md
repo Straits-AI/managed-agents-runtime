@@ -9,8 +9,8 @@ attest a changed adapter, tool version, API surface, region, or deployment.
 | Capability | Implementation | Current evidence | Shared-deployment claim |
 | --- | --- | --- | --- |
 | TOS object storage | `TosObjectStore` plus `scripts/provision-tos.ts` | Automated direct and presigned runner is unit-tested locally; a fresh live record is pending operator authentication | Blocked until the live record is retained |
-| ModelArk inference | `ModelArkModel` plus `scripts/smoke-ark.ts` | Historical bounded smoke only; current source/version/region rerun pending | Historical demonstration only |
-| veFaaS Cloud Sandbox | `VefaasSandbox` plus `scripts/smoke-sandbox.ts` | Historical create/exec/file/terminate smoke only; current rerun pending | Historical demonstration only |
+| ModelArk inference | `ModelArkModel` plus `scripts/conformance-modelark.ts` | Bounded temporary-key runner is locally gated; live inference requires a current endpoint resource ID | Historical demonstration only |
+| veFaaS Cloud Sandbox | `VefaasSandbox` plus private WebShell transport and `scripts/conformance-sandbox.ts` | Private lifecycle, fixed marker/file operations, secret isolation, and cleanup are locally gated; a fresh released sandbox application is required for live evidence | Historical demonstration only |
 | AgentKit Memory | `AgentKitMemory` | Historical write/extract/recall result only; current adapter-version record pending | Historical demonstration only |
 | AgentKit Knowledge | `AgentKitKnowledge` | No current shared-deployment isolation attestation | Fail-closed unless `AGENTKIT_KNOWLEDGE_LIVE_VERIFIED=1` for that deployment |
 | Skills and MCP | Registry implementations and adapter seams | Local contract evidence; no BytePlus-hosted Skills/MCP claim | Local/registry semantics only |
@@ -59,6 +59,45 @@ node --env-file=.env --import tsx scripts/provision-tos.ts \
 The output includes direct PUT/GET/HEAD, presigned GET/PUT with 60-second URLs,
 an expected post-delete 404 with bounded code/request ID, and confirmed absence
 of both disposable objects. The configured bucket is retained.
+
+## ModelArk record generation
+
+The ModelArk runner requires an actual endpoint resource for temporary-key
+issuance. A public preset model identifier is not interchangeable with that
+resource ID:
+
+```bash
+node --import tsx scripts/conformance-modelark.ts \
+  --profile dev \
+  --region ap-southeast-1 \
+  --model seed-2-0-lite-260228 \
+  --resource-type endpoint \
+  --key-resource-id ep-... \
+  --evidence-file /secure/path/modelark-conformance.json
+```
+
+The temporary key and model output remain in memory. The evidence contains only
+bounded request, token, finish, source, and redaction metadata.
+
+## Private sandbox record generation
+
+The private runner requires a released sandbox application and creates one
+short-lived 1-vCPU/2-GiB instance. It uses the ticketed WebShell endpoint only
+inside the credential-isolating Node process, executes fixed marker operations,
+verifies the instance configuration and file round-trip, then kills the instance:
+
+```bash
+node --import tsx scripts/conformance-sandbox.ts \
+  --profile dev \
+  --region ap-southeast-1 \
+  --function-id <released-sandbox-function-id> \
+  --run-id <non-secret-run-id> \
+  --evidence-file /secure/path/sandbox-conformance.json
+```
+
+This proves private WebShell execution, not public HTTP. It does not create or
+use an API Gateway route. The application is an explicit input and is retained;
+the disposable sandbox instance is the runner's cleanup responsibility.
 
 ## Promotion rule
 

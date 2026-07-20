@@ -173,11 +173,12 @@ private operator inventory rather than committing them to this repository:
 | `BYTEPLUS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN` | `python3 scripts/refresh-creds.py` syncs STS creds from `bp login` (~15 min TTL; rerun before a cloud batch) |
 | `TOS_BUCKET` | `scripts/provision-tos.ts` (idempotent create plus direct/presigned conformance, bounded failure-path evidence, verified object cleanup, and a versioned provenance record) |
 | `ARK_API_KEY` / `ARK_MODEL` | activate a model in the console, then `scripts/get-ark-key.py --endpoint-id ep-…` (key + endpoint id → `.env`) |
-| `VEFAAS_SANDBOX_FUNCTION_ID` | sandbox application created in the console (only surface that sets `FunctionType: sandbox`); instances are then fully programmatic |
-| `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | APIG serverless gateway + Key Auth route fronting the sandbox; key registered via `bp apig CreateConsumerCredential` |
+| `VEFAAS_SANDBOX_FUNCTION_ID` | released sandbox application created through the current `bp vefaas CreateFunction`/`Release` API contract; instances are then fully programmatic |
+| `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | optional public APIG route for the runtime's AIO REST adapter; private conformance uses secret-isolated WebShell and does not require APIG |
 
-> **Provisioning notes learned the hard way:** sandbox applications and the
-> APIG gateway are console-only to create;
+> **Provisioning notes learned the hard way:** sandbox application fields omitted
+> from older CLI help must be live-validated through current official schemas;
+> APIG is a separate public-exposure decision, not a private sandbox prerequisite;
 > `CreateSandbox` uses `InstanceImageInfo.{Image,Command}` (not `ImageUrl`) and
 > inherits the released app image when omitted; the AIO sandbox runs as user
 > `gem`, so the workspace lives under `/home/gem/workspace`.
@@ -190,6 +191,11 @@ node --env-file=.env --import tsx scripts/provision-tos.ts \
   --evidence-file /tmp/tos-conformance.json               # TOS live evidence
 node --env-file=.env --import tsx scripts/smoke-ark.ts       # ModelArk chat (≤32 tokens)
 node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→exec→file r/w→terminate via gateway
+node --import tsx scripts/conformance-sandbox.ts \
+  --profile dev --region ap-southeast-1 \
+  --function-id <released-sandbox-function-id> \
+  --run-id <non-secret-run-id> \
+  --evidence-file /secure/path/sandbox-conformance.json      # private WebShell, no APIG
 ```
 
 Interactive `bp login` belongs in the operator's normal host browser. Containers
