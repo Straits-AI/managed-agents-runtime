@@ -17,7 +17,8 @@ const option = (name: string, fallback?: string): string => {
 const profile = option('--profile', 'dev');
 const region = option('--region', 'ap-southeast-1');
 const model = option('--model', 'seed-2-0-lite-260228');
-const resourceType = option('--resource-type', 'model');
+const resourceType = option('--resource-type');
+const keyResourceId = option('--key-resource-id');
 const evidenceFile = option('--evidence-file');
 const durationSeconds = 900;
 const baseUrl = 'https://ark.ap-southeast.bytepluses.com/api/v3';
@@ -41,7 +42,7 @@ const evidence = await runModelArkConformance({
     const body = JSON.stringify({
       DurationSeconds: durationSeconds,
       ResourceType: resourceType,
-      ResourceIds: [model],
+      ResourceIds: [keyResourceId],
     });
     let stdout: string;
     try {
