@@ -1,7 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runModelArkConformance } from '../src/providers/modelArkConformance.js';
+import {
+  parseBoundedProviderFailure,
+  runModelArkConformance,
+} from '../src/providers/modelArkConformance.js';
 
 describe('ModelArk live conformance seam', () => {
+  it('extracts only bounded provider metadata from a bp failure', () => {
+    expect(parseBoundedProviderFailure(
+      'NotFound.Resource: secret body\nstatus code: 404, request id: request-404',
+    )).toEqual({
+      status: 404,
+      code: 'NotFound.Resource',
+      requestId: 'request-404',
+    });
+  });
+
   it('uses a temporary key in memory and emits metadata without key, prompt, or output', async () => {
     const getTemporaryKey = vi.fn(async () => ({
       apiKey: 'canary-model-key',

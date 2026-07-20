@@ -1,7 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { runModelArkConformance } from '../src/providers/modelArkConformance.js';
+import {
+  parseBoundedProviderFailure,
+  runModelArkConformance,
+} from '../src/providers/modelArkConformance.js';
 import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
 
 const option = (name: string, fallback?: string): string => {
@@ -48,9 +51,16 @@ const evidence = await runModelArkConformance({
         '---region', region,
         '--body', body,
       ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    } catch {
+    } catch (error) {
+      const failure = parseBoundedProviderFailure(
+        typeof error === 'object' && error !== null && 'stderr' in error
+          ? error.stderr
+          : null,
+      );
       throw Object.assign(new Error('temporary key request failed'), {
-        code: 'TemporaryKeyRequestFailed',
+        status: failure.status,
+        code: failure.code ?? 'TemporaryKeyRequestFailed',
+        requestId: failure.requestId,
       });
     }
     let parsed: unknown;

@@ -18,6 +18,28 @@ export interface ModelArkConformanceDependencies {
   invoke(input: { apiKey: string; model: string }): Promise<ModelArkInvocationResult>;
 }
 
+export interface BoundedProviderFailure {
+  status: number | null;
+  code: string | null;
+  requestId: string | null;
+}
+
+export function parseBoundedProviderFailure(value: unknown): BoundedProviderFailure {
+  const text = typeof value === 'string'
+    ? value
+    : value instanceof Uint8Array
+      ? new TextDecoder().decode(value)
+      : '';
+  const statusMatch = /status code:\s*(\d{3})/i.exec(text);
+  const codeMatch = /^([A-Za-z0-9._:-]{1,160}):/m.exec(text);
+  const requestMatch = /request id:\s*([A-Za-z0-9._:-]{1,160})/i.exec(text);
+  return {
+    status: statusMatch ? Number(statusMatch[1]) : null,
+    code: codeMatch?.[1] ?? null,
+    requestId: requestMatch?.[1] ?? null,
+  };
+}
+
 export interface ModelArkConformanceEvidence {
   schemaVersion: 1;
   model: string;
