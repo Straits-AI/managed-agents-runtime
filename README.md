@@ -180,6 +180,8 @@ private operator inventory rather than committing them to this repository:
 > **Provisioning notes learned the hard way:** sandbox application fields omitted
 > from older CLI help must be live-validated through current official schemas;
 > APIG is a separate public-exposure decision, not a private sandbox prerequisite;
+> private commands return at most 100,000 bytes across stdout/stderr, and the
+> UTF-8 text-file seam is bounded to 100,000 bytes per file;
 > `CreateSandbox` uses `InstanceImageInfo.{Image,Command}` (not `ImageUrl`) and
 > inherits the released app image when omitted; the AIO sandbox runs as user
 > `gem`, so the workspace lives under `/home/gem/workspace`.

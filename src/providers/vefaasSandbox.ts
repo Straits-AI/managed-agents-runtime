@@ -23,10 +23,40 @@ interface VefaasSandboxLifecycle {
 
 type PrivateCommandRunner = typeof runPrivateWebshellCommand;
 
+interface ApigSandboxClient {
+  bash: {
+    exec(input: {
+      command: string;
+      exec_dir?: string;
+      timeout: number;
+      max_output_length: number;
+    }, route: { queryParams: { faasInstanceName: string } }): Promise<{
+      ok: boolean;
+      error?: unknown;
+      body: { data?: { exit_code?: number; stdout?: string; stderr?: string } };
+    }>;
+  };
+  file: {
+    writeFile(
+      input: { file: string; content: string },
+      route: { queryParams: { faasInstanceName: string } },
+    ): Promise<{ ok: boolean; error?: unknown; body: unknown }>;
+    readFile(
+      input: { file: string },
+      route: { queryParams: { faasInstanceName: string } },
+    ): Promise<{
+      ok: boolean;
+      error?: unknown;
+      body: { data?: { content?: string } };
+    }>;
+  };
+}
+
 export interface VefaasSandboxProviderDependencies {
   lifecycle?: VefaasSandboxLifecycle;
   privateCommand?: PrivateCommandRunner;
   websocketFactory?: (endpoint: string) => PrivateWebSocket;
+  apigClientFactory?: (handle: SandboxHandle) => ApigSandboxClient;
   sleep?: (milliseconds: number) => Promise<void>;
 }
 
@@ -45,6 +75,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
   private readonly transport: 'private-webshell' | 'apig';
   private readonly privateCommand: PrivateCommandRunner;
   private readonly websocketFactory: (endpoint: string) => PrivateWebSocket;
+  private readonly apigClientFactory: (handle: SandboxHandle) => ApigSandboxClient;
   private readonly sleepFn: (milliseconds: number) => Promise<void>;
   private readonly terminatedSandboxIds = new Set<string>();
   private domainCache: string | null = null;
@@ -70,6 +101,12 @@ export class VefaasSandboxProvider implements SandboxProvider {
     this.transport = cfg.SANDBOX_TRANSPORT;
     this.privateCommand = dependencies.privateCommand ?? runPrivateWebshellCommand;
     this.websocketFactory = dependencies.websocketFactory ?? createNodePrivateWebSocket;
+    this.apigClientFactory = dependencies.apigClientFactory ?? ((handle) => {
+      const headers = this.gatewayApiKey
+        ? { Authorization: this.gatewayApiKey }
+        : undefined;
+      return new SandboxClient({ environment: handle.baseUrl, headers }) as unknown as ApigSandboxClient;
+    });
     this.sleepFn = dependencies.sleep ?? (async (milliseconds) => {
       await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
     });
@@ -96,14 +133,8 @@ export class VefaasSandboxProvider implements SandboxProvider {
     return domain;
   }
 
-  private client(handle: SandboxHandle): SandboxClient {
-    // The APIG route's Key Auth plugin reads the API key from the
-    // Authorization header; without it the gateway returns 401 before the
-    // request reaches the sandbox.
-    const headers = this.gatewayApiKey
-      ? { Authorization: this.gatewayApiKey }
-      : undefined;
-    return new SandboxClient({ environment: handle.baseUrl, headers });
+  private client(handle: SandboxHandle): ApigSandboxClient {
+    return this.apigClientFactory(handle);
   }
 
   private route(handle: SandboxHandle) {
@@ -185,17 +216,32 @@ export class VefaasSandboxProvider implements SandboxProvider {
 
   async writeFile(handle: SandboxHandle, path: string, content: string): Promise<void> {
     if (this.transport === 'private-webshell') {
+      const bytes = Buffer.from(content, 'utf8');
+      if (bytes.byteLength > 100_000) {
+        throw new Error('private file.writeFile content exceeded 100000-byte bound');
+      }
       const encodedPath = Buffer.from(path, 'utf8').toString('base64');
-      const encodedContent = Buffer.from(content, 'utf8').toString('base64');
-      const result = await this.execPrivate(
+      const initialize = await this.execPrivate(
         handle,
         `ma_path=$(printf '%s' '${encodedPath}' | base64 -d) && ` +
           `mkdir -p -- "$(dirname -- "$ma_path")" && ` +
-          `printf '%s' '${encodedContent}' | base64 -d > "$ma_path"`,
+          `: > "$ma_path"`,
         { timeoutSec: 60, cwd: WORKSPACE_DIR },
       );
-      if (result.exitCode !== 0) {
-        throw new Error(`private file.writeFile failed with exit ${result.exitCode}`);
+      if (initialize.exitCode !== 0) {
+        throw new Error(`private file.writeFile failed with exit ${initialize.exitCode}`);
+      }
+      for (let offset = 0; offset < bytes.byteLength; offset += 24 * 1024) {
+        const encodedChunk = bytes.subarray(offset, offset + 24 * 1024).toString('base64');
+        const append = await this.execPrivate(
+          handle,
+          `ma_path=$(printf '%s' '${encodedPath}' | base64 -d) && ` +
+            `printf '%s' '${encodedChunk}' | base64 -d >> "$ma_path"`,
+          { timeoutSec: 60, cwd: WORKSPACE_DIR },
+        );
+        if (append.exitCode !== 0) {
+          throw new Error(`private file.writeFile failed with exit ${append.exitCode}`);
+        }
       }
       return;
     }
