@@ -169,12 +169,16 @@ export class VefaasSandboxProvider implements SandboxProvider {
     const privateHandle = { sandboxId, baseUrl: 'private://webshell' };
     try {
       await this.waitForReady(privateHandle);
-      if (this.transport === 'private-webshell') return privateHandle;
-      const domain = await this.apigDomain();
-      return {
-        sandboxId,
-        baseUrl: domain.startsWith('http') ? domain : `https://${domain}`,
-      };
+      let handle = privateHandle;
+      if (this.transport === 'apig') {
+        const domain = await this.apigDomain();
+        handle = {
+          sandboxId,
+          baseUrl: domain.startsWith('http') ? domain : `https://${domain}`,
+        };
+      }
+      await this.ensureWorkspace(handle);
+      return handle;
     } catch (error) {
       await this.terminate(privateHandle).catch(() => {});
       throw error;
@@ -332,6 +336,19 @@ export class VefaasSandboxProvider implements SandboxProvider {
       maxOutputBytes: 100_000,
       websocketFactory: this.websocketFactory,
     });
+  }
+
+  private async ensureWorkspace(handle: SandboxHandle): Promise<void> {
+    const result = await this.exec(
+      handle,
+      `mkdir -p -- '${WORKSPACE_DIR}'`,
+      { timeoutSec: 60, cwd: '/' },
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `could not initialize sandbox workspace: ${result.stderr.slice(0, 200)}`,
+      );
+    }
   }
 
   private async waitForReady(handle: SandboxHandle): Promise<void> {

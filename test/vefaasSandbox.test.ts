@@ -62,6 +62,12 @@ describe('BytePlus private sandbox runtime provider', () => {
       sandboxId: 'sandbox-fixture',
       baseUrl: 'private://webshell',
     });
+    expect(privateCommand).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: 'wss://sandbox.example/webshell?ticket=runtime-secret',
+      command: "mkdir -p -- '/home/gem/workspace'",
+      cwd: '/',
+    }));
+    privateCommand.mockClear();
     await expect(provider.exec(handle, 'printf runtime-ok')).resolves.toEqual({
       exitCode: 0,
       stdout: 'runtime-ok\n',
@@ -188,6 +194,14 @@ describe('BytePlus private sandbox runtime provider', () => {
       sandboxId: 'sandbox-apig',
       baseUrl: 'https://sandbox.example/runtime',
     });
+    expect(apigClient.bash.exec).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: "mkdir -p -- '/home/gem/workspace'",
+        exec_dir: '/',
+      }),
+      { queryParams: { faasInstanceName: 'sandbox-apig' } },
+    );
+    apigClient.bash.exec.mockClear();
     await expect(provider.exec(handle, 'printf apig-ok')).resolves.toEqual({
       exitCode: 0,
       stdout: 'apig-ok\n',
