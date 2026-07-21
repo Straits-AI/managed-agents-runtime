@@ -173,7 +173,7 @@ private operator inventory rather than committing them to this repository:
 | `BYTEPLUS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN` | `python3 scripts/refresh-creds.py` syncs STS creds from `bp login` (~15 min TTL; rerun before a cloud batch) |
 | `TOS_BUCKET` | `scripts/provision-tos.ts` (idempotent create plus direct/presigned conformance, bounded failure-path evidence, verified object cleanup, and a versioned provenance record) |
 | `ARK_API_KEY` / `ARK_MODEL` | activate a model in the console, then `scripts/get-ark-key.py --endpoint-id ep-…` (key + endpoint id → `.env`) |
-| `VEFAAS_SANDBOX_FUNCTION_ID` | released sandbox application created through the current `bp vefaas CreateFunction`/`Release` API contract; instances are then fully programmatic |
+| `VEFAAS_SANDBOX_FUNCTION_ID` | released sandbox application created through the Function Service sandbox-application flow; on CLI `1.0.17`, create through the console unless the public API contract has been revalidated, then manage instances programmatically |
 | `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | optional public APIG route for the runtime's AIO REST adapter; private conformance uses secret-isolated WebShell and does not require APIG |
 
 > **Provisioning notes learned the hard way:** sandbox application fields omitted
