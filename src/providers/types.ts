@@ -79,7 +79,7 @@ export interface ModelProvider {
 
 export interface SandboxHandle {
   sandboxId: string;
-  /** Base URL of the in-sandbox REST API (without instance routing). */
+  /** Non-secret transport locator; never a signed endpoint or credential. */
   baseUrl: string;
 }
 

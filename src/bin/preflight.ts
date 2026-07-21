@@ -99,7 +99,7 @@ await check(
   },
 );
 
-// 5. Full sandbox lifecycle: create → domain → exec → kill
+// 5. Full sandbox lifecycle: create → Ready → exec → verified termination
 await check(
   'sandbox-lifecycle',
   ['BYTEPLUS_ACCESS_KEY_ID', 'BYTEPLUS_SECRET_ACCESS_KEY', 'VEFAAS_SANDBOX_FUNCTION_ID'],
@@ -118,7 +118,7 @@ await check(
           `exec returned unexpected output: exit=${echo.exitCode} stdout=${echo.stdout.slice(0, 120)} stderr=${echo.stderr.slice(0, 120)}`,
         );
       }
-      return `sandbox=${handle.sandboxId} domain OK, bash exec OK`;
+      return `sandbox=${handle.sandboxId} transport=${cfg.SANDBOX_TRANSPORT} bash exec OK`;
     } finally {
       await provider.terminate(handle).catch((e) => {
         report('sandbox-cleanup', 'FAIL', `could not kill ${handle.sandboxId}: ${e}`);

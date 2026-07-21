@@ -168,4 +168,10 @@ describe('production configuration', () => {
     expect(() => loadConfig({ TOS_REQUEST_TIMEOUT_MS: '999' })).toThrow();
     expect(() => loadConfig({ TOS_MAX_OBJECT_BYTES: '2147483649' })).toThrow();
   });
+
+  it('uses private WebShell for sandbox data-plane access unless APIG is explicit', () => {
+    expect(loadConfig({}).SANDBOX_TRANSPORT).toBe('private-webshell');
+    expect(loadConfig({ SANDBOX_TRANSPORT: 'apig' }).SANDBOX_TRANSPORT).toBe('apig');
+    expect(() => loadConfig({ SANDBOX_TRANSPORT: 'public' })).toThrow();
+  });
 });

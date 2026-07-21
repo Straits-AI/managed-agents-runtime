@@ -174,6 +174,7 @@ private operator inventory rather than committing them to this repository:
 | `TOS_BUCKET` | `scripts/provision-tos.ts` (idempotent create plus direct/presigned conformance, bounded failure-path evidence, verified object cleanup, and a versioned provenance record) |
 | `ARK_API_KEY` / `ARK_MODEL` | activate a model in the console, then `scripts/get-ark-key.py --endpoint-id ep-…` (key + endpoint id → `.env`) |
 | `VEFAAS_SANDBOX_FUNCTION_ID` | released sandbox application created through the Function Service sandbox-application flow; on CLI `1.0.17`, create through the console unless the public API contract has been revalidated, then manage instances programmatically |
+| `SANDBOX_TRANSPORT` | `private-webshell` by default; set `apig` only for an explicitly reviewed public gateway deployment |
 | `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | optional public APIG route for the runtime's AIO REST adapter; private conformance uses secret-isolated WebShell and does not require APIG |
 
 > **Provisioning notes learned the hard way:** sandbox application fields omitted
@@ -190,7 +191,7 @@ npm run preflight       # control-plane PASS/FAIL per provider
 node --env-file=.env --import tsx scripts/provision-tos.ts \
   --evidence-file /tmp/tos-conformance.json               # TOS live evidence
 node --env-file=.env --import tsx scripts/smoke-ark.ts       # ModelArk chat (≤32 tokens)
-node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→exec→file r/w→terminate via gateway
+node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→private exec→file r/w→verified terminate
 node --import tsx scripts/conformance-sandbox.ts \
   --profile dev --region ap-southeast-1 \
   --function-id <released-sandbox-function-id> \

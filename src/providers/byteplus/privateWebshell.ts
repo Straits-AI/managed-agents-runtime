@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import type { ExecResult } from '../types.js';
 
 export interface PrivateWebSocketEvent {
   data?: unknown;
@@ -28,6 +30,194 @@ interface PrivateWebshellEndpointLease {
 
 export interface BpPrivateWebshellResult extends PrivateWebshellResult {
   endpointRequestId: string | null;
+}
+
+export async function runPrivateWebshellCommand(input: {
+  endpoint: string;
+  command: string;
+  cwd: string;
+  timeoutMs: number;
+  commandTimeoutSec?: number;
+  maxOutputBytes: number;
+  websocketFactory: (endpoint: string) => PrivateWebSocket;
+  nonceFactory?: () => string;
+}): Promise<ExecResult> {
+  const commandBytes = Buffer.byteLength(input.command, 'utf8');
+  const cwdBytes = Buffer.byteLength(input.cwd, 'utf8');
+  if (commandBytes < 1 || commandBytes > 64 * 1024) {
+    throw new Error('Private WebShell command size is invalid');
+  }
+  if (cwdBytes < 1 || cwdBytes > 4 * 1024) {
+    throw new Error('Private WebShell working directory is invalid');
+  }
+  if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > 605_000) {
+    throw new Error('Private WebShell timeout is invalid');
+  }
+  if (!Number.isSafeInteger(input.maxOutputBytes)
+    || input.maxOutputBytes < 1
+    || input.maxOutputBytes > 100_000) {
+    throw new Error('Private WebShell output bound is invalid');
+  }
+  const commandTimeoutSec = input.commandTimeoutSec ?? Math.max(1, Math.ceil(input.timeoutMs / 1_000));
+  if (!Number.isSafeInteger(commandTimeoutSec) || commandTimeoutSec < 1 || commandTimeoutSec > 600) {
+    throw new Error('Private WebShell command timeout is invalid');
+  }
+  validateSignedEndpoint(input.endpoint);
+
+  const nonce = (input.nonceFactory ?? (() => randomUUID().replaceAll('-', '')))();
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(nonce)) {
+    throw new Error('Private WebShell protocol nonce is invalid');
+  }
+  const start = `__managed_agents_${nonce}_start__`;
+  const stderrMarker = `__managed_agents_${nonce}_stderr__`;
+  const end = `__managed_agents_${nonce}_end__`;
+  const tempBase = `/tmp/managed-agents-${nonce}`;
+  const encoded = (value: string): string => Buffer.from(value, 'utf8').toString('base64');
+  const shellCommand = [
+    `ma_cmd=$(printf '%s' '${encoded(input.command)}' | base64 -d) || exit 125`,
+    `ma_cwd=$(printf '%s' '${encoded(input.cwd)}' | base64 -d) || exit 125`,
+    `(cd -- "$ma_cwd" && timeout --signal=TERM --kill-after=5s ${commandTimeoutSec}s sh -c "$ma_cmd") > '${tempBase}.out' 2> '${tempBase}.err'`,
+    'ma_rc=$?',
+    `printf '%s' '${encoded(start)}' | base64 -d`,
+    'printf \'\\n\'',
+    'printf \'%s\\n\' "$ma_rc"',
+    `base64 < '${tempBase}.out' | tr -d '\\n'`,
+    'printf \'\\n\'',
+    `printf '%s' '${encoded(stderrMarker)}' | base64 -d`,
+    'printf \'\\n\'',
+    `base64 < '${tempBase}.err' | tr -d '\\n'`,
+    'printf \'\\n\'',
+    `rm -f '${tempBase}.out' '${tempBase}.err'`,
+    `printf '%s' '${encoded(end)}' | base64 -d`,
+    'printf \'\\n\'',
+  ].join('; ') + '\n';
+
+  return await new Promise<ExecResult>((resolve, reject) => {
+    let socket: PrivateWebSocket;
+    let settled = false;
+    let output = '';
+    const transportBound = Math.min(
+      512 * 1024,
+      128 * 1024 + commandBytes * 2 + Math.ceil(input.maxOutputBytes * 4 / 3),
+    );
+    const finish = (result?: ExecResult, failure?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.removeEventListener('open', onOpen);
+      socket.removeEventListener('message', onMessage);
+      socket.removeEventListener('error', onError);
+      socket.removeEventListener('close', onClose);
+      socket.close();
+      if (failure) reject(failure);
+      else resolve(result ?? { exitCode: -1, stdout: '', stderr: '' });
+    };
+    const onOpen = (): void => {
+      socket.send(JSON.stringify({ Op: 'stdin', Data: shellCommand }));
+    };
+    const onMessage = (event: PrivateWebSocketEvent): void => {
+      if (typeof event.data !== 'string' || Buffer.byteLength(event.data, 'utf8') > 256 * 1024) {
+        finish(undefined, new Error('Private WebShell frame was invalid'));
+        return;
+      }
+      let frame: unknown;
+      try {
+        frame = JSON.parse(event.data);
+      } catch {
+        finish(undefined, new Error('Private WebShell frame was invalid'));
+        return;
+      }
+      if (!isStdoutFrame(frame)) {
+        finish(undefined, new Error('Private WebShell frame contract changed'));
+        return;
+      }
+      output += frame.Data;
+      if (Buffer.byteLength(output, 'utf8') > transportBound) {
+        finish(undefined, new Error('Private WebShell output exceeded bound'));
+        return;
+      }
+      try {
+        const parsed = parseCommandResult(
+          output,
+          { start, stderrMarker, end },
+          input.maxOutputBytes,
+        );
+        if (parsed) finish(parsed);
+      } catch (error) {
+        finish(
+          undefined,
+          error instanceof Error
+            ? error
+            : new Error('Private WebShell result was invalid'),
+        );
+      }
+    };
+    const onError = (): void => finish(undefined, new Error('Private WebShell connection failed'));
+    const onClose = (): void => finish(undefined, new Error('Private WebShell closed before result'));
+    const timer = setTimeout(() => {
+      finish(undefined, new Error('Private WebShell command timed out'));
+    }, input.timeoutMs);
+    timer.unref?.();
+
+    try {
+      socket = input.websocketFactory(input.endpoint);
+      socket.addEventListener('open', onOpen);
+      socket.addEventListener('message', onMessage);
+      socket.addEventListener('error', onError);
+      socket.addEventListener('close', onClose);
+    } catch {
+      clearTimeout(timer);
+      reject(new Error('Private WebShell connection failed'));
+    }
+  });
+}
+
+function parseCommandResult(
+  raw: string,
+  markers: { start: string; stderrMarker: string; end: string },
+  maxOutputBytes: number,
+): ExecResult | null {
+  const normalized = raw.replaceAll('\r', '');
+  const startIndex = normalized.indexOf(`${markers.start}\n`);
+  if (startIndex < 0) return null;
+  const payload = normalized.slice(startIndex + markers.start.length + 1);
+  const endDelimiter = `\n${markers.end}`;
+  const endIndex = payload.indexOf(endDelimiter);
+  if (endIndex < 0) return null;
+  const complete = payload.slice(0, endIndex);
+  const firstLine = complete.indexOf('\n');
+  const stderrDelimiter = `\n${markers.stderrMarker}\n`;
+  const stderrIndex = complete.indexOf(stderrDelimiter);
+  if (firstLine < 1 || stderrIndex < firstLine) {
+    throw new Error('Private WebShell result was invalid');
+  }
+  const exitCodeText = complete.slice(0, firstLine);
+  if (!/^\d{1,3}$/.test(exitCodeText)) {
+    throw new Error('Private WebShell result was invalid');
+  }
+  const stdout = decodeCommandOutput(
+    complete.slice(firstLine + 1, stderrIndex),
+    maxOutputBytes,
+  );
+  const stderr = decodeCommandOutput(
+    complete.slice(stderrIndex + stderrDelimiter.length),
+    maxOutputBytes,
+  );
+  if (Buffer.byteLength(stdout, 'utf8') + Buffer.byteLength(stderr, 'utf8') > maxOutputBytes) {
+    throw new Error('Private WebShell output exceeded bound');
+  }
+  return { exitCode: Number(exitCodeText), stdout, stderr };
+}
+
+function decodeCommandOutput(value: string, maxOutputBytes: number): string {
+  if (value && (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0)) {
+    throw new Error('Private WebShell result was invalid');
+  }
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.byteLength > maxOutputBytes) {
+    throw new Error('Private WebShell output exceeded bound');
+  }
+  return decoded.toString('utf8');
 }
 
 export class BpCliError extends Error {

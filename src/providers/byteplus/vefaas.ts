@@ -29,6 +29,11 @@ export interface SandboxInfo {
   [k: string]: unknown;
 }
 
+export interface WebshellEndpointResult {
+  Endpoint?: string;
+  [k: string]: unknown;
+}
+
 export class VefaasClient {
   constructor(private readonly opts: VefaasClientOptions) {}
 
@@ -111,6 +116,16 @@ export class VefaasClient {
     return this.call('vefaas', 'KillSandbox', {
       FunctionId: functionId,
       SandboxId: sandboxId,
+    });
+  }
+
+  genWebshellEndpoint(
+    functionId: string,
+    instanceName: string,
+  ): Promise<WebshellEndpointResult> {
+    return this.call<WebshellEndpointResult>('vefaas', 'GenWebshellEndpoint', {
+      FunctionId: functionId,
+      InstanceName: instanceName,
     });
   }
 

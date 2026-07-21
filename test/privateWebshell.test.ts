@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseBpCliFailure,
   runBpPrivateWebshellOperation,
+  runPrivateWebshellCommand,
   runPrivateWebshellOperation,
   type PrivateWebSocket,
   type PrivateWebSocketEvent,
@@ -36,6 +37,88 @@ class FixtureSocket implements PrivateWebSocket {
 }
 
 describe('private BytePlus WebShell transport', () => {
+  it('returns bounded exit, stdout, and stderr from an echoed terminal session', async () => {
+    const endpoint = 'wss://sandbox.example/webshell?ticket=runtime-secret';
+    const socket = new FixtureSocket();
+    const pending = runPrivateWebshellCommand({
+      endpoint,
+      command: 'printf runtime-output; printf runtime-warning >&2; exit 7',
+      cwd: '/home/gem/workspace',
+      timeoutMs: 1_000,
+      maxOutputBytes: 100_000,
+      nonceFactory: () => 'runtimefixture',
+      websocketFactory: () => {
+        queueMicrotask(() => {
+          socket.emit('open');
+          socket.emit('message', {
+            data: JSON.stringify({
+              Op: 'stdout',
+              Data: [
+                'terminal echo that must be ignored',
+                '__managed_agents_runtimefixture_start__',
+                '7',
+                Buffer.from('runtime-output').toString('base64'),
+                '__managed_agents_runtimefixture_stderr__',
+                Buffer.from('runtime-warning').toString('base64'),
+                '__managed_agents_runtimefixture_end__',
+                '',
+              ].join('\r\n'),
+            }),
+          });
+        });
+        return socket;
+      },
+    });
+
+    await expect(pending).resolves.toEqual({
+      exitCode: 7,
+      stdout: 'runtime-output',
+      stderr: 'runtime-warning',
+    });
+    expect(socket.sent).toHaveLength(1);
+    expect(socket.sent[0]).not.toContain('runtime-output');
+    expect(socket.sent[0]).not.toContain('runtime-warning');
+    expect(socket.sent[0]).not.toContain('/home/gem/workspace');
+    expect(JSON.stringify(await pending)).not.toContain('runtime-secret');
+    expect(socket.closeCalls).toBe(1);
+  });
+
+  it('rejects a malformed command result through the transport promise', async () => {
+    const socket = new FixtureSocket();
+    const pending = runPrivateWebshellCommand({
+      endpoint: 'wss://sandbox.example/webshell?ticket=malformed-secret',
+      command: 'true',
+      cwd: '/home/gem/workspace',
+      timeoutMs: 1_000,
+      maxOutputBytes: 100_000,
+      nonceFactory: () => 'malformedfixture',
+      websocketFactory: () => {
+        queueMicrotask(() => {
+          socket.emit('open');
+          socket.emit('message', {
+            data: JSON.stringify({
+              Op: 'stdout',
+              Data: [
+                '__managed_agents_malformedfixture_start__',
+                '0',
+                'not-base64!',
+                '__managed_agents_malformedfixture_stderr__',
+                '',
+                '__managed_agents_malformedfixture_end__',
+                '',
+              ].join('\n'),
+            }),
+          });
+        });
+        return socket;
+      },
+    });
+
+    await expect(pending).rejects.toThrow('Private WebShell result was invalid');
+    await expect(pending).rejects.not.toThrow('malformed-secret');
+    expect(socket.closeCalls).toBe(1);
+  });
+
   it('extracts only bounded provider metadata from CLI failures', () => {
     const failure = parseBpCliFailure([
       'ResourceNotFound: Sandbox not found; ticket=never-serialize-this',
