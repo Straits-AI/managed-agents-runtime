@@ -30,6 +30,29 @@ export interface BpPrivateWebshellResult extends PrivateWebshellResult {
   endpointRequestId: string | null;
 }
 
+export class BpCliError extends Error {
+  readonly code: string | null;
+  readonly requestId: string | null;
+
+  constructor(code: string | null, requestId: string | null) {
+    super('BytePlus CLI request failed');
+    this.name = 'BpCliError';
+    this.code = code !== null && /^[A-Za-z][A-Za-z0-9._-]{0,79}$/.test(code)
+      ? code
+      : null;
+    this.requestId = requestId !== null && /^[A-Za-z0-9._:-]{1,160}$/.test(requestId)
+      ? requestId
+      : null;
+  }
+}
+
+export function parseBpCliFailure(stderr: string): BpCliError {
+  const bounded = new TextEncoder().encode(stderr).byteLength <= 64 * 1024 ? stderr : '';
+  const code = /(?:^|\n)([A-Za-z][A-Za-z0-9._-]{0,79}):/.exec(bounded)?.[1] ?? null;
+  const requestId = /request id:\s*([A-Za-z0-9._:-]{1,160})/i.exec(bounded)?.[1] ?? null;
+  return new BpCliError(code, requestId);
+}
+
 export async function executeBpCapture(args: string[]): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     execFile('bp', args, {
@@ -37,9 +60,9 @@ export async function executeBpCapture(args: string[]): Promise<string> {
       maxBuffer: 64 * 1024,
       timeout: 30_000,
       windowsHide: true,
-    }, (error, stdout) => {
+    }, (error, stdout, stderr) => {
       if (error) {
-        reject(new Error('BytePlus CLI request failed'));
+        reject(parseBpCliFailure(stderr));
         return;
       }
       resolve(stdout);

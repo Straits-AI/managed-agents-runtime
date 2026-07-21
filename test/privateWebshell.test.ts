@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  parseBpCliFailure,
   runBpPrivateWebshellOperation,
   runPrivateWebshellOperation,
   type PrivateWebSocket,
@@ -35,6 +36,20 @@ class FixtureSocket implements PrivateWebSocket {
 }
 
 describe('private BytePlus WebShell transport', () => {
+  it('extracts only bounded provider metadata from CLI failures', () => {
+    const failure = parseBpCliFailure([
+      'ResourceNotFound: Sandbox not found; ticket=never-serialize-this',
+      '\tstatus code: 404, request id: 20260721171237DF94A49687A6AC1634BF',
+    ].join('\n'));
+
+    expect(failure).toMatchObject({
+      code: 'ResourceNotFound',
+      requestId: '20260721171237DF94A49687A6AC1634BF',
+    });
+    expect(JSON.stringify(failure)).not.toContain('never-serialize-this');
+    expect(failure.message).toBe('BytePlus CLI request failed');
+  });
+
   it('combines endpoint acquisition and execution into metadata-only output', async () => {
     const endpoint = 'wss://sandbox.example/webshell?ticket=combined-secret';
     const socket = new FixtureSocket();

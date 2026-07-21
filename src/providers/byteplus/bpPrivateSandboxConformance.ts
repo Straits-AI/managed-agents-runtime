@@ -1,6 +1,7 @@
 import type { ExecResult, SandboxHandle } from '../types.js';
 import type { SandboxConformanceProvider } from '../sandboxConformance.js';
 import {
+  BpCliError,
   createNodePrivateWebSocket,
   executeBpCapture,
   runBpPrivateWebshellOperation,
@@ -43,6 +44,7 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
   private readonly sleepFn: (milliseconds: number) => Promise<void>;
   private readonly observedRequestIds: string[] = [];
   private readonly expectedFileMarkers = new Map<string, string>();
+  private readonly terminatedSandboxIds = new Set<string>();
   private observedInstance: PrivateSandboxInstanceEvidence | null = null;
 
   constructor(input: {
@@ -109,10 +111,21 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
   }
 
   async describe(handle: SandboxHandle): Promise<{ status: string }> {
-    const result = await this.call('DescribeSandbox', [
-      '--FunctionId', this.functionId,
-      '--SandboxId', handle.sandboxId,
-    ]);
+    let result: Record<string, unknown>;
+    try {
+      result = await this.call('DescribeSandbox', [
+        '--FunctionId', this.functionId,
+        '--SandboxId', handle.sandboxId,
+      ]);
+    } catch (error) {
+      if (error instanceof BpCliError && error.code === 'ResourceNotFound') {
+        this.captureFailureRequestId(error);
+        return {
+          status: this.terminatedSandboxIds.has(handle.sandboxId) ? 'Deleted' : 'Creating',
+        };
+      }
+      throw error;
+    }
     const status = typeof result.Status === 'string' && /^[A-Za-z]+$/.test(result.Status)
       ? result.Status
       : 'unknown';
@@ -144,10 +157,16 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
   }
 
   async terminate(handle: SandboxHandle): Promise<void> {
-    await this.call('KillSandbox', [
-      '--FunctionId', this.functionId,
-      '--SandboxId', handle.sandboxId,
-    ]);
+    try {
+      await this.call('KillSandbox', [
+        '--FunctionId', this.functionId,
+        '--SandboxId', handle.sandboxId,
+      ]);
+    } catch (error) {
+      if (!(error instanceof BpCliError) || error.code !== 'ResourceNotFound') throw error;
+      this.captureFailureRequestId(error);
+    }
+    this.terminatedSandboxIds.add(handle.sandboxId);
     this.expectedFileMarkers.delete(handle.sandboxId);
   }
 
@@ -181,7 +200,8 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
         '---profile', this.profile,
         '---region', this.region,
       ]);
-    } catch {
+    } catch (error) {
+      if (error instanceof BpCliError) throw error;
       throw new Error(`Private sandbox ${action} request failed`);
     }
     if (new TextEncoder().encode(stdout).byteLength > 64 * 1024) {
@@ -205,6 +225,10 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
       this.observedRequestIds.push(requestId);
     }
     return envelope.Result as Record<string, unknown>;
+  }
+
+  private captureFailureRequestId(error: BpCliError): void {
+    if (error.requestId) this.observedRequestIds.push(error.requestId);
   }
 
   private captureReadyEvidence(
