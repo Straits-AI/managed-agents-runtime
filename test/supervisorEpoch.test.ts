@@ -12,6 +12,7 @@ import { listAttempts } from '../src/store/attempts.js';
 import { loadConfig } from '../src/config.js';
 import { startWorker } from '../src/harness/worker.js';
 import { createRealEpoch } from '../src/harness/epoch.js';
+import { reapExpiredLeases } from '../src/scheduler/reaper.js';
 import { FsObjectStore } from '../src/providers/local/fsObjectStore.js';
 import { LocalSandboxProvider } from '../src/providers/local/localSandbox.js';
 import type { ModelProvider } from '../src/providers/types.js';
@@ -38,6 +39,27 @@ function loopingModel(): { model: ModelProvider; seen: string[] } {
   return { model, seen };
 }
 
+function repeatedlyCompletingModel(): ModelProvider {
+  let calls = 0;
+  return {
+    async chat() {
+      calls += 1;
+      return {
+        message: {
+          role: 'assistant',
+          content: null,
+          toolCalls: [{
+            id: `complete-${calls}`,
+            name: 'run_complete',
+            arguments: { summary: 'done', artifacts: [] },
+          }],
+        },
+        usage: { inputTokens: 10, outputTokens: 5 },
+      };
+    },
+  };
+}
+
 let db: TestDb;
 let store: FsObjectStore;
 let storeDir: string;
@@ -56,6 +78,77 @@ afterAll(async () => {
 });
 
 describe('semantic supervisor — live epoch (no BytePlus)', () => {
+  it('settles verification exhaustion once as a definitive terminal failure', async () => {
+    const def = await createAgentDefinition(db.pool, { name: 'verification-exhaustion' });
+    const ver = await withTransaction(db.pool, (tx) =>
+      createAgentVersion(tx, {
+        agentId: def.id,
+        instructions: 'complete the task',
+        modelPolicy: { model: 'fixture-model' },
+        verifierPolicy: { requiredArtifacts: ['required-but-missing.txt'] },
+      }),
+    );
+    const run = await withTransaction(db.pool, (tx) =>
+      createRun(tx, {
+        tenantId: 'default',
+        agentVersionId: ver.id,
+        goal: 'prove terminal verification exhaustion',
+      }),
+    );
+    const cfg = loadConfig({
+      ...process.env,
+      DATABASE_URL: db.url,
+      SUPERVISOR_LOOP_THRESHOLD: '100',
+      SUPERVISOR_STAGNATION_STEPS: '100',
+      LEASE_TTL_MS: '30000',
+      HEARTBEAT_MS: '10000',
+      POLL_MS: '100',
+    } as NodeJS.ProcessEnv);
+    const worker = startWorker(
+      db.pool,
+      cfg,
+      createRealEpoch({
+        model: repeatedlyCompletingModel(),
+        sandbox: new LocalSandboxProvider(),
+        objectStore: store,
+      }),
+    );
+
+    try {
+      await waitFor(
+        async () => {
+          const current = await getRun(db.pool, run.id);
+          const attempts = await listAttempts(db.pool, run.id);
+          return current?.status === 'FAILED' && attempts[0]?.state === 'EXITED'
+            ? { current, attempts }
+            : null;
+        },
+        { timeoutMs: 5_000, label: 'verification exhaustion settled once' },
+      );
+    } finally {
+      await worker.stop();
+    }
+
+    const failed = await getRun(db.pool, run.id);
+    expect(failed?.status).toBe('FAILED');
+    expect(failed?.status_reason).toBe('verification_retries_exhausted');
+
+    const attemptsBeforeReap = await listAttempts(db.pool, run.id);
+    expect(attemptsBeforeReap).toHaveLength(1);
+    expect(attemptsBeforeReap[0]).toMatchObject({ state: 'EXITED', exit_reason: 'failed' });
+
+    const eventsBeforeReap = await listEvents(db.pool, run.id);
+    expect(eventsBeforeReap.some((event) => event.type === 'RetryScheduled')).toBe(false);
+
+    await reapExpiredLeases(db.pool, cfg.MAX_ATTEMPTS);
+    expect(await getRun(db.pool, run.id)).toMatchObject({
+      status: 'FAILED',
+      status_reason: 'verification_retries_exhausted',
+    });
+    expect(await listAttempts(db.pool, run.id)).toEqual(attemptsBeforeReap);
+    expect(await listEvents(db.pool, run.id)).toEqual(eventsBeforeReap);
+  }, 15_000);
+
   it('detects a looping agent, escalates the model, then terminates the run', async () => {
     const def = await createAgentDefinition(db.pool, { name: 'looper' });
     const ver = await withTransaction(db.pool, (tx) =>

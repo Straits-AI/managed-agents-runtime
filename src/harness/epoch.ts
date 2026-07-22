@@ -553,7 +553,7 @@ export function createRealEpoch(providers: EpochProviders) {
                 }),
               );
               await cleanup();
-              return 'error';
+              return 'failed';
             }
             transcript.push({
               role: 'tool',
