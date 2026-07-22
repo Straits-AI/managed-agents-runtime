@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { EpochContext } from './worker.js';
 import type {
   EpochExitReason,
@@ -14,6 +15,13 @@ import { spawnChildren } from '../scheduler/children.js';
 import { tokenBudgetExceeded } from './limits.js';
 import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
 import { buildBoundedRunResult } from '../core/delegatedResults.js';
+import { createArtifact, type CreateArtifactInput } from '../store/artifacts.js';
+import { FsObjectStore } from '../providers/local/fsObjectStore.js';
+import {
+  deterministicArtifactId,
+  mimeTypeFor,
+  normalizeArtifactPath,
+} from './artifacts.js';
 import {
   createCheckpointEnvelope,
   type CheckpointEnvelopeV2,
@@ -38,7 +46,52 @@ export type ScriptOp =
     }
   | { op: 'delegate'; goals: string[]; childScript?: ScriptOp[] }
   | { op: 'fail'; once?: boolean }
-  | { op: 'complete' };
+  | {
+      op: 'complete';
+      artifacts?: Array<{ path: string; content: string }>;
+    };
+
+async function stageScriptedArtifacts(
+  ctx: EpochContext,
+  artifacts: Array<{ path: string; content: string }>,
+  producerStep: number,
+): Promise<CreateArtifactInput[]> {
+  if (artifacts.length === 0) return [];
+  if (!ctx.cfg.LOCAL_OBJECT_STORE_DIR) {
+    throw new Error('scripted artifacts require LOCAL_OBJECT_STORE_DIR');
+  }
+  if (artifacts.length > 32) throw new Error('scripted completion supports at most 32 artifacts');
+  const store = new FsObjectStore(ctx.cfg.LOCAL_OBJECT_STORE_DIR, ctx.cfg.TOS_MAX_OBJECT_BYTES);
+  const seen = new Set<string>();
+  const staged: CreateArtifactInput[] = [];
+  for (const artifact of artifacts) {
+    const sourcePath = normalizeArtifactPath(artifact.path);
+    if (seen.has(sourcePath)) throw new Error(`duplicate scripted artifact path: ${sourcePath}`);
+    seen.add(sourcePath);
+    const bytes = Buffer.from(artifact.content, 'utf8');
+    if (bytes.byteLength > 100_000) throw new Error('scripted artifact exceeds 100000 bytes');
+    const digestHex = createHash('sha256').update(bytes).digest('hex');
+    const id = deterministicArtifactId(ctx.run.id, sourcePath, digestHex);
+    const objectKey = `runs/${ctx.run.id}/artifacts/${id}`;
+    await store.put(objectKey, bytes);
+    staged.push({
+      id,
+      producerRunId: ctx.run.id,
+      producerAttemptId: ctx.attempt.id,
+      producerStep,
+      digest: `sha256:${digestHex}`,
+      mimeType: mimeTypeFor(sourcePath),
+      sizeBytes: bytes.byteLength,
+      logicalRole: 'deliverable',
+      sourcePath,
+      sourceRefs: [{ kind: 'scripted_fixture', path: sourcePath }],
+      verificationRefs: [{ kind: 'scripted_verifier', status: 'passed' }],
+      evidenceRefs: [],
+      objectKey,
+    });
+  }
+  return staged;
+}
 
 function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -289,6 +342,7 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
 
       case 'complete': {
         const scriptedResult = buildBoundedRunResult('scripted completion', {});
+        const stagedArtifacts = await stageScriptedArtifacts(ctx, op.artifacts ?? [], step);
         await withTransaction(pool, async (tx) => {
           // Preserve the atomic VERIFYING -> COMPLETED scripted fast path while
           // taking the terminal lock before the first run-row lock.
@@ -305,13 +359,20 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
           await transitionRun(tx, run.id, {
             expectFrom: ['VERIFYING'],
             to: 'COMPLETED',
-            event: { type: 'RunCompleted', payload: { verification: 'scripted-pass' } },
+            event: {
+              type: 'RunCompleted',
+              payload: {
+                verification: 'scripted-pass',
+                artifacts: stagedArtifacts.map((artifact) => artifact.id),
+              },
+            },
             attemptId: attempt.id,
             patch: {
               result: scriptedResult.value,
               result_size_bytes: scriptedResult.sizeBytes,
             },
           });
+          for (const artifact of stagedArtifacts) await createArtifact(tx, artifact);
         });
         return 'completed';
       }

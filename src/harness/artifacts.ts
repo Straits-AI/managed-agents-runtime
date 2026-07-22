@@ -80,7 +80,7 @@ export function normalizeArtifactPath(path: string): string {
   return candidate;
 }
 
-function deterministicArtifactId(runId: string, sourcePath: string, digestHex: string): string {
+export function deterministicArtifactId(runId: string, sourcePath: string, digestHex: string): string {
   const suffix = createHash('sha256')
     .update(runId)
     .update('\0')
@@ -92,7 +92,7 @@ function deterministicArtifactId(runId: string, sourcePath: string, digestHex: s
   return `art_${suffix}`;
 }
 
-function mimeTypeFor(path: string): string {
+export function mimeTypeFor(path: string): string {
   switch (extname(path).toLowerCase()) {
     case '.csv': return 'text/csv';
     case '.docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';

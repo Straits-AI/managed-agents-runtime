@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 
@@ -161,7 +162,27 @@ try {
   process.stdout.write('PASS container release contract\n');
 } finally {
   for (const name of containers) {
-    await docker(['rm', '-f', name], true);
+    await docker(['rm', '-f', '-v', name], true);
   }
   await docker(['network', 'rm', network], true);
 }
+
+const conformanceEnvironment = { ...process.env };
+const releaseCommit = process.env.RELEASE_COMMIT?.trim();
+if (releaseCommit) {
+  conformanceEnvironment.KERTAS_SERVER_COMMIT = releaseCommit;
+  conformanceEnvironment.KERTAS_CLIENT_COMMIT = releaseCommit;
+}
+conformanceEnvironment.KERTAS_CONFORMANCE_EVIDENCE_DIR =
+  process.env.KERTAS_CONFORMANCE_EVIDENCE_DIR
+  ?? 'release-evidence/kertas-conformance';
+
+const conformance = await exec(
+  join(process.cwd(), 'node_modules', '.bin', 'tsx'),
+  ['scripts/conformance-kertas-client.ts'],
+  {
+    env: conformanceEnvironment,
+    maxBuffer: 20 * 1024 * 1024,
+  },
+);
+process.stdout.write(conformance.stdout);

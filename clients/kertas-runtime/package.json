@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/contractDiscovery.ts"
+    ".": "./src/index.ts"
   }
 }

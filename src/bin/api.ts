@@ -14,6 +14,9 @@ if (cfg.TOS_BUCKET && cfg.BYTEPLUS_ACCESS_KEY_ID) {
   const { TosObjectStore } = await import('../providers/tosObjectStore.js');
   objectStore = new TosObjectStore(cfg);
   presignGet = (key: string, ttl: number) => objectStore!.presignGet(key, ttl);
+} else if (cfg.LOCAL_OBJECT_STORE_DIR) {
+  const { FsObjectStore } = await import('../providers/local/fsObjectStore.js');
+  objectStore = new FsObjectStore(cfg.LOCAL_OBJECT_STORE_DIR, cfg.TOS_MAX_OBJECT_BYTES);
 }
 
 // Test sources are intentionally absent from the runtime image; CI verifies
