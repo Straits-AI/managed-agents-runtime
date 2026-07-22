@@ -22,7 +22,6 @@ export interface SandboxConformanceEvidence {
 
 const TERMINAL_STATUSES = new Set([
   'Killed',
-  'Terminating',
   'Terminated',
   'Stopped',
   'Deleted',

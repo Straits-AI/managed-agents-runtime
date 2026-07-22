@@ -60,6 +60,69 @@ describe('BytePlus private sandbox runtime provider', () => {
     );
   });
 
+  it('reconciles and kills an exact run-owned instance when create succeeds without an id', async () => {
+    let listed = 0;
+    const lifecycle = {
+      createSandbox: vi.fn(async () => ({})),
+      describeSandbox: vi.fn(),
+      genWebshellEndpoint: vi.fn(),
+      killSandbox: vi.fn(async () => ({})),
+      listSandboxes: vi.fn(async () => {
+        listed += 1;
+        return listed === 1
+          ? {
+              Sandboxes: [{
+                Id: 'sandbox-idless-create',
+                FunctionId: 'function-fixture',
+                Metadata: { runId: 'run-idless' },
+                Status: 'Ready',
+              }],
+              Total: 1,
+            }
+          : { Sandboxes: [], Total: 0 };
+      }),
+      getApigDomains: vi.fn(),
+    };
+    const provider = new VefaasSandboxProvider(loadConfig({
+      BYTEPLUS_ACCESS_KEY_ID: 'fixture-ak',
+      BYTEPLUS_SECRET_ACCESS_KEY: 'fixture-sk',
+      VEFAAS_SANDBOX_FUNCTION_ID: 'function-fixture',
+      SANDBOX_TRANSPORT: 'private-webshell',
+    }), { lifecycle, sleep: async () => {} });
+
+    await expect(provider.create({
+      runId: 'run-idless',
+      timeoutMinutes: 10,
+    })).rejects.toThrow('CreateSandbox returned no sandbox id');
+    expect(lifecycle.killSandbox).toHaveBeenCalledWith(
+      'function-fixture',
+      'sandbox-idless-create',
+    );
+  });
+
+  it('fails closed when ambiguous-create inventory omits its item array', async () => {
+    const lifecycle = {
+      createSandbox: vi.fn(async () => ({})),
+      describeSandbox: vi.fn(),
+      genWebshellEndpoint: vi.fn(),
+      killSandbox: vi.fn(async () => ({})),
+      listSandboxes: vi.fn(async () => ({ Total: 0 })),
+      getApigDomains: vi.fn(),
+    };
+    const provider = new VefaasSandboxProvider(loadConfig({
+      BYTEPLUS_ACCESS_KEY_ID: 'fixture-ak',
+      BYTEPLUS_SECRET_ACCESS_KEY: 'fixture-sk',
+      VEFAAS_SANDBOX_FUNCTION_ID: 'function-fixture',
+      SANDBOX_TRANSPORT: 'private-webshell',
+    }), { lifecycle, sleep: async () => {} });
+
+    await expect(provider.create({
+      runId: 'run-idless',
+      timeoutMinutes: 10,
+    })).rejects.toThrow('exact-run cleanup was not verified');
+    expect(lifecycle.killSandbox).not.toHaveBeenCalled();
+  });
+
   it('waits for Ready, executes privately, and verifies termination', async () => {
     const states: Array<Record<string, unknown> | Error> = [
       new BytePlusApiError(
@@ -160,10 +223,11 @@ describe('BytePlus private sandbox runtime provider', () => {
     expect(states).toHaveLength(0);
   });
 
-  it('accepts an exact provider Terminating tombstone after KillSandbox', async () => {
+  it('waits past Terminating until the sandbox reaches a verified terminal state', async () => {
     const states: Array<Record<string, unknown>> = [
       { Id: 'sandbox-terminating', Status: 'Ready' },
       { Id: 'sandbox-terminating', Status: 'Terminating' },
+      { Id: 'sandbox-terminating', Status: 'Deleted' },
     ];
     const lifecycle = {
       createSandbox: vi.fn(async () => ({ SandboxId: 'sandbox-terminating' })),
@@ -174,7 +238,14 @@ describe('BytePlus private sandbox runtime provider', () => {
         Endpoint: 'wss://sandbox.example/webshell?ticket=runtime-secret',
       })),
       killSandbox: vi.fn(async () => ({})),
-      listSandboxes: vi.fn(async () => ({ Sandboxes: [], Total: 0 })),
+      listSandboxes: vi.fn(async () => ({
+        Sandboxes: [{
+          Id: 'sandbox-terminating',
+          FunctionId: 'function-fixture',
+          Status: 'Terminating',
+        }],
+        Total: 1,
+      })),
       getApigDomains: vi.fn(),
     };
     const cfg = loadConfig({
@@ -199,6 +270,38 @@ describe('BytePlus private sandbox runtime provider', () => {
       'sandbox-terminating',
     );
     expect(states).toHaveLength(0);
+  });
+
+  it('does not report a retained Terminating tombstone as verified termination', async () => {
+    const lifecycle = {
+      createSandbox: vi.fn(),
+      describeSandbox: vi.fn(async () => ({
+        Id: 'sandbox-terminating',
+        Status: 'Terminating',
+      })),
+      genWebshellEndpoint: vi.fn(),
+      killSandbox: vi.fn(async () => ({})),
+      listSandboxes: vi.fn(async () => ({
+        Sandboxes: [{
+          Id: 'sandbox-terminating',
+          FunctionId: 'function-fixture',
+          Status: 'Terminating',
+        }],
+        Total: 1,
+      })),
+      getApigDomains: vi.fn(),
+    };
+    const provider = new VefaasSandboxProvider(loadConfig({
+      BYTEPLUS_ACCESS_KEY_ID: 'fixture-ak',
+      BYTEPLUS_SECRET_ACCESS_KEY: 'fixture-sk',
+      VEFAAS_SANDBOX_FUNCTION_ID: 'function-fixture',
+      SANDBOX_TRANSPORT: 'private-webshell',
+    }), { lifecycle, sleep: async () => {} });
+
+    await expect(provider.terminate({
+      sandboxId: 'sandbox-terminating',
+      baseUrl: 'private://webshell',
+    })).rejects.toThrow('termination was not verified');
   });
 
   it('retries only idempotent private file operations after an uncertain transport timeout', async () => {

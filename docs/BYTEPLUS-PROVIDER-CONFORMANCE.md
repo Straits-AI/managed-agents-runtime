@@ -125,13 +125,17 @@ after live startup showed their `/opt/gem/run.sh` exiting on an invalid
 receipt before creation. If creation fails after BytePlus allocates an instance,
 the provider inventories by the exact run metadata, kills only those instances,
 verifies their absence, and records a sanitized failure receipt.
-Application cleanup normally requires an empty child inventory. It also accepts
-provider-retained tombstones only when every returned child belongs to the exact
-target function and is already `Terminating`; any active, unknown, paginated, or
-cross-function child fails closed before `DeleteFunction`.
-Runtime termination likewise treats the provider's post-kill `Terminating`
-state as accepted termination, but final evidence separately reports live
-instances and retained tombstones and requires exact function and run metadata.
+Application cleanup reserves its owner-only evidence destination before its first
+cloud call. It normally requires an empty child inventory. For an exact disposable
+application it also permits the documented cascading `DeleteFunction` path only
+when every returned child belongs to the target function and is already
+`Terminating`; any active non-terminating, unknown, paginated, or cross-function
+child fails closed. Fresh function-inventory absence is then required.
+Runtime termination does not treat the provider's post-kill `Terminating` state
+as completion. It polls `DescribeSandbox` and an exact `SandboxId` inventory until
+`Terminated`, `Deleted`, `ResourceNotFound`, or complete exact absence. Retained
+`Terminating` records remain in `liveInstances`, and conformance fails rather than
+claiming verified termination.
 Transient private-WebShell failures are retried only for idempotent workspace
 and file operations. File chunks use fixed byte offsets so an uncertain retry
 cannot duplicate content; arbitrary shell commands are never retried.
@@ -141,7 +145,7 @@ use an API Gateway route. Provisioning omits `InstanceType`, verifies the draft
 as CPU-only before release, and refuses to adopt a differing exact-name
 application. The runtime record must show successful request IDs for create,
 describe, WebShell lease, kill, and final inventory. Cleanup refuses to delete
-an application with live instances or a mismatched ID/name pair.
+an application with active non-terminating instances or a mismatched ID/name pair.
 
 ## Promotion rule
 

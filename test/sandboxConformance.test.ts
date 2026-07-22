@@ -61,4 +61,17 @@ describe('private sandbox live conformance seam', () => {
     })).rejects.toThrow('Sandbox conformance file write request failed');
     expect(provider.terminate).toHaveBeenCalledTimes(1);
   });
+
+  it('does not classify Terminating as verified terminal cleanup', async () => {
+    const provider = fixture();
+    provider.terminate.mockImplementation(async () => {
+      provider.describe.mockResolvedValue({ status: 'Terminating' });
+    });
+
+    await expect(runSandboxConformance(provider, {
+      runId: 'terminating-run',
+      timeoutMinutes: 10,
+      marker: 'canary-marker',
+    })).rejects.toThrow('cleanup could not be verified');
+  });
 });

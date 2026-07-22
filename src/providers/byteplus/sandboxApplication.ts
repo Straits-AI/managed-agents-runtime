@@ -276,7 +276,7 @@ export async function deletePrivateSandboxApplication(
   } catch {
     throw new Error('Private sandbox application still has active or unowned instances');
   }
-  if (inventory.liveInstances !== 0) {
+  if (inventory.liveInstances !== inventory.terminatingTombstones) {
     throw new Error('Private sandbox application still has active or unowned instances');
   }
 

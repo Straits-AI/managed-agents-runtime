@@ -177,7 +177,12 @@ export class VefaasSandboxProvider implements SandboxProvider {
     }
     const sandboxId = (result.SandboxId ?? result.Id) as string | undefined;
     if (!sandboxId) {
-      throw new Error(`CreateSandbox returned no sandbox id: ${JSON.stringify(result)}`);
+      try {
+        await this.cleanupAmbiguousCreate(req.runId);
+      } catch {
+        throw new Error('CreateSandbox returned no sandbox id and exact-run cleanup was not verified');
+      }
+      throw new Error('CreateSandbox returned no sandbox id after exact-run cleanup');
     }
     const privateHandle = { sandboxId, baseUrl: 'private://webshell' };
     try {
@@ -205,16 +210,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
         pageSize: 100,
         metadata: { runId },
       });
-      const exact = (inventory.Sandboxes ?? []).filter((sandbox) => {
-        const metadata = sandbox.Metadata;
-        return sandbox.FunctionId === this.functionId
-          && typeof sandbox.Id === 'string'
-          && /^[A-Za-z0-9._-]{1,240}$/.test(sandbox.Id)
-          && typeof metadata === 'object'
-          && metadata !== null
-          && !Array.isArray(metadata)
-          && (metadata as Record<string, unknown>).runId === runId;
-      });
+      const exact = exactRunSandboxInventory(inventory, this.functionId, runId);
       if (exact.length > 10) {
         throw new Error('Ambiguous CreateSandbox cleanup exceeded instance bound');
       }
@@ -230,15 +226,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
         pageSize: 100,
         metadata: { runId },
       });
-      const remaining = (after.Sandboxes ?? []).some((sandbox) => {
-        const metadata = sandbox.Metadata;
-        return sandbox.FunctionId === this.functionId
-          && typeof metadata === 'object'
-          && metadata !== null
-          && !Array.isArray(metadata)
-          && (metadata as Record<string, unknown>).runId === runId;
-      });
-      if (remaining) {
+      if (exactRunSandboxInventory(after, this.functionId, runId).length > 0) {
         throw new Error('Ambiguous CreateSandbox cleanup was not verified');
       }
       return;
@@ -443,11 +431,75 @@ export class VefaasSandboxProvider implements SandboxProvider {
   private async waitForTerminal(handle: SandboxHandle): Promise<void> {
     for (let attempt = 0; attempt < 60; attempt += 1) {
       const { status } = await this.describe(handle);
-      if (status === 'Deleted' || status === 'Terminated' || status === 'Terminating') return;
+      if (status === 'Deleted' || status === 'Terminated') return;
+      try {
+        const inventory = await this.vefaas.listSandboxes(this.functionId, {
+          pageNumber: 1,
+          pageSize: 100,
+          sandboxId: handle.sandboxId,
+        });
+        const items = exactSandboxIdInventory(
+          inventory,
+          this.functionId,
+          handle.sandboxId,
+        );
+        if (items.length === 0) return;
+      } catch (error) {
+        if (error instanceof BytePlusApiError && error.code === 'ResourceNotFound') return;
+        throw error;
+      }
       await this.sleepFn(1_000);
     }
     throw new Error('sandbox termination was not verified before deadline');
   }
+}
+
+function exactRunSandboxInventory(
+  inventory: { Sandboxes?: SandboxInfo[]; Total?: number },
+  functionId: string,
+  runId: string,
+): SandboxInfo[] {
+  const sandboxes = inventory.Sandboxes;
+  if (!Array.isArray(sandboxes)
+    || !Number.isSafeInteger(inventory.Total)
+    || (inventory.Total as number) < 0
+    || inventory.Total !== sandboxes.length) {
+    throw new Error('Exact-run sandbox inventory was incomplete');
+  }
+  return sandboxes.filter((sandbox) => {
+    const metadata = sandbox.Metadata;
+    if (sandbox.FunctionId !== functionId
+      || typeof sandbox.Id !== 'string'
+      || !/^[A-Za-z0-9._-]{1,240}$/.test(sandbox.Id)
+      || typeof metadata !== 'object'
+      || metadata === null
+      || Array.isArray(metadata)
+      || (metadata as Record<string, unknown>).runId !== runId) {
+      throw new Error('Exact-run sandbox inventory ownership was invalid');
+    }
+    return true;
+  });
+}
+
+function exactSandboxIdInventory(
+  inventory: { Sandboxes?: SandboxInfo[]; Total?: number },
+  functionId: string,
+  sandboxId: string,
+): SandboxInfo[] {
+  const sandboxes = inventory.Sandboxes;
+  if (!Array.isArray(sandboxes)
+    || !Number.isSafeInteger(inventory.Total)
+    || (inventory.Total as number) < 0
+    || inventory.Total !== sandboxes.length) {
+    throw new Error('Exact sandbox inventory was incomplete');
+  }
+  for (const sandbox of sandboxes) {
+    const id = sandbox.Id ?? sandbox.SandboxId;
+    if (sandbox.FunctionId !== functionId || id !== sandboxId) {
+      throw new Error('Exact sandbox inventory ownership was invalid');
+    }
+  }
+  return sandboxes;
 }
 
 function isRetriablePrivateTransportError(error: unknown): boolean {

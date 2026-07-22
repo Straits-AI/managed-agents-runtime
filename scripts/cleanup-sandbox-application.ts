@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { createBpProvisioningApi } from '../src/providers/byteplus/bpProvisioningApi.js';
+import { reserveEvidenceRecord } from '../src/providers/byteplus/provisioningEvidence.js';
 import { deletePrivateSandboxApplication } from '../src/providers/byteplus/sandboxApplication.js';
 import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
 
@@ -32,12 +31,7 @@ const source = resolveTosConformanceSource({
   gitCommit,
   gitStatus: gitCommit === null ? null : readGit(['status', '--porcelain']),
 });
-const api = createBpProvisioningApi({ profile, region });
-const receipt = await deletePrivateSandboxApplication({ functionId, name }, api);
-if (readGit(['rev-parse', 'HEAD']) !== source.commit || readGit(['status', '--porcelain'])) {
-  throw new Error('Sandbox cleanup source revision changed during the live run');
-}
-const record = {
+const baseRecord = {
   schemaVersion: 1,
   evidenceId: `byteplus-sandbox-cleanup-${name}`,
   source: {
@@ -48,12 +42,34 @@ const record = {
   provider: 'byteplus-vefaas',
   region,
   retrievedAt: new Date().toISOString(),
-  cleanup: receipt,
 };
-const serialized = `${JSON.stringify(record, null, 2)}\n`;
-writeFileSync(resolve(evidenceFile), serialized, {
-  encoding: 'utf8',
-  flag: 'wx',
-  mode: 0o600,
+const evidence = reserveEvidenceRecord(evidenceFile, {
+  ...baseRecord,
+  status: 'pending',
+  cleanup: { functionId, name, completion: 'unknown' },
 });
-process.stdout.write(serialized);
+const api = createBpProvisioningApi({ profile, region });
+let cleanup: Awaited<ReturnType<typeof deletePrivateSandboxApplication>> | null = null;
+try {
+  cleanup = await deletePrivateSandboxApplication({ functionId, name }, api);
+  if (readGit(['rev-parse', 'HEAD']) !== source.commit || readGit(['status', '--porcelain'])) {
+    throw new Error('Sandbox cleanup source revision changed during the live run');
+  }
+  const record = { ...baseRecord, status: 'succeeded', cleanup };
+  evidence.commit(record);
+  process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
+} catch {
+  const record = {
+    ...baseRecord,
+    status: 'failed',
+    cleanup: cleanup ?? { functionId, absent: false },
+    failure: {
+      reason: 'Private sandbox application cleanup failed',
+      sourceUnchanged: readGit(['rev-parse', 'HEAD']) === source.commit
+        && !readGit(['status', '--porcelain']),
+    },
+  };
+  evidence.commit(record);
+  process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
+  throw new Error('Private sandbox application cleanup failed; sanitized evidence was retained');
+}

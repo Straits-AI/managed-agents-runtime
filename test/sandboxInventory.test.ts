@@ -5,7 +5,7 @@ import {
 } from '../src/providers/byteplus/sandboxInventory.js';
 
 describe('BytePlus sandbox inventory summary', () => {
-  it('distinguishes exact terminating tombstones from live instances', () => {
+  it('keeps exact terminating tombstones in the unverified live inventory', () => {
     expect(summarizeExactSandboxInventory({
       Sandboxes: [{
         FunctionId: 'function-1',
@@ -16,7 +16,7 @@ describe('BytePlus sandbox inventory summary', () => {
     }, {
       functionId: 'function-1',
       metadata: { runId: 'run-1' },
-    })).toEqual({ liveInstances: 0, terminatingTombstones: 1 });
+    })).toEqual({ liveInstances: 1, terminatingTombstones: 1 });
 
     expect(summarizeExactSandboxInventory({
       Sandboxes: [{
@@ -43,7 +43,7 @@ describe('BytePlus sandbox inventory summary', () => {
     })).toThrow(reason);
   });
 
-  it('reconciles a bounded live-to-terminating inventory transition', async () => {
+  it('reconciles only after a live-to-terminating-to-absent transition', async () => {
     const inventories = [
       {
         Sandboxes: [{
@@ -61,6 +61,7 @@ describe('BytePlus sandbox inventory summary', () => {
         }],
         Total: 1,
       },
+      { Sandboxes: [], Total: 0 },
     ];
     let slept = 0;
 
@@ -69,7 +70,7 @@ describe('BytePlus sandbox inventory summary', () => {
       target: { functionId: 'function-1', metadata: { runId: 'run-1' } },
       attempts: 3,
       sleep: async () => { slept += 1; },
-    })).resolves.toEqual({ liveInstances: 0, terminatingTombstones: 1 });
-    expect(slept).toBe(1);
+    })).resolves.toEqual({ liveInstances: 0, terminatingTombstones: 0 });
+    expect(slept).toBe(2);
   });
 });

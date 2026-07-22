@@ -42,7 +42,7 @@ export function summarizeExactSandboxInventory(
   }
 
   return {
-    liveInstances: total - terminatingTombstones,
+    liveInstances: total,
     terminatingTombstones,
   };
 }

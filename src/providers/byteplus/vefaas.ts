@@ -113,6 +113,7 @@ export class VefaasClient {
     opts: {
       pageNumber?: number;
       pageSize?: number;
+      sandboxId?: string;
       status?: string;
       metadata?: Record<string, string>;
     } = {},
@@ -121,6 +122,7 @@ export class VefaasClient {
       FunctionId: functionId,
       PageNumber: opts.pageNumber ?? 1,
       PageSize: opts.pageSize ?? 10,
+      SandboxId: opts.sandboxId,
       Status: opts.status,
       Metadata: opts.metadata,
     });
