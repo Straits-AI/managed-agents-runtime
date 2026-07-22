@@ -1,10 +1,53 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createModelArkTemporaryKeyRequest,
   parseBoundedProviderFailure,
   runModelArkConformance,
 } from '../src/providers/modelArkConformance.js';
 
 describe('ModelArk live conformance seam', () => {
+  it('scopes a preset endpoint key to the explicit project and model alias', () => {
+    expect(createModelArkTemporaryKeyRequest({
+      durationSeconds: 900,
+      resourceType: 'presetendpoint',
+      resourceIds: ['seed-2-0-lite-260228'],
+      projectName: 'default',
+    })).toEqual({
+      DurationSeconds: 900,
+      ResourceType: 'presetendpoint',
+      ResourceIds: ['seed-2-0-lite-260228'],
+      ProjectName: 'default',
+    });
+  });
+
+  it('rejects preset endpoint key requests without a project', () => {
+    expect(() => createModelArkTemporaryKeyRequest({
+      durationSeconds: 900,
+      resourceType: 'presetendpoint',
+      resourceIds: ['seed-2-0-lite-260228'],
+    })).toThrow('ModelArk preset endpoint key requires an explicit project name');
+  });
+
+  it('does not add a project to endpoint key requests', () => {
+    expect(createModelArkTemporaryKeyRequest({
+      durationSeconds: 900,
+      resourceType: 'endpoint',
+      resourceIds: ['ep-fixture'],
+    })).toEqual({
+      DurationSeconds: 900,
+      ResourceType: 'endpoint',
+      ResourceIds: ['ep-fixture'],
+    });
+  });
+
+  it('rejects an unsupported key resource type at the runtime boundary', () => {
+    expect(() => createModelArkTemporaryKeyRequest({
+      durationSeconds: 900,
+      resourceType: 'model' as never,
+      resourceIds: ['seed-2-0-lite-260228'],
+    })).toThrow('ModelArk temporary key resource type is invalid');
+  });
+
   it('extracts only bounded provider metadata from a bp failure', () => {
     expect(parseBoundedProviderFailure(
       'NotFound.Resource: secret body\nstatus code: 404, request id: request-404',

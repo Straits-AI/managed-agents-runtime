@@ -71,13 +71,16 @@ node --import tsx scripts/conformance-modelark.ts \
   --profile dev \
   --region ap-southeast-1 \
   --model seed-2-0-lite-260228 \
-  --resource-type endpoint \
-  --key-resource-id ep-... \
+  --resource-type presetendpoint \
+  --key-resource-id seed-2-0-lite-260228 \
+  --project-name default \
   --evidence-file /secure/path/modelark-conformance.json
 ```
 
+For a provisioned inference endpoint, use `--resource-type endpoint` and its
+`ep-...` identifier instead; the project field is omitted from that key request.
 The temporary key and model output remain in memory. The evidence contains only
-bounded request, token, finish, source, and redaction metadata.
+bounded request, token, finish, source, key-scope, and redaction metadata.
 
 ## Private sandbox record generation
 

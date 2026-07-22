@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  createModelArkTemporaryKeyRequest,
+  type ModelArkKeyResourceType,
   parseBoundedProviderFailure,
   runModelArkConformance,
 } from '../src/providers/modelArkConformance.js';
@@ -17,8 +19,9 @@ const option = (name: string, fallback?: string): string => {
 const profile = option('--profile', 'dev');
 const region = option('--region', 'ap-southeast-1');
 const model = option('--model', 'seed-2-0-lite-260228');
-const resourceType = option('--resource-type');
+const resourceType = option('--resource-type') as ModelArkKeyResourceType;
 const keyResourceId = option('--key-resource-id');
+const projectName = option('--project-name', 'default');
 const evidenceFile = option('--evidence-file');
 const durationSeconds = 900;
 const baseUrl = 'https://ark.ap-southeast.bytepluses.com/api/v3';
@@ -39,11 +42,12 @@ const source = resolveTosConformanceSource({
 
 const evidence = await runModelArkConformance({
   async getTemporaryKey() {
-    const body = JSON.stringify({
-      DurationSeconds: durationSeconds,
-      ResourceType: resourceType,
-      ResourceIds: [keyResourceId],
-    });
+    const body = JSON.stringify(createModelArkTemporaryKeyRequest({
+      durationSeconds,
+      resourceType,
+      resourceIds: [keyResourceId],
+      projectName,
+    }));
     let stdout: string;
     try {
       stdout = execFileSync('bp', [
@@ -161,7 +165,16 @@ const record = {
   provider: 'byteplus-modelark',
   region,
   retrievedAt: new Date().toISOString(),
-  toolchain: { runtime: `node ${process.version}`, api: 'chat-completions', maxOutputTokens: 32 },
+  toolchain: {
+    runtime: `node ${process.version}`,
+    controlApi: 'GetApiKey 2024-01-01',
+    inferenceApi: 'chat-completions',
+    maxOutputTokens: 32,
+    keyScope: {
+      resourceType,
+      projectName: resourceType === 'presetendpoint' ? projectName : null,
+    },
+  },
   evidence,
 };
 writeFileSync(resolve(evidenceFile), `${JSON.stringify(record, null, 2)}\n`, {

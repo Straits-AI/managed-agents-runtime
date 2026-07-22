@@ -4,6 +4,55 @@ export interface ModelArkTemporaryKey {
   expiresAt: Date;
 }
 
+export type ModelArkKeyResourceType = 'endpoint' | 'bot' | 'presetendpoint';
+
+export interface ModelArkTemporaryKeyRequestInput {
+  durationSeconds: number;
+  resourceType: ModelArkKeyResourceType;
+  resourceIds: string[];
+  projectName?: string;
+}
+
+export interface ModelArkTemporaryKeyRequest {
+  DurationSeconds: number;
+  ResourceType: ModelArkKeyResourceType;
+  ResourceIds: string[];
+  ProjectName?: string;
+}
+
+export function createModelArkTemporaryKeyRequest(
+  input: ModelArkTemporaryKeyRequestInput,
+): ModelArkTemporaryKeyRequest {
+  if (!['endpoint', 'bot', 'presetendpoint'].includes(input.resourceType)) {
+    throw new Error('ModelArk temporary key resource type is invalid');
+  }
+  if (!Number.isSafeInteger(input.durationSeconds)
+    || input.durationSeconds < 1
+    || input.durationSeconds > 2_592_000) {
+    throw new Error('ModelArk temporary key duration is invalid');
+  }
+  if (input.resourceIds.length === 0
+    || input.resourceIds.some((id) => !/^[A-Za-z0-9._:-]{1,160}$/.test(id))) {
+    throw new Error('ModelArk temporary key resource identifier is invalid');
+  }
+  if (input.resourceType === 'presetendpoint') {
+    if (!input.projectName || !/^[A-Za-z0-9._-]{1,128}$/.test(input.projectName)) {
+      throw new Error('ModelArk preset endpoint key requires an explicit project name');
+    }
+    return {
+      DurationSeconds: input.durationSeconds,
+      ResourceType: input.resourceType,
+      ResourceIds: [...input.resourceIds],
+      ProjectName: input.projectName,
+    };
+  }
+  return {
+    DurationSeconds: input.durationSeconds,
+    ResourceType: input.resourceType,
+    ResourceIds: [...input.resourceIds],
+  };
+}
+
 export interface ModelArkInvocationResult {
   markerMatched: boolean;
   requestId: string | null;
