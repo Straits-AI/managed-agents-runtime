@@ -221,6 +221,24 @@ describe('private sandbox application provisioner', () => {
     ['initializer', { InitializerSec: 60 }],
     ['CPU allocation', { CpuMilli: 2000 }],
     ['environment variables', { Envs: [{ Key: 'unexpected', Value: 'value' }] }],
+    ['enabled VPC', {
+      VpcConfig: {
+        EnableVpc: true,
+        EnableSharedInternetAccess: false,
+        VpcId: '',
+        SubnetIds: [],
+        SecurityGroupIds: [],
+      },
+    }],
+    ['shared internet VPC', {
+      VpcConfig: {
+        EnableVpc: false,
+        EnableSharedInternetAccess: true,
+        VpcId: '',
+        SubnetIds: [],
+        SecurityGroupIds: [],
+      },
+    }],
     ['VPC identifiers', {
       VpcConfig: {
         EnableVpc: false,
@@ -268,6 +286,32 @@ describe('private sandbox application provisioner', () => {
     delete readback.CpuMilli;
     delete readback.Envs;
     delete readback.VpcConfig;
+    const api: VefaasProvisioningApi = async (action) => ({
+      result: action === 'ListFunctions'
+        ? { Items: [{ Id: 'function-1', Name: 'managed-agents-runtime-test' }], Total: 1 }
+        : action === 'GetReleaseStatus'
+          ? {
+              Status: 'done',
+              StableRevisionNumber: 1,
+              ReleaseRecordId: 'release-1',
+            }
+          : action === 'GetFunction' || action === 'GetRevision'
+            ? readback
+            : (() => { throw new Error(`unexpected action ${action}`); })(),
+      requestId: `request-${action}`,
+    });
+
+    await expect(provisionPrivateSandboxApplication(
+      defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
+      api,
+    )).resolves.toMatchObject({ disposition: 'reused', functionId: 'function-1' });
+  });
+
+  it('accepts omitted false booleans in a provider-canonical disabled VPC object', async () => {
+    const readback = {
+      ...matchingRevision(1),
+      VpcConfig: { VpcId: '', SubnetIds: [], SecurityGroupIds: [] },
+    };
     const api: VefaasProvisioningApi = async (action) => ({
       result: action === 'ListFunctions'
         ? { Items: [{ Id: 'function-1', Name: 'managed-agents-runtime-test' }], Total: 1 }

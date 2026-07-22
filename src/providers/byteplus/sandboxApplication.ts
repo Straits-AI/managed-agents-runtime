@@ -396,11 +396,15 @@ function nestedBoolean(value: unknown, key: string): boolean | null {
 
 function disabledVpc(value: unknown): boolean {
   return value === undefined || value === null || (isRecord(value)
-    && nestedBoolean(value, 'EnableVpc') === false
-    && nestedBoolean(value, 'EnableSharedInternetAccess') === false
+    && optionalFalseBoolean(value, 'EnableVpc')
+    && optionalFalseBoolean(value, 'EnableSharedInternetAccess')
     && optionalEmptyString(value.VpcId)
     && optionalEmptyArray(value.SubnetIds)
     && optionalEmptyArray(value.SecurityGroupIds));
+}
+
+function optionalFalseBoolean(value: Record<string, unknown>, key: string): boolean {
+  return value[key] === undefined || value[key] === null || value[key] === false;
 }
 
 function disabledTls(value: unknown): boolean {
