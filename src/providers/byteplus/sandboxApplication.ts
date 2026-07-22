@@ -342,7 +342,6 @@ function assertRevisionMatches(
     ['Command', plan.command],
     ['Port', plan.port],
     ['CpuStrategy', 'always'],
-    ['CpuMilli', plan.cpuMilli],
     ['MemoryMB', plan.memoryMB],
     ['MaxConcurrency', plan.maxConcurrency],
     ['RequestTimeout', plan.requestTimeoutSeconds],
@@ -361,7 +360,14 @@ function assertRevisionMatches(
     && revision.InstanceType !== null) {
     mismatches.push('InstanceType');
   }
-  if (!Array.isArray(revision.Envs) || revision.Envs.length !== 0) {
+  if (revision.CpuMilli !== undefined
+    && revision.CpuMilli !== null
+    && revision.CpuMilli !== plan.cpuMilli) {
+    mismatches.push('CpuMilli');
+  }
+  if (revision.Envs !== undefined
+    && revision.Envs !== null
+    && (!Array.isArray(revision.Envs) || revision.Envs.length !== 0)) {
     mismatches.push('Envs');
   }
   if (!plan.tags.every((tag) => hasTag(revision.Tags, tag.Key, tag.Value))) {
@@ -389,12 +395,12 @@ function nestedBoolean(value: unknown, key: string): boolean | null {
 }
 
 function disabledVpc(value: unknown): boolean {
-  return isRecord(value)
+  return value === undefined || value === null || (isRecord(value)
     && nestedBoolean(value, 'EnableVpc') === false
     && nestedBoolean(value, 'EnableSharedInternetAccess') === false
     && optionalEmptyString(value.VpcId)
     && optionalEmptyArray(value.SubnetIds)
-    && optionalEmptyArray(value.SecurityGroupIds);
+    && optionalEmptyArray(value.SecurityGroupIds));
 }
 
 function disabledTls(value: unknown): boolean {

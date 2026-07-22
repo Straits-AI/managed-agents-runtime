@@ -219,6 +219,8 @@ describe('private sandbox application provisioner', () => {
   it.each([
     ['description', { Description: 'unexpected description' }],
     ['initializer', { InitializerSec: 60 }],
+    ['CPU allocation', { CpuMilli: 2000 }],
+    ['environment variables', { Envs: [{ Key: 'unexpected', Value: 'value' }] }],
     ['VPC identifiers', {
       VpcConfig: {
         EnableVpc: false,
@@ -259,6 +261,32 @@ describe('private sandbox application provisioner', () => {
       defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
       api,
     )).rejects.toThrow('mismatch');
+  });
+
+  it('accepts provider-canonical omission of default CPU, empty envs, and disabled VPC', async () => {
+    const readback = { ...matchingRevision(1) };
+    delete readback.CpuMilli;
+    delete readback.Envs;
+    delete readback.VpcConfig;
+    const api: VefaasProvisioningApi = async (action) => ({
+      result: action === 'ListFunctions'
+        ? { Items: [{ Id: 'function-1', Name: 'managed-agents-runtime-test' }], Total: 1 }
+        : action === 'GetReleaseStatus'
+          ? {
+              Status: 'done',
+              StableRevisionNumber: 1,
+              ReleaseRecordId: 'release-1',
+            }
+          : action === 'GetFunction' || action === 'GetRevision'
+            ? readback
+            : (() => { throw new Error(`unexpected action ${action}`); })(),
+      requestId: `request-${action}`,
+    });
+
+    await expect(provisionPrivateSandboxApplication(
+      defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
+      api,
+    )).resolves.toMatchObject({ disposition: 'reused', functionId: 'function-1' });
   });
 
   it('deletes only its newly created function when draft verification fails', async () => {

@@ -111,6 +111,9 @@ releases with `MaxInstance: 1`; this permits no more than one warm application
 instance. Before any cloud call, provisioning reserves an owner-only pending
 receipt containing the unique attempt ID used as an application tag. Final
 success or sanitized failure evidence replaces that receipt atomically.
+BytePlus may omit default CPU allocation, empty environment variables, and a
+disabled VPC from application/revision readback; omission is accepted only for
+those canonical defaults, while any returned conflicting value fails closed.
 
 This proves private WebShell execution, not public HTTP. It does not create or
 use an API Gateway route. Provisioning omits `InstanceType`, verifies the draft
