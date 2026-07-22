@@ -20,7 +20,7 @@ export class BpVefaasLifecycle {
     this.onResponseMetadata = input.onResponseMetadata;
   }
 
-  createSandbox(input: {
+  async createSandbox(input: {
     functionId: string;
     timeoutMinutes: number;
     envs?: Record<string, string>;
@@ -31,12 +31,16 @@ export class BpVefaasLifecycle {
     memoryMB?: number;
     metadata?: Record<string, string>;
   }): Promise<CreateSandboxResult> {
+    if (input.envs !== undefined) {
+      throw new Error(
+        'bp-backed veFaaS lifecycle does not accept per-run environment values; ' +
+        'configure non-secret defaults on the released application and use a credential-isolating ' +
+        'provider for secret-bearing runtime inputs',
+      );
+    }
     return this.call('CreateSandbox', {
       FunctionId: input.functionId,
       Timeout: input.timeoutMinutes,
-      Envs: input.envs === undefined
-        ? undefined
-        : Object.entries(input.envs).map(([Key, Value]) => ({ Key, Value })),
       InstanceImageInfo: input.image
         ? { Image: input.image, Command: input.command, Port: input.port }
         : undefined,

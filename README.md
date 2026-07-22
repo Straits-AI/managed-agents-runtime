@@ -184,6 +184,9 @@ private operator inventory rather than committing them to this repository:
 > the documented API minimum, while release `MaxInstance` remains 1; exact-name
 > resources are reused only after full configuration and stable-revision validation;
 > APIG is a separate public-exposure decision, not a private sandbox prerequisite;
+> the OAuth-backed `bp` lifecycle rejects per-run environment values because
+> `bp --body` is an argv transport; configure non-secret defaults on the released
+> application and use a credential-isolating provider channel for runtime secrets;
 > private commands return at most 100,000 bytes across stdout/stderr, and the
 > UTF-8 text-file seam is bounded to 100,000 bytes per file;
 > `CreateSandbox` uses `InstanceImageInfo.{Image,Command}` (not `ImageUrl`) and

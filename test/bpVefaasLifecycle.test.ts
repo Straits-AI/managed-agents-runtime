@@ -2,6 +2,27 @@ import { describe, expect, it, vi } from 'vitest';
 import { BpVefaasLifecycle } from '../src/providers/byteplus/bpVefaasLifecycle.js';
 
 describe('bp-backed veFaaS lifecycle', () => {
+  it('rejects per-run environment injection before invoking bp', async () => {
+    const executeBp = vi.fn(async () => JSON.stringify({
+      ResponseMetadata: { RequestId: 'must-not-run' },
+      Result: { SandboxId: 'must-not-exist' },
+    }));
+    const lifecycle = new BpVefaasLifecycle({
+      profile: 'dev',
+      region: 'ap-southeast-1',
+      executeBp,
+    });
+
+    await expect(lifecycle.createSandbox({
+      functionId: 'function-fixture',
+      timeoutMinutes: 10,
+      envs: { SECRET_VALUE: 'must-not-enter-process-arguments' },
+    })).rejects.toThrow(
+      'bp-backed veFaaS lifecycle does not accept per-run environment values',
+    );
+    expect(executeBp).not.toHaveBeenCalled();
+  });
+
   it('maps the production lifecycle contract without exposing profile credentials', async () => {
     const calls: string[][] = [];
     const metadata = vi.fn();

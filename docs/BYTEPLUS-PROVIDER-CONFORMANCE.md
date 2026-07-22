@@ -86,7 +86,10 @@ application, invokes the production `VefaasSandboxProvider` through an OAuth-bac
 `bp` lifecycle adapter with one short-lived 1-vCPU/2-GiB instance, and removes the
 explicitly disposable application as the verified post-kill cascade. The signed
 WebShell endpoint remains only inside the credential-isolating process. Successful
-provider calls retain only bounded action and request-ID metadata:
+provider calls retain only bounded action and request-ID metadata. Because the
+`bp` structured-body channel is transported through process arguments, this
+adapter rejects all per-run environment values before invoking `bp`; runtime
+secrets require a separate credential-isolating provider channel:
 
 ```bash
 npm run byteplus:sandbox:provision -- \
