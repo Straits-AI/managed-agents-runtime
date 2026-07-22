@@ -2,6 +2,8 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createHash, createHmac } from 'node:crypto';
 import {
   buildSignedRequest,
+  BytePlusApiError,
+  signedCall,
   signedCallWithMetadata,
 } from '../src/providers/byteplus/signer.js';
 
@@ -186,5 +188,18 @@ describe('BytePlus signer', () => {
       result: { SandboxId: 'sandbox-1' },
       requestId: '20260722010000ABC:def-123',
     });
+  });
+
+  it('does not preserve unsafe request metadata on errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ResponseMetadata: {
+        RequestId: 'r'.repeat(161),
+        Error: { Code: 'InvalidParameter', Message: 'invalid' },
+      },
+    }), { status: 400 })));
+
+    const error = await signedCall(fixed).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(BytePlusApiError);
+    expect((error as BytePlusApiError).requestId).toBeUndefined();
   });
 });

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export interface VefaasProvisioningResponse {
   result: Record<string, unknown>;
   requestId: string | null;
@@ -19,6 +21,7 @@ export interface PrivateSandboxApplicationPlan {
   maxConcurrency: number;
   requestTimeoutSeconds: number;
   initializerSeconds: number;
+  tags: ReadonlyArray<{ Key: string; Value: string }>;
 }
 
 export interface PrivateSandboxProvisioningReceipt {
@@ -37,6 +40,10 @@ export interface PrivateSandboxCleanupReceipt {
 
 const CODE_IMAGE =
   'enterprise-public-ap-southeast-1.cr.volces.com/vefaas-public/code-cli:0.0.7';
+const MANAGED_TAGS = [
+  { Key: 'managed-by', Value: 'managed-agents-runtime' },
+  { Key: 'managed-purpose', Value: 'private-sandbox' },
+] as const;
 
 export function defaultPrivateSandboxApplicationPlan(
   name: string,
@@ -55,14 +62,22 @@ export function defaultPrivateSandboxApplicationPlan(
     maxConcurrency: 1,
     requestTimeoutSeconds: 900,
     initializerSeconds: 120,
+    tags: MANAGED_TAGS,
   };
 }
 
 export async function provisionPrivateSandboxApplication(
   plan: PrivateSandboxApplicationPlan,
   api: VefaasProvisioningApi,
-  dependencies: { sleep?: (milliseconds: number) => Promise<void> } = {},
+  dependencies: {
+    sleep?: (milliseconds: number) => Promise<void>;
+    attemptId?: string;
+  } = {},
 ): Promise<PrivateSandboxProvisioningReceipt> {
+  const attemptId = dependencies.attemptId ?? randomUUID();
+  if (!/^[A-Za-z0-9._-]{8,80}$/.test(attemptId)) {
+    throw new Error('Private sandbox provisioning attempt ID is invalid');
+  }
   const requestIds: Array<{ action: string; requestId: string | null }> = [];
   const call = async (action: string, body: Record<string, unknown>) => {
     const response = await api(action, body);
@@ -70,8 +85,7 @@ export async function provisionPrivateSandboxApplication(
     return response.result;
   };
 
-  const inventory = await call('ListFunctions', { PageNumber: 1, PageSize: 100 });
-  const items = Array.isArray(inventory.Items) ? inventory.Items : [];
+  const items = await listAllFunctionItems(call);
   const matches = items.filter((item) => isRecord(item) && item.Name === plan.name);
   if (matches.length > 1) {
     throw new Error('Multiple private sandbox applications matched the exact name');
@@ -79,17 +93,17 @@ export async function provisionPrivateSandboxApplication(
   if (matches.length === 1) {
     const functionId = boundedIdentifier(matches[0]?.Id);
     if (!functionId) throw new Error('Existing private sandbox application ID is invalid');
-    const revision = await call('GetRevision', {
-      FunctionId: functionId,
-      RevisionNumber: 1,
-    });
-    assertRevisionMatches(plan, functionId, revision);
     const status = await call('GetReleaseStatus', { FunctionId: functionId });
     const stableRevisionNumber = positiveInteger(status.StableRevisionNumber);
     const releaseRecordId = boundedIdentifier(status.ReleaseRecordId);
-    if (status.Status !== 'done' || stableRevisionNumber !== 1 || !releaseRecordId) {
+    if (status.Status !== 'done' || stableRevisionNumber === null || !releaseRecordId) {
       throw new Error('Existing private sandbox application is not stably released');
     }
+    const revision = await call('GetRevision', {
+      FunctionId: functionId,
+      RevisionNumber: stableRevisionNumber,
+    });
+    assertRevisionMatches(plan, functionId, revision, stableRevisionNumber);
     return {
       disposition: 'reused',
       functionId,
@@ -101,24 +115,29 @@ export async function provisionPrivateSandboxApplication(
 
   let created: Record<string, unknown>;
   try {
-    created = await call('CreateFunction', createBody(plan));
+    created = await call('CreateFunction', createBody(plan, attemptId));
   } catch (error) {
-    const afterCreate = await call('ListFunctions', { PageNumber: 1, PageSize: 100 });
-    const possible = Array.isArray(afterCreate.Items)
-      ? afterCreate.Items.filter((item) => isRecord(item) && item.Name === plan.name)
-      : [];
+    const afterCreate = await listAllFunctionItems(call);
+    const exactName = afterCreate.filter((item) => item.Name === plan.name);
+    const possible = exactName.filter((item) => hasTag(
+      item.Tags,
+      'provisioning-attempt',
+      attemptId,
+    ));
     if (possible.length === 1) {
       const possibleId = boundedIdentifier(possible[0]?.Id);
       if (!possibleId) {
         throw new Error('Ambiguous CreateFunction cleanup target was invalid');
       }
       await call('DeleteFunction', { Id: possibleId });
-      const afterDelete = await call('ListFunctions', { PageNumber: 1, PageSize: 100 });
+      const afterDelete = await listAllFunctionItems(call);
       if (!inventoryExcludes(afterDelete, plan.name, possibleId)) {
         throw new Error('Ambiguous CreateFunction cleanup was not verified');
       }
     } else if (possible.length > 1) {
       throw new Error('Ambiguous CreateFunction produced multiple exact-name resources');
+    } else if (exactName.length > 0) {
+      throw new Error('Ambiguous CreateFunction cleanup target was not proven disposable');
     }
     throw error;
   }
@@ -127,7 +146,7 @@ export async function provisionPrivateSandboxApplication(
 
   try {
     const draft = await call('GetRevision', { FunctionId: functionId, RevisionNumber: 0 });
-    assertRevisionMatches(plan, functionId, draft);
+    assertRevisionMatches(plan, functionId, draft, 0);
 
     const released = await call('Release', {
       FunctionId: functionId,
@@ -151,6 +170,11 @@ export async function provisionPrivateSandboxApplication(
         if (stableRevisionNumber !== 1 || !releaseRecordId) {
           throw new Error('Private sandbox release completion was incomplete');
         }
+        const stable = await call('GetRevision', {
+          FunctionId: functionId,
+          RevisionNumber: stableRevisionNumber,
+        });
+        assertRevisionMatches(plan, functionId, stable, stableRevisionNumber);
         return {
           disposition: 'created',
           functionId,
@@ -171,7 +195,7 @@ export async function provisionPrivateSandboxApplication(
   } catch (error) {
     try {
       await call('DeleteFunction', { Id: functionId });
-      const after = await call('ListFunctions', { PageNumber: 1, PageSize: 100 });
+      const after = await listAllFunctionItems(call);
       if (!inventoryExcludes(after, plan.name, functionId)) {
         throw new Error('created function still present');
       }
@@ -209,24 +233,25 @@ export async function deletePrivateSandboxApplication(
     throw new Error('Private sandbox application still has instances');
   }
 
-  const before = await call('ListFunctions', { PageNumber: 1, PageSize: 100 });
-  const exact = Array.isArray(before.Items)
-    ? before.Items.filter((item) => isRecord(item)
-      && item.Id === target.functionId
-      && item.Name === target.name)
-    : [];
+  const before = await listAllFunctionItems(call);
+  const exact = before.filter((item) => item.Id === target.functionId
+    && item.Name === target.name
+    && MANAGED_TAGS.every((tag) => hasTag(item.Tags, tag.Key, tag.Value)));
   if (exact.length !== 1) {
     throw new Error('Private sandbox cleanup target did not match exactly');
   }
   await call('DeleteFunction', { Id: target.functionId });
-  const after = await call('ListFunctions', { PageNumber: 1, PageSize: 100 });
+  const after = await listAllFunctionItems(call);
   if (!inventoryExcludes(after, target.name, target.functionId)) {
     throw new Error('Private sandbox application deletion was not verified');
   }
   return { functionId: target.functionId, absent: true, requestIds };
 }
 
-function createBody(plan: PrivateSandboxApplicationPlan): Record<string, unknown> {
+function createBody(
+  plan: PrivateSandboxApplicationPlan,
+  attemptId: string,
+): Record<string, unknown> {
   return {
     Name: plan.name,
     Description: plan.description,
@@ -244,6 +269,10 @@ function createBody(plan: PrivateSandboxApplicationPlan): Record<string, unknown
     InitializerSec: plan.initializerSeconds,
     ExclusiveMode: false,
     ProjectName: 'default',
+    Tags: [
+      ...plan.tags,
+      { Key: 'provisioning-attempt', Value: attemptId },
+    ],
     Envs: [],
     VpcConfig: {
       EnableVpc: false,
@@ -262,6 +291,7 @@ function assertRevisionMatches(
   plan: PrivateSandboxApplicationPlan,
   functionId: string,
   revision: Record<string, unknown>,
+  revisionNumber: number,
 ): void {
   const expected: Array<[string, unknown]> = [
     ['Id', functionId],
@@ -277,26 +307,73 @@ function assertRevisionMatches(
     ['MemoryMB', plan.memoryMB],
     ['MaxConcurrency', plan.maxConcurrency],
     ['RequestTimeout', plan.requestTimeoutSeconds],
+    ['InitializerSec', plan.initializerSeconds],
+    ['ExclusiveMode', false],
+    ['ProjectName', 'default'],
+    ['RevisionNumber', revisionNumber],
   ];
   for (const [key, value] of expected) {
     if (revision[key] !== value) {
       throw new Error(`Private sandbox draft mismatch: ${key}`);
     }
   }
-  if (revision.InstanceType !== '' && revision.InstanceType !== undefined) {
+  if (revision.InstanceType !== ''
+    && revision.InstanceType !== undefined
+    && revision.InstanceType !== null) {
     throw new Error('Private sandbox draft mismatch: InstanceType');
   }
-  if (nestedBoolean(revision.VpcConfig, 'EnableVpc') !== false
-    || nestedBoolean(revision.VpcConfig, 'EnableSharedInternetAccess') !== false
-    || nestedBoolean(revision.TlsConfig, 'EnableLog') !== false
-    || nestedBoolean(revision.NasStorage, 'EnableNas') !== false
-    || nestedBoolean(revision.TosMountConfig, 'EnableTos') !== false) {
-    throw new Error('Private sandbox draft enabled a forbidden capability');
+  if (!Array.isArray(revision.Envs) || revision.Envs.length !== 0) {
+    throw new Error('Private sandbox draft mismatch: Envs');
+  }
+  if (!plan.tags.every((tag) => hasTag(revision.Tags, tag.Key, tag.Value))) {
+    throw new Error('Private sandbox draft mismatch: Tags');
+  }
+  if (!disabledVpc(revision.VpcConfig)) {
+    throw new Error('Private sandbox draft mismatch: VpcConfig');
+  }
+  if (!disabledTls(revision.TlsConfig)) {
+    throw new Error('Private sandbox draft mismatch: TlsConfig');
+  }
+  if (!disabledMount(revision.NasStorage, 'EnableNas', 'NasConfigs')) {
+    throw new Error('Private sandbox draft mismatch: NasStorage');
+  }
+  if (!disabledMount(revision.TosMountConfig, 'EnableTos', 'MountPoints')) {
+    throw new Error('Private sandbox draft mismatch: TosMountConfig');
   }
 }
 
 function nestedBoolean(value: unknown, key: string): boolean | null {
   return isRecord(value) && typeof value[key] === 'boolean' ? value[key] : null;
+}
+
+function disabledVpc(value: unknown): boolean {
+  return isRecord(value)
+    && nestedBoolean(value, 'EnableVpc') === false
+    && nestedBoolean(value, 'EnableSharedInternetAccess') === false
+    && optionalEmptyString(value.VpcId)
+    && optionalEmptyArray(value.SubnetIds)
+    && optionalEmptyArray(value.SecurityGroupIds);
+}
+
+function disabledTls(value: unknown): boolean {
+  return isRecord(value)
+    && nestedBoolean(value, 'EnableLog') === false
+    && optionalEmptyString(value.TlsProjectId)
+    && optionalEmptyString(value.TlsTopicId);
+}
+
+function disabledMount(value: unknown, enableKey: string, pointsKey: string): boolean {
+  return isRecord(value)
+    && nestedBoolean(value, enableKey) === false
+    && optionalEmptyArray(value[pointsKey]);
+}
+
+function optionalEmptyString(value: unknown): boolean {
+  return value === undefined || value === null || value === '';
+}
+
+function optionalEmptyArray(value: unknown): boolean {
+  return value === undefined || value === null || (Array.isArray(value) && value.length === 0);
 }
 
 function boundedIdentifier(value: unknown): string | null {
@@ -315,12 +392,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function hasTag(value: unknown, key: string, expectedValue: string): boolean {
+  return Array.isArray(value) && value.some((entry) => isRecord(entry)
+    && entry.Key === key
+    && entry.Value === expectedValue);
+}
+
 function inventoryExcludes(
-  inventory: Record<string, unknown>,
+  inventory: Record<string, unknown>[],
   name: string,
   functionId: string,
 ): boolean {
-  return Array.isArray(inventory.Items)
-    && !inventory.Items.some((item) => isRecord(item)
-      && (item.Id === functionId || item.Name === name));
+  return !inventory.some((item) => item.Id === functionId || item.Name === name);
+}
+
+async function listAllFunctionItems(
+  call: (
+    action: string,
+    body: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>,
+): Promise<Record<string, unknown>[]> {
+  const all: Record<string, unknown>[] = [];
+  for (let pageNumber = 1; pageNumber <= 100; pageNumber += 1) {
+    const page = await call('ListFunctions', { PageNumber: pageNumber, PageSize: 100 });
+    if (!Array.isArray(page.Items)
+      || !page.Items.every(isRecord)
+      || !Number.isInteger(page.Total)
+      || (page.Total as number) < 0
+      || (page.Total as number) > 10_000) {
+      throw new Error('Private sandbox function inventory was invalid');
+    }
+    all.push(...page.Items);
+    if (all.length >= (page.Total as number)) return all;
+    if (page.Items.length === 0) {
+      throw new Error('Private sandbox function inventory was incomplete');
+    }
+  }
+  throw new Error('Private sandbox function inventory exceeded page bound');
 }

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createBpProvisioningApi } from '../src/providers/byteplus/bpProvisioningApi.js';
+import { BpCliError } from '../src/providers/byteplus/privateWebshell.js';
 import {
   defaultPrivateSandboxApplicationPlan,
   provisionPrivateSandboxApplication,
@@ -42,27 +43,40 @@ if (!/^[A-Za-z0-9._-]{1,80}$/.test(bpVersion)) {
   throw new Error('BytePlus CLI version was invalid');
 }
 
-const api = createBpProvisioningApi({ profile, region });
+const rawApi = createBpProvisioningApi({ profile, region });
+const requestObservations: Array<{
+  action: string;
+  status: 'success' | 'failed';
+  requestId: string | null;
+  errorCode?: string | null;
+}> = [];
+let createdFunctionId: string | null = null;
+const api: typeof rawApi = async (action, body) => {
+  try {
+    const response = await rawApi(action, body);
+    requestObservations.push({
+      action,
+      status: 'success',
+      requestId: response.requestId,
+    });
+    if (action === 'CreateFunction'
+      && typeof response.result.Id === 'string'
+      && /^[A-Za-z0-9._:-]{1,160}$/.test(response.result.Id)) {
+      createdFunctionId = response.result.Id;
+    }
+    return response;
+  } catch (error) {
+    requestObservations.push({
+      action,
+      status: 'failed',
+      requestId: error instanceof BpCliError ? error.requestId : null,
+      errorCode: error instanceof BpCliError ? error.code : null,
+    });
+    throw error;
+  }
+};
 const plan = defaultPrivateSandboxApplicationPlan(name);
-const images = await api('ListSandboxImages', {
-  ImageType: 'public',
-  PageNumber: 1,
-  PageSize: 100,
-});
-const imageItems = Array.isArray(images.result.Images) ? images.result.Images : [];
-const selectedImage = imageItems.find((item) => typeof item === 'object'
-  && item !== null
-  && (item as Record<string, unknown>).ImageGroup === 'Code'
-  && (item as Record<string, unknown>).ImageUrl === plan.image
-  && (item as Record<string, unknown>).PrecacheStatus === 'success');
-if (!selectedImage) {
-  throw new Error('The planned BytePlus Code image is not currently pre-cached');
-}
-const receipt = await provisionPrivateSandboxApplication(plan, api);
-if (readGit(['rev-parse', 'HEAD']) !== source.commit || readGit(['status', '--porcelain'])) {
-  throw new Error('Sandbox provisioning source revision changed during the live run');
-}
-const record = {
+const baseRecord = {
   schemaVersion: 1,
   evidenceId: `byteplus-sandbox-application-${name}`,
   source: {
@@ -74,10 +88,8 @@ const record = {
   region,
   retrievedAt: new Date().toISOString(),
   toolchain: { bpVersion, apiVersion: '2024-06-06' },
-  application: {
+  plannedApplication: {
     name: plan.name,
-    functionId: receipt.functionId,
-    disposition: receipt.disposition,
     functionType: 'sandbox',
     runtime: 'native/v1',
     image: plan.image,
@@ -87,29 +99,78 @@ const record = {
     memoryMB: plan.memoryMB,
     maxConcurrency: plan.maxConcurrency,
     requestTimeoutSeconds: plan.requestTimeoutSeconds,
+    initializerSeconds: plan.initializerSeconds,
     instanceType: 'cpu-empty',
-    stableRevisionNumber: receipt.stableRevisionNumber,
-    releaseRecordId: receipt.releaseRecordId,
+    tags: plan.tags,
     vpcEnabled: false,
     sharedInternetEnabled: false,
     logsEnabled: false,
     nasEnabled: false,
     tosMountEnabled: false,
   },
-  requestIds: [
-    { action: 'ListSandboxImages', requestId: images.requestId },
-    ...receipt.requestIds,
-  ],
   redaction: {
     credentialsSerialized: false,
     signedUrlsSerialized: false,
     responseBodiesSerialized: false,
   },
 };
-const serialized = `${JSON.stringify(record, null, 2)}\n`;
-writeFileSync(resolve(evidenceFile), serialized, {
-  encoding: 'utf8',
-  flag: 'wx',
-  mode: 0o600,
-});
-process.stdout.write(serialized);
+try {
+  const images = await api('ListSandboxImages', {
+    ImageType: 'public',
+    PageNumber: 1,
+    PageSize: 100,
+  });
+  const imageItems = Array.isArray(images.result.Images) ? images.result.Images : [];
+  const selectedImage = imageItems.find((item) => typeof item === 'object'
+    && item !== null
+    && (item as Record<string, unknown>).ImageGroup === 'Code'
+    && (item as Record<string, unknown>).ImageUrl === plan.image
+    && (item as Record<string, unknown>).PrecacheStatus === 'success');
+  if (!selectedImage) {
+    throw new Error('The planned BytePlus Code image is not currently pre-cached');
+  }
+  const receipt = await provisionPrivateSandboxApplication(plan, api);
+  assertSourceUnchanged();
+  writeRecord({
+    ...baseRecord,
+    status: 'succeeded',
+    application: {
+      functionId: receipt.functionId,
+      disposition: receipt.disposition,
+      stableRevisionNumber: receipt.stableRevisionNumber,
+      releaseRecordId: receipt.releaseRecordId,
+      configurationVerified: true,
+    },
+    requests: requestObservations,
+  });
+} catch (error) {
+  writeRecord({
+    ...baseRecord,
+    status: 'failed',
+    application: { functionId: createdFunctionId },
+    requests: requestObservations,
+    failure: {
+      code: error instanceof BpCliError ? error.code : 'ProvisioningFailed',
+      requestId: error instanceof BpCliError ? error.requestId : null,
+      sourceUnchanged: readGit(['rev-parse', 'HEAD']) === source.commit
+        && !readGit(['status', '--porcelain']),
+    },
+  });
+  throw new Error('Private sandbox provisioning failed; sanitized evidence was retained');
+}
+
+function assertSourceUnchanged(): void {
+  if (readGit(['rev-parse', 'HEAD']) !== source.commit || readGit(['status', '--porcelain'])) {
+    throw new Error('Sandbox provisioning source revision changed during the live run');
+  }
+}
+
+function writeRecord(record: Record<string, unknown>): void {
+  const serialized = `${JSON.stringify(record, null, 2)}\n`;
+  writeFileSync(resolve(evidenceFile), serialized, {
+    encoding: 'utf8',
+    flag: 'wx',
+    mode: 0o600,
+  });
+  process.stdout.write(serialized);
+}

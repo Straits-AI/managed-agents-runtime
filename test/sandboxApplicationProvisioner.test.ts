@@ -17,7 +17,9 @@ describe('private sandbox application provisioner', () => {
       });
       if (action === 'ListFunctions') return response({ Items: [], Total: 0 });
       if (action === 'CreateFunction') return response({ Id: 'function-1' });
-      if (action === 'GetRevision') return response(matchingRevision());
+      if (action === 'GetRevision') return response(
+        matchingRevision(Number(body.RevisionNumber)),
+      );
       if (action === 'Release') return response({ ReleaseRecordId: 'release-1' });
       if (action === 'GetReleaseStatus') return response({
         FunctionId: 'function-1',
@@ -31,7 +33,7 @@ describe('private sandbox application provisioner', () => {
     const receipt = await provisionPrivateSandboxApplication(
       defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
       api,
-      { sleep: vi.fn(async () => {}) },
+      { sleep: vi.fn(async () => {}), attemptId: 'attempt-fixture' },
     );
 
     expect(receipt).toMatchObject({
@@ -55,6 +57,11 @@ describe('private sandbox application provisioner', () => {
       TlsConfig: { EnableLog: false },
       NasStorage: { EnableNas: false, NasConfigs: [] },
       TosMountConfig: { EnableTos: false, MountPoints: [] },
+      Tags: [
+        { Key: 'managed-by', Value: 'managed-agents-runtime' },
+        { Key: 'managed-purpose', Value: 'private-sandbox' },
+        { Key: 'provisioning-attempt', Value: 'attempt-fixture' },
+      ],
     });
     expect(create?.body).not.toHaveProperty('InstanceType');
     expect(calls.map((call) => call.action)).toEqual([
@@ -63,6 +70,7 @@ describe('private sandbox application provisioner', () => {
       'GetRevision',
       'Release',
       'GetReleaseStatus',
+      'GetRevision',
     ]);
   });
 
@@ -73,7 +81,7 @@ describe('private sandbox application provisioner', () => {
       const result = action === 'ListFunctions'
         ? { Items: [{ Id: 'function-1', Name: 'managed-agents-runtime-test' }], Total: 1 }
         : action === 'GetRevision'
-          ? matchingRevision()
+          ? matchingRevision(1)
           : action === 'GetReleaseStatus'
             ? {
                 Status: 'done',
@@ -93,7 +101,55 @@ describe('private sandbox application provisioner', () => {
       stableRevisionNumber: 1,
       releaseRecordId: 'release-1',
     });
-    expect(actions).toEqual(['ListFunctions', 'GetRevision', 'GetReleaseStatus']);
+    expect(actions).toEqual(['ListFunctions', 'GetReleaseStatus', 'GetRevision']);
+  });
+
+  it('checks every reported inventory page before deciding to create', async () => {
+    const actions: Array<{ action: string; body: Record<string, unknown> }> = [];
+    const api: VefaasProvisioningApi = async (action, body) => {
+      actions.push({ action, body });
+      if (action === 'ListFunctions') {
+        const page = body.PageNumber;
+        return {
+          result: page === 1
+            ? {
+                Items: Array.from({ length: 100 }, (_, index) => ({
+                  Id: `other-${index}`,
+                  Name: `other-${index}`,
+                })),
+                Total: 101,
+              }
+            : {
+                Items: [{ Id: 'function-1', Name: 'managed-agents-runtime-test' }],
+                Total: 101,
+              },
+          requestId: `request-list-${page}`,
+        };
+      }
+      if (action === 'GetRevision') return {
+        result: matchingRevision(1),
+        requestId: 'request-revision',
+      };
+      if (action === 'GetReleaseStatus') return {
+        result: {
+          Status: 'done',
+          StableRevisionNumber: 1,
+          ReleaseRecordId: 'release-1',
+        },
+        requestId: 'request-release-status',
+      };
+      throw new Error(`unexpected mutation ${action}`);
+    };
+
+    await expect(provisionPrivateSandboxApplication(
+      defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
+      api,
+    )).resolves.toMatchObject({ disposition: 'reused', functionId: 'function-1' });
+    expect(actions.slice(0, 2)).toEqual([
+      { action: 'ListFunctions', body: { PageNumber: 1, PageSize: 100 } },
+      { action: 'ListFunctions', body: { PageNumber: 2, PageSize: 100 } },
+    ]);
+    expect(actions.some(({ action }) => action === 'CreateFunction')).toBe(false);
   });
 
   it('fails closed before mutation when an exact-name application differs', async () => {
@@ -108,8 +164,16 @@ describe('private sandbox application provisioner', () => {
         requestId: 'request-list',
       };
       if (action === 'GetRevision') return {
-        result: { ...matchingRevision(), InstanceType: 'nvidia-tesla-l4' },
+        result: { ...matchingRevision(1), InstanceType: 'nvidia-tesla-l4' },
         requestId: 'request-revision',
+      };
+      if (action === 'GetReleaseStatus') return {
+        result: {
+          Status: 'done',
+          StableRevisionNumber: 1,
+          ReleaseRecordId: 'release-1',
+        },
+        requestId: 'request-release-status',
       };
       throw new Error(`unexpected mutation ${action}`);
     };
@@ -118,7 +182,49 @@ describe('private sandbox application provisioner', () => {
       defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
       api,
     )).rejects.toThrow('InstanceType');
-    expect(actions).toEqual(['ListFunctions', 'GetRevision']);
+    expect(actions).toEqual(['ListFunctions', 'GetReleaseStatus', 'GetRevision']);
+  });
+
+  it.each([
+    ['initializer', { InitializerSec: 60 }],
+    ['VPC identifiers', {
+      VpcConfig: {
+        EnableVpc: false,
+        EnableSharedInternetAccess: false,
+        VpcId: 'vpc-unexpected',
+        SubnetIds: [],
+        SecurityGroupIds: [],
+      },
+    }],
+    ['TLS identifiers', {
+      TlsConfig: {
+        EnableLog: false,
+        TlsProjectId: 'project-unexpected',
+        TlsTopicId: '',
+      },
+    }],
+    ['NAS mounts', { NasStorage: { EnableNas: false, NasConfigs: [{}] } }],
+    ['TOS mounts', { TosMountConfig: { EnableTos: false, MountPoints: [{}] } }],
+  ])('rejects an existing application with mismatched %s', async (_case, patch) => {
+    const api: VefaasProvisioningApi = async (action) => ({
+      result: action === 'ListFunctions'
+        ? { Items: [{ Id: 'function-1', Name: 'managed-agents-runtime-test' }], Total: 1 }
+        : action === 'GetReleaseStatus'
+          ? {
+              Status: 'done',
+              StableRevisionNumber: 1,
+              ReleaseRecordId: 'release-1',
+            }
+        : action === 'GetRevision'
+          ? { ...matchingRevision(1), ...patch }
+          : (() => { throw new Error(`unexpected action ${action}`); })(),
+      requestId: `request-${action}`,
+    });
+
+    await expect(provisionPrivateSandboxApplication(
+      defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
+      api,
+    )).rejects.toThrow('mismatch');
   });
 
   it('deletes only its newly created function when draft verification fails', async () => {
@@ -140,7 +246,7 @@ describe('private sandbox application provisioner', () => {
         requestId: 'request-create',
       };
       if (action === 'GetRevision') return {
-        result: { ...matchingRevision(), Id: 'function-created-by-run', Port: 9000 },
+        result: { ...matchingRevision(0), Id: 'function-created-by-run', Port: 9000 },
         requestId: 'request-revision',
       };
       if (action === 'DeleteFunction') {
@@ -173,7 +279,11 @@ describe('private sandbox application provisioner', () => {
         return {
           result: {
             Items: present
-              ? [{ Id: 'function-ambiguous', Name: 'managed-agents-runtime-test' }]
+              ? [{
+                  Id: 'function-ambiguous',
+                  Name: 'managed-agents-runtime-test',
+                  Tags: [{ Key: 'provisioning-attempt', Value: 'attempt-fixture' }],
+                }]
               : [],
             Total: present ? 1 : 0,
           },
@@ -191,6 +301,7 @@ describe('private sandbox application provisioner', () => {
     await expect(provisionPrivateSandboxApplication(
       defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
       api,
+      { attemptId: 'attempt-fixture' },
     )).rejects.toThrow('connection closed');
     expect(actions).toEqual([
       'ListFunctions',
@@ -199,6 +310,35 @@ describe('private sandbox application provisioner', () => {
       'DeleteFunction',
       'ListFunctions',
     ]);
+  });
+
+  it('does not delete an ambiguous exact-name function without the attempt tag', async () => {
+    const actions: string[] = [];
+    let listed = 0;
+    const api: VefaasProvisioningApi = async (action) => {
+      actions.push(action);
+      if (action === 'ListFunctions') {
+        listed += 1;
+        return {
+          result: {
+            Items: listed === 1
+              ? []
+              : [{ Id: 'function-unowned', Name: 'managed-agents-runtime-test' }],
+            Total: listed === 1 ? 0 : 1,
+          },
+          requestId: `request-list-${listed}`,
+        };
+      }
+      if (action === 'CreateFunction') throw new Error('connection closed');
+      throw new Error(`unexpected destructive action ${action}`);
+    };
+
+    await expect(provisionPrivateSandboxApplication(
+      defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
+      api,
+      { attemptId: 'attempt-fixture' },
+    )).rejects.toThrow('not proven disposable');
+    expect(actions).toEqual(['ListFunctions', 'CreateFunction', 'ListFunctions']);
   });
 
   it('deletes an exact idle application and verifies fresh absence', async () => {
@@ -215,7 +355,14 @@ describe('private sandbox application provisioner', () => {
         return {
           result: {
             Items: functionsListed === 1
-              ? [{ Id: 'function-1', Name: 'managed-agents-runtime-test' }]
+              ? [{
+                  Id: 'function-1',
+                  Name: 'managed-agents-runtime-test',
+                  Tags: [
+                    { Key: 'managed-by', Value: 'managed-agents-runtime' },
+                    { Key: 'managed-purpose', Value: 'private-sandbox' },
+                  ],
+                }]
               : [],
             Total: functionsListed === 1 ? 1 : 0,
           },
@@ -245,7 +392,7 @@ describe('private sandbox application provisioner', () => {
   });
 });
 
-function matchingRevision(): Record<string, unknown> {
+function matchingRevision(revisionNumber: number): Record<string, unknown> {
   return {
     Id: 'function-1',
     Name: 'managed-agents-runtime-test',
@@ -260,10 +407,25 @@ function matchingRevision(): Record<string, unknown> {
     MemoryMB: 2048,
     MaxConcurrency: 1,
     RequestTimeout: 900,
+    InitializerSec: 120,
+    ExclusiveMode: false,
+    ProjectName: 'default',
+    Envs: [],
+    Tags: [
+      { Key: 'managed-by', Value: 'managed-agents-runtime' },
+      { Key: 'managed-purpose', Value: 'private-sandbox' },
+    ],
     InstanceType: '',
-    VpcConfig: { EnableVpc: false, EnableSharedInternetAccess: false },
-    TlsConfig: { EnableLog: false },
+    VpcConfig: {
+      EnableVpc: false,
+      EnableSharedInternetAccess: false,
+      VpcId: '',
+      SubnetIds: [],
+      SecurityGroupIds: [],
+    },
+    TlsConfig: { EnableLog: false, TlsProjectId: '', TlsTopicId: '' },
     NasStorage: { EnableNas: false, NasConfigs: [] },
     TosMountConfig: { EnableTos: false, MountPoints: [] },
+    RevisionNumber: revisionNumber,
   };
 }

@@ -166,7 +166,7 @@ export async function signedCallWithMetadata<T = unknown>(
       err?.Code ?? `HTTP${res.status}`,
       err?.Message ?? text.slice(0, 500),
       res.status,
-      parsed.ResponseMetadata?.RequestId,
+      boundedRequestId(parsed.ResponseMetadata?.RequestId) ?? undefined,
     );
   }
   return {
