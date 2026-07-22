@@ -97,6 +97,7 @@ const receipt = reserveEvidenceRecord(evidenceFile, {
   status: 'pending',
   successfulRequestMetadata: [],
 });
+let conformanceStage = 'provider-conformance';
 
 try {
   const evidence = await runSandboxConformance({
@@ -114,6 +115,7 @@ try {
     timeoutMinutes: 10,
     marker: `runtime-${randomUUID()}`,
   });
+  conformanceStage = 'final-inventory';
   const finalInventory = await client.listSandboxes(functionId, {
     pageNumber: 1,
     pageSize: 100,
@@ -125,6 +127,7 @@ try {
   if (inventorySummary.liveInstances !== 0) {
     throw new Error('Runtime sandbox final instance inventory was not empty');
   }
+  conformanceStage = 'request-metadata';
   for (const action of [
     'CreateSandbox',
     'DescribeSandbox',
@@ -136,6 +139,7 @@ try {
       throw new Error(`Runtime sandbox did not preserve ${action} request metadata`);
     }
   }
+  conformanceStage = 'source-verification';
   assertSourceUnchanged();
   const record = {
     ...baseRecord,
@@ -144,6 +148,7 @@ try {
     evidence,
     finalInventory: inventorySummary,
   };
+  conformanceStage = 'evidence-commit';
   receipt.commit(record);
   process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
 } catch (error) {
@@ -169,6 +174,7 @@ try {
       code: error instanceof BytePlusApiError ? error.code : 'RuntimeConformanceFailed',
       requestId: error instanceof BytePlusApiError ? error.requestId : null,
       reason: safeRuntimeFailureReason(error),
+      stage: conformanceStage,
       sourceUnchanged: readGit(['rev-parse', 'HEAD']) === source.commit
         && !readGit(['status', '--porcelain']),
     },
