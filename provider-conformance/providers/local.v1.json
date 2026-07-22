@@ -4,7 +4,7 @@
   "profileId": "reference",
   "displayName": "Local reference providers",
   "providerClass": "local",
-  "releaseVersion": "0.1.0-alpha.1",
+  "releaseVersion": "0.1.0-alpha.2",
   "capabilities": [
     {
       "contract": "model.chat/v1",

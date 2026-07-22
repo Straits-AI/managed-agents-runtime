@@ -3,7 +3,7 @@
 **Contract schema:** `provider-contracts/v1`  
 **Manifest schema:** `provider-manifest/v1`  
 **Deployment schema:** `provider-deployment/v1`  
-**Release:** `0.1.0-alpha.1`
+**Release:** `0.1.0-alpha.2`
 
 This is the runtime's public provider-selection boundary. It records exact
 capabilities and assurance without treating a cloud brand, historical demo, or

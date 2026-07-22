@@ -4,7 +4,7 @@
   "profileId": "public-s3-read",
   "displayName": "AWS public S3 read-only subset",
   "providerClass": "cloud",
-  "releaseVersion": "0.1.0-alpha.1",
+  "releaseVersion": "0.1.0-alpha.2",
   "capabilities": [
     {
       "contract": "model.chat/v1",

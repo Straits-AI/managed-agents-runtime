@@ -106,7 +106,8 @@ The default reporting window now matches admission's UTC-day boundary.
 The candidate adds a versioned non-root OCI image, real-container
 migration/process/probe smoke testing, CycloneDX plus registry attestation
 evidence, and an explicit migration/application rollback runbook. The package,
-changelog, image label, and proposed tag agree on `v0.1.0-alpha.1`. Closure still
+changelog, image label, and proposed tag agree on `v0.1.0-alpha.2`. The earlier
+`v0.1.0-alpha.1` candidate tag remains immutable but was never published. Closure still
 requires the PR and exact post-merge `main` gates, current live provider evidence
 for every release claim, the immutable registry digest, and the final tag.
 
