@@ -59,6 +59,30 @@ const forkBody = z.object({
   tokenBudget: z.number().int().positive().optional(),
 });
 
+const usageWindowQuery = z.object({
+  since: z.string().datetime({ offset: true }).optional(),
+  until: z.string().datetime({ offset: true }).optional(),
+}).superRefine((window, ctx) => {
+  if (window.until !== undefined && window.since === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['until'],
+      message: 'until requires since',
+    });
+  }
+  if (
+    window.since !== undefined &&
+    window.until !== undefined &&
+    new Date(window.since) >= new Date(window.until)
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['until'],
+      message: 'usage window must satisfy since < until',
+    });
+  }
+});
+
 export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
   const { pool } = deps;
   const price: ModelPrice = {
@@ -101,9 +125,10 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
   });
 
   // Tenant-wide usage rollup (memo §20 /usage). Defaults to the current UTC day;
-  // pass ?since=ISO to widen the window.
-  app.get<{ Querystring: { since?: string } }>('/v1/usage', async (req) => {
-    return tenantUsage(pool, req.tenantId, price, req.query.since);
+  // pass ?since=ISO&until=ISO for an explicit half-open event-time window.
+  app.get<{ Querystring: { since?: string; until?: string } }>('/v1/usage', async (req) => {
+    const window = usageWindowQuery.parse(req.query);
+    return tenantUsage(pool, req.tenantId, price, window.since, window.until);
   });
 
   // Per-run usage + estimated model cost (memo §20). Tenant-scoped.

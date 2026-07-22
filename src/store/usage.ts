@@ -67,33 +67,58 @@ export interface TenantUsage {
   totalTokens: number;
   estimatedCostUsd: number;
   since: string;
+  until: string;
 }
 
 /**
- * Tenant-wide usage since `sinceIso` (default: start of the current UTC day).
- * Aggregates the input/output token split from the ledger across the tenant's
- * runs so cost can be priced accurately (not a hot path).
+ * Tenant-wide usage in the half-open `[since, until)` window. Token attribution
+ * uses immutable ModelInvocationCompleted event time; the independent run count
+ * describes Runs created in the same window. The default is the current UTC day,
+ * matching daily admission. A caller-supplied `since` without `until` preserves
+ * the historical `since`-through-now behavior.
  */
 export async function tenantUsage(
   pool: Pool,
   tenantId: string,
   price: ModelPrice,
   sinceIso?: string,
+  untilIso?: string,
 ): Promise<TenantUsage> {
-  const since = sinceIso ?? new Date(new Date().toISOString().slice(0, 10)).toISOString();
+  const now = new Date();
+  const utcDayStart = new Date(now.toISOString().slice(0, 10));
+  const sinceDate = sinceIso === undefined ? utcDayStart : new Date(sinceIso);
+  const untilDate = untilIso === undefined
+    ? sinceIso === undefined
+      ? new Date(utcDayStart.getTime() + 24 * 60 * 60 * 1_000)
+      : now
+    : new Date(untilIso);
+  if (
+    !Number.isFinite(sinceDate.getTime()) ||
+    !Number.isFinite(untilDate.getTime()) ||
+    sinceDate >= untilDate
+  ) {
+    throw new Error('usage window must be valid and satisfy since < until');
+  }
+  const since = sinceDate.toISOString();
+  const until = untilDate.toISOString();
   const { rows } = await pool.query<{
     runs: string;
     input_tokens: string;
     output_tokens: string;
   }>(
     `SELECT
-       (SELECT COUNT(*) FROM runs r WHERE r.tenant_id = $1 AND r.created_at >= $2) AS runs,
+       (SELECT COUNT(*) FROM runs counted_run
+        WHERE counted_run.tenant_id = $1
+          AND counted_run.created_at >= $2
+          AND counted_run.created_at < $3) AS runs,
        COALESCE(SUM((e.payload->'usage'->>'inputTokens')::bigint), 0)  AS input_tokens,
        COALESCE(SUM((e.payload->'usage'->>'outputTokens')::bigint), 0) AS output_tokens
      FROM runs r
      JOIN run_events e ON e.run_id = r.id AND e.type = 'ModelInvocationCompleted'
-     WHERE r.tenant_id = $1 AND r.created_at >= $2`,
-    [tenantId, since],
+     WHERE r.tenant_id = $1
+       AND e.created_at >= $2
+       AND e.created_at < $3`,
+    [tenantId, since, until],
   );
   const inputTokens = Number(rows[0]!.input_tokens);
   const outputTokens = Number(rows[0]!.output_tokens);
@@ -105,5 +130,6 @@ export async function tenantUsage(
     totalTokens: inputTokens + outputTokens,
     estimatedCostUsd: estimateModelCostUsd(inputTokens, outputTokens, price),
     since,
+    until,
   };
 }

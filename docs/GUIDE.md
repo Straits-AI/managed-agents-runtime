@@ -254,6 +254,15 @@ Tenants using parallel delegation should configure enough concurrent slots and
 provide explicit per-run token budgets instead of letting one run reserve all
 remaining daily capacity.
 
+Tenant token reporting uses the immutable `ModelInvocationCompleted` event
+timestamp, independently of when its Run was created. `GET /v1/usage` defaults
+to the same half-open UTC-day boundary used by admission: `[00:00, next 00:00)`.
+Callers may select an explicit half-open window with `?since=<ISO>&until=<ISO>`.
+`until` is accepted only together with `since`, and invalid or non-increasing
+bounds return HTTP 400. A `since`-only query remains compatible through query time.
+The returned `runs` count means Runs created in that window, while token and cost
+fields mean model invocations completed in that window.
+
 ## 5. Credential broker (secrets in tool calls, never in the model)
 
 Agents call external systems without the model ever seeing the secret: the broker
