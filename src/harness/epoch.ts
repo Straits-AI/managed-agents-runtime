@@ -57,6 +57,8 @@ import {
 } from '../store/modelUsage.js';
 import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
 import { invocationAbortFence } from './invocationAbort.js';
+import { createArtifact } from '../store/artifacts.js';
+import { stageArtifactOutputs } from './artifacts.js';
 
 export interface EpochProviders {
   model: ModelProvider;
@@ -533,6 +535,7 @@ export function createRealEpoch(providers: EpochProviders) {
               outcome.summary,
               outcome.artifacts,
               version.verifier_policy as VerifierPolicy,
+              step,
             );
             if (result === 'completed') {
               await cleanup();
@@ -595,6 +598,7 @@ async function finishRun(
   summary: string,
   artifacts: string[],
   policy: VerifierPolicy,
+  producerStep: number,
 ): Promise<'completed' | string[]> {
   const { pool, run, attempt } = ctx;
 
@@ -628,15 +632,22 @@ async function finishRun(
     return result.failures;
   }
 
-  // Upload declared artifacts to TOS for durable retrieval.
-  const artifactKeys: Record<string, string> = {};
-  for (const path of artifacts) {
-    const abs = path.startsWith('/') ? path : `${WORKSPACE_DIR}/${path}`;
-    const content = await ctx.providers.sandbox.readFile(ctx.sandbox, abs);
-    const key = `runs/${run.id}/artifacts/${path.replace(/^\//, '')}`;
-    await ctx.providers.objectStore.put(key, Buffer.from(content));
-    artifactKeys[path] = key;
-  }
+  const verificationPassedEventSeq = await withTransaction(pool, (tx) =>
+    appendEvent(tx, run.id, {
+      type: 'VerificationPassed',
+      payload: { artifacts },
+    }, { attemptId: attempt.id }),
+  );
+
+  const stagedArtifacts = await stageArtifactOutputs({
+    runId: run.id,
+    attemptId: attempt.id,
+    producerStep,
+    verificationPassedEventSeq: verificationPassedEventSeq.toString(),
+    sandbox: ctx.sandbox,
+    sandboxProvider: ctx.providers.sandbox,
+    objectStore: ctx.providers.objectStore,
+  }, artifacts);
   // Final workspace snapshot so the completed state is durable.
   await ctx.workspaces.checkpoint(ctx.sandbox, {
     runId: run.id,
@@ -644,17 +655,18 @@ async function finishRun(
     workspaceId: run.workspace_id!,
   });
 
-  await withTransaction(pool, (tx) =>
-    transitionRun(tx, run.id, {
+  await withTransaction(pool, async (tx) => {
+    for (const artifact of stagedArtifacts) await createArtifact(tx, artifact);
+    await transitionRun(tx, run.id, {
       expectFrom: ['VERIFYING'],
       to: 'COMPLETED',
       event: {
         type: 'RunCompleted',
-        payload: { summary, artifacts: artifactKeys },
+        payload: { summary, artifacts: stagedArtifacts.map((artifact) => artifact.id) },
       },
       attemptId: attempt.id,
-    }),
-  );
+    });
+  });
   return 'completed';
 }
 

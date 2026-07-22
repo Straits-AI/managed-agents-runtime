@@ -7,6 +7,7 @@ export type IdPrefix =
   | 'att'  // run attempt
   | 'ws'   // workspace
   | 'rev'  // workspace revision
+  | 'art'  // immutable runtime artifact
   | 'ckpt' // checkpoint
   | 'rcpt' // tool receipt
   | 'apr'  // approval
