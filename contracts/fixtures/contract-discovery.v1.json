@@ -12,14 +12,14 @@
         "deprecatedAt": null,
         "sunsetAt": null,
         "replacement": "kertas.runtime/v1alpha1",
-        "features": { "managedSession": false }
+        "features": { "managedSession": false, "inboundEvents": false }
       }
     ],
     "plannedContracts": [
       {
         "id": "kertas.runtime/v1alpha1",
         "lifecycle": "not_available",
-        "features": { "managedSession": false }
+        "features": { "managedSession": false, "inboundEvents": false }
       }
     ],
     "deprecationPolicy": {
@@ -40,7 +40,7 @@
         "deprecatedAt": "2026-10-01T00:00:00Z",
         "sunsetAt": "2027-01-01T00:00:00Z",
         "replacement": "kertas.runtime/v1alpha1",
-        "features": { "managedSession": false }
+        "features": { "managedSession": false, "inboundEvents": false }
       },
       {
         "id": "kertas.runtime/v1alpha1",
@@ -51,7 +51,7 @@
         "deprecatedAt": null,
         "sunsetAt": null,
         "replacement": null,
-        "features": { "managedSession": true }
+        "features": { "managedSession": true, "inboundEvents": true }
       }
     ],
     "plannedContracts": [],
@@ -73,7 +73,7 @@
         "deprecatedAt": null,
         "sunsetAt": null,
         "replacement": null,
-        "features": { "managedSession": false }
+        "features": { "managedSession": false, "inboundEvents": false }
       }
     ],
     "plannedContracts": [],

@@ -6,6 +6,7 @@ export type IdPrefix =
   | 'run'
   | 'ses'  // managed session
   | 'scmd' // managed-session command receipt
+  | 'sevt' // authenticated ManagedSession event receipt
   | 'att'  // run attempt
   | 'ws'   // workspace
   | 'rev'  // workspace revision

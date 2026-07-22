@@ -83,10 +83,10 @@ describe('kertas.runtime/v1alpha1 ManagedSession API', () => {
       headers: bearer(keyA),
     });
     expect(discovery.statusCode).toBe(200);
-    expect(discovery.json().plannedContracts).toContainEqual(expect.objectContaining({
+    expect(discovery.json().contracts).toContainEqual(expect.objectContaining({
       id: 'kertas.runtime/v1alpha1',
-      lifecycle: 'not_available',
-      features: { managedSession: true, inboundEvents: false },
+      lifecycle: 'supported',
+      features: { managedSession: true, inboundEvents: true },
     }));
 
     const contractResponse = await app.inject({
@@ -96,10 +96,10 @@ describe('kertas.runtime/v1alpha1 ManagedSession API', () => {
     });
     expect(contractResponse.statusCode).toBe(200);
     const contract = contractResponse.json();
-    expect(contract.status).toBe('planned');
+    expect(contract.status).toBe('active');
     expect(contract.semantics).toMatchObject({
       topLevelResource: 'ManagedSession',
-      contractCompleteness: 'partial',
+      contractCompleteness: 'complete',
       projectCorrelationIsAuthorization: false,
       runCompletionImpliesKertasOutcome: false,
       runCompletionImpliesKertasRelease: false,

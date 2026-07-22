@@ -706,7 +706,11 @@ async function waitForSignal(ctx: ToolContext, name: string): Promise<ToolOutcom
       to: 'WAITING_SIGNAL',
       event: { type: 'SignalReceived', payload: { waiting_for: name } },
       attemptId: ctx.attempt.id,
-      patch: { awaited_signal: name },
+      patch: {
+        awaited_signal: name,
+        awaited_signal_correlation_id: null,
+        awaited_signal_schema: { type: 'any' },
+      },
     }),
   );
   return { kind: 'suspend_signal', signalName: name };

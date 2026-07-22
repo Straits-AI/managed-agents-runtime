@@ -54,6 +54,7 @@ describe('standalone Kertas compatibility client', () => {
       contractId: 'run-as-session/v1',
       mode: 'compatibility',
       managedSession: false,
+      inboundEvents: false,
       lifecycle: 'supported',
       deprecatedAt: null,
       sunsetAt: null,
@@ -64,14 +65,25 @@ describe('standalone Kertas compatibility client', () => {
     expect(selectCompatibleContract(fixtures.currentOnly)).toMatchObject({
       contractId: 'run-as-session/v1',
       managedSession: false,
+      inboundEvents: false,
     });
     expect(selectCompatibleContract(fixtures.managedSessionAvailable)).toMatchObject({
       contractId: 'kertas.runtime/v1alpha1',
       managedSession: true,
+      inboundEvents: true,
     });
     expect(() => selectCompatibleContract(fixtures.unsupportedOnly)).toThrow(
       RuntimeContractCompatibilityError,
     );
+    const missingEventFeature = structuredClone(fixtures.managedSessionAvailable) as {
+      contracts: Array<{ features: Record<string, unknown> }>;
+    };
+    delete missingEventFeature.contracts[1]!.features.inboundEvents;
+    expect(selectCompatibleContract(missingEventFeature)).toMatchObject({
+      contractId: 'run-as-session/v1',
+      managedSession: false,
+      inboundEvents: false,
+    });
   });
 
   it('contains no imports of runtime stores, migrations, or internal domain modules', async () => {

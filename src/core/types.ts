@@ -106,10 +106,28 @@ export interface RunRow {
   token_budget: string | null;
   tokens_used: string;
   awaited_signal: string | null;
+  awaited_signal_correlation_id: string | null;
+  awaited_signal_schema: SignalPayloadSchema | null;
   scheduled_for: Date | null;
   debug_fault_points: string[];
   created_at: Date;
   updated_at: Date;
+}
+
+export type SignalPayloadPrimitiveType =
+  | 'string'
+  | 'number'
+  | 'integer'
+  | 'boolean'
+  | 'object'
+  | 'array'
+  | 'null';
+
+export interface SignalPayloadSchema {
+  type: 'any' | 'object';
+  required?: string[];
+  properties?: Record<string, { type: SignalPayloadPrimitiveType }>;
+  additionalProperties?: boolean;
 }
 
 export interface RunEventRow {

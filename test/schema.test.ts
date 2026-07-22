@@ -202,6 +202,23 @@ describe('schema', () => {
       [newId('ses'), tenantId, avId],
     )).rejects.toThrow(/agent version must belong to the same tenant/);
   });
+
+  it('enforces tenant lineage and immutable payloads for session event receipts', async () => {
+    const { rows: triggers } = await db.pool.query<{ tgname: string }>(
+      `SELECT tgname FROM pg_trigger
+       WHERE tgrelid = 'managed_session_events'::regclass AND NOT tgisinternal`,
+    );
+    expect(triggers.map((trigger) => trigger.tgname)).toContain(
+      'managed_session_events_receipt_guard',
+    );
+    const { rows: constraints } = await db.pool.query<{ conname: string }>(
+      `SELECT conname FROM pg_constraint
+       WHERE conrelid = 'managed_session_events'::regclass`,
+    );
+    expect(constraints.map((constraint) => constraint.conname)).toContain(
+      'managed_session_events_session_tenant_fk',
+    );
+  });
 });
 
 describe('tenant-lineage migration', () => {
@@ -313,6 +330,40 @@ describe('managed-session migration', () => {
       const { rows: sessions } = await legacy.pool.query('SELECT id FROM managed_sessions');
       expect(runs[0]?.managed_session_id).toBeNull();
       expect(sessions).toHaveLength(0);
+    } finally {
+      await legacy.drop();
+    }
+  });
+
+  it('adds event ordering state without inventing events for existing sessions', async () => {
+    const legacy = await createTestDb({ through: '0019_managed_sessions.sql' });
+    try {
+      await legacy.pool.query(
+        `INSERT INTO agent_definitions (id, name)
+         VALUES ('ad_event_upgrade', 'event-upgrade')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+         VALUES ('av_event_upgrade', 'ad_event_upgrade', 1, 'x', '{}')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO managed_sessions
+           (id, tenant_id, principal_id, agent_version_id, objective)
+         VALUES ('ses_event_upgrade', 'default', 'principal',
+                 'av_event_upgrade', 'historical session')`,
+      );
+
+      await expect(legacy.applyRemainingMigrations()).resolves.toContain(
+        '0020_managed_session_events.sql',
+      );
+      const { rows: sessions } = await legacy.pool.query<{ received_event_seq: string }>(
+        `SELECT received_event_seq FROM managed_sessions WHERE id = 'ses_event_upgrade'`,
+      );
+      const { rows: events } = await legacy.pool.query(
+        `SELECT id FROM managed_session_events WHERE session_id = 'ses_event_upgrade'`,
+      );
+      expect(sessions[0]?.received_event_seq).toBe('0');
+      expect(events).toHaveLength(0);
     } finally {
       await legacy.drop();
     }
