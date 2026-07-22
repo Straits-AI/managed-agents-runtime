@@ -46,6 +46,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Check internal documentation links
+        run: npm run docs:check
       - name: Run controlled multi-tenant alpha gate
         run: npm run release:gate -- --evidence-dir release-evidence
       - name: Verify release version contract
@@ -59,6 +61,8 @@ jobs:
           .
       - name: Smoke controlled-alpha image
         run: npm run container:smoke
+      - name: Smoke documented quickstart
+        run: RUNTIME_IMAGE="${CONTAINER_IMAGE}" npm run quickstart:smoke
       - name: Record image and SBOM evidence
         run: npm run container:evidence
       - name: Retain machine-readable gate evidence

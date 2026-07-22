@@ -4,6 +4,8 @@ A practical guide to running the platform, driving agents through the API, and
 operating it in production. For the architecture overview see the
 [README](../README.md); for cost see [COST.md](./COST.md); for worked scenarios
 see [COURSE-MATERIAL.md](./COURSE-MATERIAL.md) and [articles/](./articles/).
+For a Docker-only introduction that uses the public image, start with the
+[operational tutorials](./tutorials/README.md).
 
 > **Built with the [byteplus-cloud skill](https://github.com/Straits-AI/byteplus-cloud-skill).**
 > BytePlus operations follow that skill's operating contract. Only capabilities

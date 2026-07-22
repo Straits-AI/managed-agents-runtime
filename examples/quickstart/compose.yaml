@@ -1,0 +1,103 @@
+name: managed-agents-quickstart
+
+x-runtime: &runtime
+  image: ${RUNTIME_IMAGE:-ghcr.io/straits-ai/managed-agents-runtime@sha256:07dcb446d811fa51fb30a7746f55ed72becbbb8b5ad41dfafc6ec8cff9af2440}
+  platform: linux/amd64
+  env_file:
+    - ./runtime.env.example
+  networks:
+    - runtime
+
+services:
+  postgres:
+    image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    environment:
+      POSTGRES_DB: managed_agents
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_USER: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d managed_agents"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - runtime
+
+  migrate:
+    <<: *runtime
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  object-store-init:
+    image: node:22.23.0-bookworm-slim@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /state/objects && chown -R 1000:1000 /state"]
+    volumes:
+      - object_data:/state
+    networks:
+      - runtime
+
+  api:
+    <<: *runtime
+    command: ["api"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      object-store-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - object_data:/var/lib/managed-agents
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - -e
+        - "const r=await fetch('http://127.0.0.1:8080/readyz');if(!r.ok)process.exit(1)"
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  worker:
+    <<: *runtime
+    command: ["worker"]
+    environment:
+      WORKER_EPOCH: scripted
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      object-store-init:
+        condition: service_completed_successfully
+    volumes:
+      - object_data:/var/lib/managed-agents
+
+  first-run:
+    image: node:22.23.0-bookworm-slim@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2
+    working_dir: /quickstart
+    command: ["node", "quickstart-client.mjs", "first-run"]
+    env_file:
+      - ./runtime.env.example
+    environment:
+      API_BASE_URL: http://api:8080
+    volumes:
+      - ./quickstart-client.mjs:/quickstart/quickstart-client.mjs:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - runtime
+    profiles:
+      - tools
+
+volumes:
+  object_data:
+  postgres_data:
+
+networks:
+  runtime:

@@ -43,6 +43,12 @@ public package to be made private again. Rerun the same tag workflow after that
 one-time bootstrap. Do not create a GitHub release, promote version tags, or
 accept the release until the isolated anonymous pull passes.
 
+That one-time visibility bootstrap is complete for `v0.1.0-alpha.2`. On
+2026-07-22 the exact release digest passed anonymous registry-token exchange,
+digest-addressed manifest verification, a credential-free `linux/amd64` pull,
+the container release contract, and standalone Kertas runtime conformance.
+Operators do not need GitHub credentials to pull this release.
+
 Always deploy by digest after resolving the tag:
 
 ```bash
