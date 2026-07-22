@@ -1,5 +1,9 @@
 import type { EpochContext } from './worker.js';
-import type { EpochExitReason, SemanticAction } from '../core/types.js';
+import type {
+  EpochExitReason,
+  SemanticAction,
+  SignalPayloadSchema,
+} from '../core/types.js';
 import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { insertCheckpoint, latestCheckpoint } from '../store/checkpoints.js';
@@ -26,7 +30,12 @@ export type ScriptOp =
   | { op: 'sleep'; ms: number }
   | { op: 'checkpoint' }
   | { op: 'requestApproval'; action: SemanticAction }
-  | { op: 'waitSignal'; name: string }
+  | {
+      op: 'waitSignal';
+      name: string;
+      correlationId?: string;
+      payloadSchema?: SignalPayloadSchema;
+    }
   | { op: 'delegate'; goals: string[]; childScript?: ScriptOp[] }
   | { op: 'fail'; once?: boolean }
   | { op: 'complete' };
@@ -218,7 +227,11 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
             to: 'WAITING_SIGNAL',
             event: { type: 'SignalReceived', payload: { waiting_for: op.name } },
             attemptId: attempt.id,
-            patch: { awaited_signal: op.name },
+            patch: {
+              awaited_signal: op.name,
+              awaited_signal_correlation_id: op.correlationId ?? null,
+              awaited_signal_schema: op.payloadSchema ?? { type: 'any' },
+            },
           });
         });
         return 'suspended_for_signal';

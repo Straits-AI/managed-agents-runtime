@@ -1,10 +1,10 @@
 {
   "apiVersion": "kertas.runtime/contracts/v1",
   "id": "kertas.runtime/v1alpha1",
-  "status": "planned",
+  "status": "active",
   "semantics": {
     "topLevelResource": "ManagedSession",
-    "contractCompleteness": "partial",
+    "contractCompleteness": "complete",
     "projectCorrelationIsAuthorization": false,
     "runCompletionImpliesKertasOutcome": false,
     "runCompletionImpliesKertasRelease": false
@@ -13,7 +13,9 @@
     "createSession": "POST /v1alpha1/sessions",
     "getSession": "GET /v1alpha1/sessions/{sessionId}",
     "listSessionRuns": "GET /v1alpha1/sessions/{sessionId}/runs",
-    "cancelSession": "POST /v1alpha1/sessions/{sessionId}/cancel"
+    "cancelSession": "POST /v1alpha1/sessions/{sessionId}/cancel",
+    "receiveSessionEvent": "POST /v1alpha1/sessions/{sessionId}/events",
+    "listSessionEvents": "GET /v1alpha1/sessions/{sessionId}/events"
   },
   "schemas": {
     "sessionCreate": {
@@ -121,6 +123,98 @@
       "additionalProperties": false,
       "properties": {
         "reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
+      }
+    },
+    "sessionEventCreate": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/kertas.runtime/v1alpha1/session-event-create",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "eventId", "type", "occurredAt"],
+      "properties": {
+        "apiVersion": { "const": "kertas.runtime/v1alpha1" },
+        "eventId": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9._:-]+$" },
+        "type": { "enum": ["kertas.signal.received", "kertas.objective.requested", "kertas.feedback.received"] },
+        "occurredAt": { "type": "string", "format": "date-time" },
+        "sourceSequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "subject": {
+          "type": "object", "additionalProperties": false, "required": ["type", "ref"],
+          "properties": {
+            "type": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "ref": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        },
+        "data": { "type": "object", "additionalProperties": true },
+        "inputSnapshotRefs": {
+          "type": "array", "maxItems": 16,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["snapshotId", "digest", "sizeBytes", "formatVersion"],
+            "properties": {
+              "snapshotId": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+              "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+              "sizeBytes": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+              "formatVersion": { "type": "string", "minLength": 1, "maxLength": 100 }
+            }
+          }
+        },
+        "correlationId": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "sessionEventResource": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/kertas.runtime/v1alpha1/session-event-resource",
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "apiVersion", "kind", "id", "sessionId", "eventId", "source",
+        "receivedSequence", "type", "occurredAt", "subject", "data",
+        "inputSnapshotRefs", "correlationId", "dispatchClass", "status",
+        "statusReason", "runId", "receivedAt", "consumedAt"
+      ],
+      "properties": {
+        "apiVersion": { "const": "kertas.runtime/v1alpha1" },
+        "kind": { "const": "ManagedSessionEvent" },
+        "id": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "eventId": { "type": "string", "minLength": 1 },
+        "source": {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "id", "sequence"],
+          "properties": {
+            "type": { "const": "authenticated-principal" },
+            "id": { "type": "string", "minLength": 1 },
+            "sequence": { "type": ["string", "null"], "pattern": "^[0-9]+$" }
+          }
+        },
+        "receivedSequence": { "type": "integer", "minimum": 1 },
+        "type": { "enum": ["kertas.signal.received", "kertas.objective.requested", "kertas.feedback.received"] },
+        "occurredAt": { "type": "string", "format": "date-time" },
+        "subject": { "type": ["object", "null"], "additionalProperties": true },
+        "data": { "type": "object", "additionalProperties": true },
+        "inputSnapshotRefs": { "type": "array" },
+        "correlationId": { "type": ["string", "null"] },
+        "dispatchClass": { "enum": ["current-run", "future-run"] },
+        "status": { "enum": ["PENDING", "CONSUMED", "DISPATCHED", "STALE"] },
+        "statusReason": { "type": ["string", "null"] },
+        "runId": { "type": ["string", "null"] },
+        "receivedAt": { "type": "string", "format": "date-time" },
+        "consumedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "sessionEventList": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/kertas.runtime/v1alpha1/session-event-list",
+      "type": "object", "additionalProperties": false,
+      "required": ["apiVersion", "kind", "sessionId", "events", "nextCursor"],
+      "properties": {
+        "apiVersion": { "const": "kertas.runtime/v1alpha1" },
+        "kind": { "const": "ManagedSessionEventList" },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "nextCursor": { "type": ["string", "null"], "pattern": "^[0-9]+$" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "https://managed-agents-runtime.invalid/contracts/kertas.runtime/v1alpha1/session-event-resource" }
+        }
       }
     }
   }

@@ -57,8 +57,11 @@ export function loadManagedSessionContract(
   return loadContract(
     'managed-session.v1alpha1.json',
     'kertas.runtime/v1alpha1',
-    'planned',
-    ['sessionCreate', 'sessionResource', 'sessionRunList', 'sessionCancel'],
+    'active',
+    [
+      'sessionCreate', 'sessionResource', 'sessionRunList', 'sessionCancel',
+      'sessionEventCreate', 'sessionEventResource', 'sessionEventList',
+    ],
     contractsRoot,
   );
 }
@@ -77,16 +80,21 @@ export function runtimeContractCatalog() {
         deprecatedAt: null,
         sunsetAt: null,
         replacement: 'kertas.runtime/v1alpha1',
-        features: { managedSession: false },
+        features: { managedSession: false, inboundEvents: false },
       },
-    ],
-    plannedContracts: [
       {
         id: 'kertas.runtime/v1alpha1',
-        lifecycle: 'not_available' as const,
-        features: { managedSession: true, inboundEvents: false },
+        status: 'active' as const,
+        lifecycle: 'supported' as const,
+        href: '/v1/contracts/kertas.runtime/v1alpha1',
+        introducedAt: '2026-07-22',
+        deprecatedAt: null,
+        sunsetAt: null,
+        replacement: null,
+        features: { managedSession: true, inboundEvents: true },
       },
     ],
+    plannedContracts: [],
     deprecationPolicy: {
       minimumNoticeDays: 90,
       compatibilityModeRemoval: 'explicit_sunset_only' as const,

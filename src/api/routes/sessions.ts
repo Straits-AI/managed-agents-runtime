@@ -11,6 +11,13 @@ import {
   SessionIdempotencyConflictError,
   type ManagedSessionRow,
 } from '../../store/sessions.js';
+import {
+  listManagedSessionEvents,
+  receiveManagedSessionEvent,
+  SessionEventConflictError,
+  SessionEventDeliveryError,
+  type ManagedSessionEventRow,
+} from '../../store/sessionEvents.js';
 
 const createSessionBody = z.object({
   agentVersionId: z.string().min(1),
@@ -30,7 +37,48 @@ const cancelSessionBody = z.object({
   reason: z.string().min(1).max(1_000).default('user_requested'),
 }).strict();
 
-async function withCancellationRetry<T>(operation: () => Promise<T>): Promise<T> {
+const snapshotReference = z.object({
+  snapshotId: z.string().min(1).max(500).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  sizeBytes: z.number().int().nonnegative().max(1_000_000_000),
+  formatVersion: z.string().min(1).max(100),
+}).strict();
+
+const sessionEventBody = z.object({
+  apiVersion: z.literal('kertas.runtime/v1alpha1'),
+  eventId: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/),
+  type: z.enum([
+    'kertas.signal.received',
+    'kertas.objective.requested',
+    'kertas.feedback.received',
+  ]),
+  occurredAt: z.string().datetime({ offset: true }),
+  sourceSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  subject: z.object({
+    type: z.string().min(1).max(100),
+    ref: z.string().min(1).max(1_000),
+  }).strict().optional(),
+  data: z.record(z.string(), z.unknown()).default({}),
+  inputSnapshotRefs: z.array(snapshotReference).max(16).default([]),
+  correlationId: z.string().min(1).max(500).optional(),
+}).strict().superRefine((body, context) => {
+  if (Buffer.byteLength(JSON.stringify(body.data)) > 65_536) {
+    context.addIssue({ code: 'custom', path: ['data'], message: 'data exceeds 65536 bytes' });
+  }
+  if (body.type === 'kertas.signal.received' && typeof body.data.name !== 'string') {
+    context.addIssue({ code: 'custom', path: ['data', 'name'], message: 'signal name is required' });
+  }
+});
+
+const sessionEventListQuery = z.object({
+  after: z.string().max(19)
+    .refine((value) => /^[0-9]+$/.test(value)
+      && BigInt(value) <= 9_223_372_036_854_775_807n)
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+}).strict();
+
+async function withContentionRetry<T>(operation: () => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await operation();
@@ -63,6 +111,30 @@ function sessionResource(session: ManagedSessionRow) {
     currentTopLevelRunId: session.current_top_level_run_id,
     createdAt: session.created_at,
     updatedAt: session.updated_at,
+  };
+}
+
+function sessionEventResource(event: ManagedSessionEventRow) {
+  return {
+    apiVersion: 'kertas.runtime/v1alpha1',
+    kind: 'ManagedSessionEvent',
+    id: event.id,
+    sessionId: event.session_id,
+    eventId: event.source_event_id,
+    source: { type: event.source_type, id: event.source_id, sequence: event.source_sequence },
+    receivedSequence: Number(event.received_sequence),
+    type: event.type,
+    occurredAt: event.occurred_at,
+    subject: event.subject,
+    data: event.data,
+    inputSnapshotRefs: event.input_snapshot_refs,
+    correlationId: event.correlation_id,
+    dispatchClass: event.dispatch_class,
+    status: event.status,
+    statusReason: event.status_reason,
+    runId: event.run_id,
+    receivedAt: event.created_at,
+    consumedAt: event.consumed_at,
   };
 }
 
@@ -114,7 +186,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
       if (!key) return reply.code(400).send({ error: 'idempotency_key_required' });
       const body = cancelSessionBody.parse(req.body ?? {});
       try {
-        const result = await withCancellationRetry(() =>
+        const result = await withContentionRetry(() =>
           withTransaction(deps.pool, (tx) =>
             cancelManagedSession(tx, {
               tenantId: req.tenantId,
@@ -133,6 +205,65 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
         }
         throw error;
       }
+    },
+  );
+
+  app.post<{ Params: { sessionId: string } }>(
+    '/v1alpha1/sessions/:sessionId/events',
+    async (req, reply) => {
+      const body = sessionEventBody.parse(req.body);
+      try {
+        const result = await withContentionRetry(() =>
+          withTransaction(deps.pool, (tx) => receiveManagedSessionEvent(tx, {
+            tenantId: req.tenantId,
+            sessionId: req.params.sessionId,
+            sourceType: 'authenticated-principal',
+            sourceId: req.principalId,
+            sourceEventId: body.eventId,
+            sourceSequence: body.sourceSequence,
+            apiVersion: body.apiVersion,
+            type: body.type,
+            occurredAt: body.occurredAt,
+            subject: body.subject,
+            data: body.data,
+            inputSnapshotRefs: body.inputSnapshotRefs,
+            correlationId: body.correlationId,
+          })),
+        );
+        if (!result) return reply.code(404).send({ error: 'session_not_found' });
+        return reply.code(result.replayed ? 200 : 201).send(sessionEventResource(result.event));
+      } catch (error) {
+        if (error instanceof SessionEventConflictError) {
+          return reply.code(409).send({ error: 'event_conflict' });
+        }
+        if (error instanceof SessionEventDeliveryError) {
+          return reply.code(409).send({ error: 'event_not_deliverable', reason: error.reason });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.get<{
+    Params: { sessionId: string };
+    Querystring: { after?: string; limit?: string };
+  }>(
+    '/v1alpha1/sessions/:sessionId/events',
+    async (req, reply) => {
+      const session = await getManagedSession(deps.pool, req.params.sessionId, req.tenantId);
+      if (!session) return reply.code(404).send({ error: 'session_not_found' });
+      const query = sessionEventListQuery.parse(req.query);
+      const result = await listManagedSessionEvents(deps.pool, session.id, req.tenantId, {
+        afterReceivedSequence: query.after,
+        limit: query.limit,
+      });
+      return {
+        apiVersion: 'kertas.runtime/v1alpha1',
+        kind: 'ManagedSessionEventList',
+        sessionId: session.id,
+        events: result.events.map(sessionEventResource),
+        nextCursor: result.nextCursor,
+      };
     },
   );
 

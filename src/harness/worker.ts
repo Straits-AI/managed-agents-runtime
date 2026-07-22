@@ -9,6 +9,7 @@ import { wakeReadyParents } from '../scheduler/children.js';
 import { exitAttempt, heartbeatAttempt } from '../store/attempts.js';
 import { log } from '../log.js';
 import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
+import { dispatchPendingSessionEvents } from '../store/sessionEvents.js';
 
 const wlog = log.child({ component: 'worker' });
 
@@ -100,6 +101,11 @@ export function startWorker(
         await reap();
         // Resolve delegated parents, replacing failed children first (memo §25).
         await wakeReadyParents(pool, cfg.MAX_CHILD_REPLACEMENTS).catch(() => {});
+        await dispatchPendingSessionEvents(pool).catch((error) => {
+          wlog.error('session event dispatch error', {
+            err: (error as Error).message,
+          });
+        });
         const claimed = await claimRun(pool, cfg.WORKER_ID, cfg.LEASE_TTL_MS);
         if (claimed) {
           await executeClaimed(claimed.run, claimed.attempt);

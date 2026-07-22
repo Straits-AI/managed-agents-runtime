@@ -22,7 +22,8 @@ function fakeRun(): RunRow {
     goal: 'g', input: {}, status: 'RUNNING', status_reason: null,
     result: null, result_size_bytes: null, progress: {},
     workspace_id: 'w1', current_attempt_id: null, last_event_seq: '0', max_steps: 50,
-    token_budget: null, tokens_used: '0', awaited_signal: null, scheduled_for: null,
+    token_budget: null, tokens_used: '0', awaited_signal: null,
+    awaited_signal_correlation_id: null, awaited_signal_schema: null, scheduled_for: null,
     debug_fault_points: [], created_at: new Date(), updated_at: new Date(),
   };
 }

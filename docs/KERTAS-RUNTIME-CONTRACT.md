@@ -2,7 +2,7 @@
 
 **Contract family:** `kertas.runtime`  
 **Target version:** `v1alpha1`  
-**Status:** architecture accepted; ManagedSession create/read/list/cancel slice implemented; inbound events pending
+**Status:** architecture accepted; ManagedSession and inbound-event slices implemented
 **Last reviewed:** 2026-07-22
 
 Implementation is tracked by
@@ -90,9 +90,8 @@ may have zero Attempts while queued or when cancelled before its first claim.
 ## Current compatibility mapping
 
 The compatibility surface continues to expose `Run` as its top-level durable
-object. The target implementation now has a reviewed ManagedSession
-create/read/list/cancel slice, but target discovery remains unavailable until
-the inbound-event contract is implemented.
+object. The target implementation now has reviewed ManagedSession and
+authenticated inbound-event slices and is published through contract discovery.
 
 Until the complete target contract is advertised as supported:
 
@@ -118,15 +117,15 @@ Outcome or created a Release.
 | Capability | Current controlled-alpha runtime | `v1alpha1` target |
 | --- | --- | --- |
 | Top-level continuity | `Run` is the top-level durable object | `ManagedSession` contains multiple Runs |
-| Session API | Create/read/list/cancel implemented behind `v1alpha1`; inbound events pending | Versioned create/read/event/cancel/list routes |
+| Session API | Versioned create/read/event/cancel/list routes implemented | Versioned create/read/event/cancel/list routes |
 | Active execution admission | Tenant-level admission plus one active top-level Run per implemented session | One active top-level Run per session plus child Runs |
-| Inbound session event queue | Signals target an existing Run | Deduplicated ordered session events create/resume Runs |
+| Inbound session event queue | Authenticated, deduplicated ordered receipt plus current/future dispatch implemented | Deduplicated ordered session events create/resume Runs |
 | Run/Attempt execution | Implemented internally with leases and fencing | Existing behavior exposed through versioned schemas; Attempt need not be a direct public mutation surface |
 | Runtime event ledger | Implemented per Run | Versioned session/Run events with resource sequence, correlation, and causation |
 | Workspace recovery | Versioned v1/v2 Run checkpoints preserve commitments, resource/evidence refs, and context-selection decisions; workspace snapshots implemented | Session workspace lineage plus explicit Kertas snapshot transfer |
 | Artifact output | First-class content-addressed Artifact resources implemented | Versioned Kertas ingestion through the public contract |
 | Child delegation | Bounded results, artifact/evidence refs, usage, replacement, and queryable lineage implemented | Versioned session-scoped projection through the public contract |
-| Public schemas/client fixtures | Run compatibility schema and partial ManagedSession schema published; target remains planned | Discoverable complete schemas, compatibility fixtures, and Kertas SDK conformance |
+| Public schemas/client fixtures | Run and ManagedSession schemas published; independent deployment conformance remains | Discoverable complete schemas, compatibility fixtures, and Kertas SDK conformance |
 | Provider selection | Versioned capability catalog, local/BytePlus/AWS subset manifests, and checked capability-selected deployment profiles | Kertas supplies capability and assurance requirements; provider identity remains a resolved runtime binding |
 
 Normative requirements below describe the target unless the table marks them as
@@ -188,8 +187,7 @@ GET    /v1alpha1/sessions/{sessionId}/runs
 GET    /v1alpha1/sessions/{sessionId}/events
 ```
 
-This route list reserves semantics; implementation requires separate reviewed
-tickets and contract tests.
+These routes are implemented by the active `kertas.runtime/v1alpha1` contract.
 
 ## Inbound event contract
 
@@ -201,11 +199,7 @@ An event delivered to a session MUST contain:
   "eventId": "evt_source_stable_id",
   "type": "kertas.feedback.received",
   "occurredAt": "2026-07-19T00:00:00Z",
-  "source": {
-    "type": "kertas",
-    "id": "deployment-or-connector-id",
-    "sequence": 42
-  },
+  "sourceSequence": 42,
   "subject": { "type": "project", "ref": "opaque-kertas-reference" },
   "data": {},
   "inputSnapshotRefs": [],
@@ -213,23 +207,29 @@ An event delivered to a session MUST contain:
 }
 ```
 
-- Source identity MUST be authenticated or bound to the caller's configured
-  connection; a payload cannot grant itself another source identity.
+- Source identity is derived from the authenticated principal and returned on
+  the receipt. It is not accepted in the request payload, so a payload cannot
+  grant itself another source identity.
 - The deduplication tuple is `(tenant, source.type, source.id, eventId)`.
 - The first accepted payload stores a canonical digest. An exact replay returns
   the original receipt; a different payload for the same tuple fails with
   `409 event_conflict`.
 - `occurredAt` is source time; runtime receipt time is recorded separately.
-- `source.sequence` is required when the source promises ordering and optional
+- `sourceSequence` is required when the source promises ordering and optional
   otherwise. It is retained for gap/out-of-order detection, not used as trusted
   authorization or a global clock.
 - Each accepted event receives a monotonic session `receivedSequence` under the
   session lock. That sequence, with serialized concurrent receipt, is the
   canonical processing order.
 - `data` is bounded and schema-validated by event type.
-- large inputs MUST be immutable references with content digests.
+- large inputs MUST be immutable references with content digests. Snapshot IDs
+  use an opaque identifier grammar; URLs and signed URLs are rejected as IDs.
 - unknown event types MUST fail closed or enter an explicit unhandled state.
-- receipt MUST be acknowledged only after durable persistence.
+- receipt MUST be acknowledged only after durable persistence. Future work is
+  acknowledged as `PENDING`; temporary Run-admission exhaustion never rolls the
+  receipt back.
+- `GET .../events` is cursor-paginated by `receivedSequence`, defaults to 100,
+  and permits at most 200 receipts per response.
 
 ## Outbound event contract
 
@@ -275,15 +275,17 @@ Every event type declares one dispatch class:
 - `future-run`: it is queued by `receivedSequence` and MUST NOT be delivered to
   the current Run.
 
-When a top-level Run reaches a terminal disposition, the runtime locks the
-session. In that transaction it first marks every accepted, unconsumed
-`current-run` event terminal as `STALE`, records a stable reason and correlation,
-and makes the updated receipt status observable through the session event log.
-A stale event is consumed for queue accounting: it cannot remain pending, be
-retried, or be reclassified as future work. The runtime then atomically inspects
-accepted, unconsumed `future-run` events. If none exist, the session becomes
-`IDLE`. Otherwise it dequeues the lowest `receivedSequence`, creates the next Run
-from that event, and transitions the session to `ACTIVE` in the same transaction.
+When a top-level Run reaches a terminal disposition, the session becomes
+`IDLE`. The durable dispatcher locks the session and dequeues only the lowest
+accepted `future-run` `receivedSequence`; creating its Run and marking the
+receipt `DISPATCHED` occur in one transaction. Admission exhaustion leaves the
+entire session queue `PENDING` behind a bounded retry delay, so newer events
+cannot overtake it and blocked sessions cannot starve later tenants. A
+cancellation transaction marks all
+remaining `PENDING` receipts `STALE` with the stable reason
+`session_cancelled`, so terminal sessions never strand apparently live work.
+Receipt payload, source, tenant, and canonical sequence fields are immutable at
+the database boundary; only their one-way lifecycle projection may change.
 
 Run and Attempt states remain runtime-specific but MUST map to a documented
 public state and reason code.

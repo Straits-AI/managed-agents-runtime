@@ -22,8 +22,20 @@ import type { RunRow } from '../../core/types.js';
 // allow pointing a run at another tenant's data (IDOR).
 const RESERVED_INPUT_KEYS = ['forkFrom', 'parentWorkspaceId'] as const;
 
-function compatibilityRunResource(run: RunRow): Omit<RunRow, 'managed_session_id'> {
-  const { managed_session_id: _managedSessionId, ...resource } = run;
+function compatibilityRunResource(
+  run: RunRow,
+): Omit<
+  RunRow,
+  | 'managed_session_id'
+  | 'awaited_signal_correlation_id'
+  | 'awaited_signal_schema'
+> {
+  const {
+    managed_session_id: _managedSessionId,
+    awaited_signal_correlation_id: _awaitedSignalCorrelationId,
+    awaited_signal_schema: _awaitedSignalSchema,
+    ...resource
+  } = run;
   return resource;
 }
 
@@ -328,6 +340,9 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
       const run = await getRun(tx, req.params.runId, req.tenantId);
       if (!run) return { code: 404 as const };
       if (isTerminal(run.status)) return { code: 409 as const, status: run.status };
+      if (run.managed_session_id) {
+        return { code: 409 as const, error: 'managed_session_event_required' };
+      }
 
       // Record delivery in the ledger regardless of whether the run is
       // currently waiting — a signal may legitimately arrive early.
@@ -343,7 +358,12 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
           expectFrom: ['WAITING_SIGNAL'],
           to: 'QUEUED',
           event: { type: 'SignalReceived', payload: { name: body.name, woke: true } },
-          patch: { current_attempt_id: null, awaited_signal: null },
+          patch: {
+            current_attempt_id: null,
+            awaited_signal: null,
+            awaited_signal_correlation_id: null,
+            awaited_signal_schema: null,
+          },
         });
       }
       return { code: 200 as const, woke };
@@ -351,7 +371,9 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
 
     if (result.code === 404) return reply.code(404).send({ error: 'run not found' });
     if (result.code === 409) {
-      return reply.code(409).send({ error: `run is ${result.status}` });
+      return reply.code(409).send({
+        error: 'error' in result ? result.error : `run is ${result.status}`,
+      });
     }
     return reply.code(202).send({ delivered: true, woke: result.woke });
   });

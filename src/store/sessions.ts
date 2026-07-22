@@ -223,6 +223,12 @@ export async function cancelManagedSession(
       reason: input.reason,
     });
     await tx.query(
+      `UPDATE managed_session_events
+       SET status = 'STALE', status_reason = 'session_cancelled', consumed_at = now()
+       WHERE session_id = $1 AND tenant_id = $2 AND status = 'PENDING'`,
+      [session.id, input.tenantId],
+    );
+    await tx.query(
       `UPDATE managed_sessions
        SET state = 'CANCELLED', current_top_level_run_id = $2,
            version = version + 1, updated_at = now()

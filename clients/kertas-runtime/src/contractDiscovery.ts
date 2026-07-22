@@ -7,7 +7,7 @@ export interface DiscoveredContract {
   deprecatedAt: string | null;
   sunsetAt: string | null;
   replacement: string | null;
-  features: { managedSession: boolean };
+  features: { managedSession: boolean; inboundEvents: boolean };
 }
 
 export interface RuntimeContractDiscovery {
@@ -25,6 +25,7 @@ export interface SelectedRuntimeContract {
   contractId: 'run-as-session/v1' | 'kertas.runtime/v1alpha1';
   mode: 'compatibility' | 'managed-session';
   managedSession: boolean;
+  inboundEvents: boolean;
   lifecycle: 'supported' | 'deprecated';
   deprecatedAt: string | null;
   sunsetAt: string | null;
@@ -57,11 +58,21 @@ function parseContract(value: unknown): DiscoveredContract {
     !isNullableString(item.replacement) ||
     !item.features ||
     typeof item.features !== 'object' ||
-    typeof (item.features as Record<string, unknown>).managedSession !== 'boolean'
+    typeof (item.features as Record<string, unknown>).managedSession !== 'boolean' ||
+    (
+      (item.features as Record<string, unknown>).inboundEvents !== undefined
+      && typeof (item.features as Record<string, unknown>).inboundEvents !== 'boolean'
+    )
   ) {
     throw new RuntimeContractCompatibilityError('runtime contract entry is malformed');
   }
-  return item as unknown as DiscoveredContract;
+  return {
+    ...(item as unknown as Omit<DiscoveredContract, 'features'>),
+    features: {
+      managedSession: (item.features as Record<string, unknown>).managedSession as boolean,
+      inboundEvents: (item.features as Record<string, unknown>).inboundEvents === true,
+    },
+  };
 }
 
 export function parseRuntimeContractDiscovery(value: unknown): RuntimeContractDiscovery {
@@ -98,13 +109,16 @@ export function selectCompatibleContract(value: unknown): SelectedRuntimeContrac
   const discovery = parseRuntimeContractDiscovery(value);
   const managed = discovery.contracts.find(
     (contract) =>
-      contract.id === 'kertas.runtime/v1alpha1' && contract.features.managedSession,
+      contract.id === 'kertas.runtime/v1alpha1'
+      && contract.features.managedSession
+      && contract.features.inboundEvents,
   );
   if (managed) {
     return {
       contractId: 'kertas.runtime/v1alpha1',
       mode: 'managed-session',
       managedSession: true,
+      inboundEvents: true,
       lifecycle: managed.lifecycle,
       deprecatedAt: managed.deprecatedAt,
       sunsetAt: managed.sunsetAt,
@@ -123,6 +137,7 @@ export function selectCompatibleContract(value: unknown): SelectedRuntimeContrac
     contractId: 'run-as-session/v1',
     mode: 'compatibility',
     managedSession: false,
+    inboundEvents: false,
     lifecycle: compatibility.lifecycle,
     deprecatedAt: compatibility.deprecatedAt,
     sunsetAt: compatibility.sunsetAt,
