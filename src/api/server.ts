@@ -7,6 +7,7 @@ import { registerAgentRoutes } from './routes/agents.js';
 import { registerRunRoutes } from './routes/runs.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerProviderRoutes } from './routes/providers.js';
+import { registerContractRoutes } from './routes/contracts.js';
 import { resolveTenant } from './auth.js';
 import { rateLimiter } from './rateLimit.js';
 import { log } from '../log.js';
@@ -95,6 +96,7 @@ export function buildServer(deps: ApiDeps): FastifyInstance {
   });
 
   registerHealthRoutes(app, deps);
+  registerContractRoutes(app);
   registerProviderRoutes(app, deps);
   registerAgentRoutes(app, deps);
   registerRunRoutes(app, deps);

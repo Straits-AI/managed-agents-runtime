@@ -1,0 +1,242 @@
+{
+  "apiVersion": "kertas.runtime/contracts/v1",
+  "id": "run-as-session/v1",
+  "status": "compatibility",
+  "semantics": {
+    "topLevelResource": "Run",
+    "managedSessionResourceAvailable": false,
+    "runCompletionImpliesKertasOutcome": false,
+    "runCompletionImpliesKertasRelease": false
+  },
+  "routes": {
+    "createRun": "POST /v1/runs",
+    "getRun": "GET /v1/runs/{runId}",
+    "listRunEvents": "GET /v1/runs/{runId}/events"
+  },
+  "schemas": {
+    "runCreate": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/run-as-session/v1/run-create",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentVersionId", "goal"],
+      "properties": {
+        "agentVersionId": { "type": "string", "minLength": 1 },
+        "goal": { "type": "string", "minLength": 1 },
+        "input": {
+          "type": "object",
+          "propertyNames": { "not": { "enum": ["forkFrom", "parentWorkspaceId"] } },
+          "additionalProperties": true
+        },
+        "maxSteps": { "type": "integer", "minimum": 1 },
+        "tokenBudget": { "type": "integer", "minimum": 1 },
+        "scheduledFor": { "type": "string", "format": "date-time", "pattern": "Z$" },
+        "grants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action"],
+            "properties": {
+              "action": { "type": "string", "minLength": 1 },
+              "resource": { "type": "string" },
+              "requiresApproval": { "type": "boolean" },
+              "maxCalls": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "debugFaultPoints": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "runResource": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/run-as-session/v1/run-resource",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "tenant_id",
+        "agent_version_id",
+        "parent_run_id",
+        "replaces_run_id",
+        "replacement_generation",
+        "forked_from_run_id",
+        "goal",
+        "input",
+        "status",
+        "status_reason",
+        "result",
+        "result_size_bytes",
+        "progress",
+        "workspace_id",
+        "current_attempt_id",
+        "last_event_seq",
+        "max_steps",
+        "token_budget",
+        "tokens_used",
+        "awaited_signal",
+        "scheduled_for",
+        "debug_fault_points",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "tenant_id": { "type": "string", "minLength": 1 },
+        "agent_version_id": { "type": "string", "minLength": 1 },
+        "parent_run_id": { "type": ["string", "null"] },
+        "replaces_run_id": { "type": ["string", "null"] },
+        "replacement_generation": { "type": "integer", "minimum": 0 },
+        "forked_from_run_id": { "type": ["string", "null"] },
+        "goal": { "type": "string", "minLength": 1 },
+        "input": { "type": "object", "additionalProperties": true },
+        "status": {
+          "enum": [
+            "CREATED",
+            "RESOLVING",
+            "QUEUED",
+            "STARTING",
+            "RUNNING",
+            "WAITING_APPROVAL",
+            "WAITING_SIGNAL",
+            "WAITING_CHILDREN",
+            "SLEEPING",
+            "SUSPENDED",
+            "RETRY_PENDING",
+            "VERIFYING",
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED"
+          ]
+        },
+        "status_reason": { "type": ["string", "null"] },
+        "result": { "type": ["object", "null"], "additionalProperties": true },
+        "result_size_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "progress": { "type": "object", "additionalProperties": true },
+        "workspace_id": { "type": ["string", "null"] },
+        "current_attempt_id": { "type": ["string", "null"] },
+        "last_event_seq": { "type": "string", "pattern": "^[0-9]+$" },
+        "max_steps": { "type": "integer", "minimum": 1 },
+        "token_budget": { "type": ["string", "null"], "pattern": "^[0-9]+$" },
+        "tokens_used": { "type": "string", "pattern": "^[0-9]+$" },
+        "awaited_signal": { "type": ["string", "null"] },
+        "scheduled_for": { "type": ["string", "null"] },
+        "debug_fault_points": { "type": "array", "items": { "type": "string" } },
+        "created_at": { "type": "string", "minLength": 1 },
+        "updated_at": { "type": "string", "minLength": 1 },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "run_id",
+              "attempt_no",
+              "worker_id",
+              "state",
+              "lease_expires_at",
+              "heartbeat_at",
+              "sandbox_id",
+              "sandbox_domain",
+              "started_from_checkpoint_id",
+              "exit_reason",
+              "created_at"
+            ],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "run_id": { "type": "string", "minLength": 1 },
+              "attempt_no": { "type": "integer", "minimum": 1 },
+              "worker_id": { "type": "string", "minLength": 1 },
+              "state": { "enum": ["ACTIVE", "EXITED", "ORPHANED"] },
+              "lease_expires_at": { "type": "string", "minLength": 1 },
+              "heartbeat_at": { "type": "string", "minLength": 1 },
+              "sandbox_id": { "type": ["string", "null"] },
+              "sandbox_domain": { "type": ["string", "null"] },
+              "started_from_checkpoint_id": { "type": ["string", "null"] },
+              "exit_reason": { "type": ["string", "null"] },
+              "created_at": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "runEvent": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/run-as-session/v1/run-event",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "seq", "type", "payload", "attempt_id", "created_at"],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "seq": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "type": {
+          "enum": [
+            "RunCreated",
+            "AgentVersionResolved",
+            "CapabilitiesResolved",
+            "RunQueued",
+            "AttemptStarted",
+            "AttemptExited",
+            "AttemptOrphaned",
+            "SandboxAllocated",
+            "SandboxTerminated",
+            "WorkspaceRestored",
+            "WorkspaceCheckpointed",
+            "ContextCompiled",
+            "ModelInvocationStarted",
+            "ModelInvocationCompleted",
+            "ActionProposed",
+            "ActionAuthorized",
+            "ActionDenied",
+            "ToolInvoked",
+            "ToolInvocationStarted",
+            "ToolInvocationCommitted",
+            "ToolInvocationFailed",
+            "ProgressUpdated",
+            "LoopDetected",
+            "StagnationDetected",
+            "ContextLossDetected",
+            "SemanticRecoveryApplied",
+            "ModelEscalated",
+            "BudgetPlanUpdated",
+            "SignalReceived",
+            "ChildRunSpawned",
+            "ChildRunReplaced",
+            "ChildReplacementDeferred",
+            "ChildrenResolved",
+            "ApprovalRequested",
+            "ApprovalReceived",
+            "ApprovalDenied",
+            "UserMessageReceived",
+            "RetryScheduled",
+            "VerificationStarted",
+            "VerificationPassed",
+            "VerificationFailed",
+            "RunCompleted",
+            "RunFailed",
+            "RunCancelled"
+          ]
+        },
+        "payload": { "type": "object", "additionalProperties": true },
+        "attempt_id": { "type": ["string", "null"] },
+        "created_at": { "type": "string", "minLength": 1 }
+      }
+    },
+    "runEventsResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/run-as-session/v1/run-events-response",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["events"],
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "https://managed-agents-runtime.invalid/contracts/run-as-session/v1/run-event"
+          }
+        }
+      }
+    }
+  }
+}
