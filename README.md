@@ -203,11 +203,12 @@ node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→
 npm run byteplus:sandbox:provision -- \
   --profile dev --region ap-southeast-1 --name <deterministic-name> \
   --evidence-file /secure/path/sandbox-provisioning.json
-python3 scripts/refresh-creds.py --profile dev --region ap-southeast-1
 npm run byteplus:sandbox:conformance -- \
+  --profile dev --region ap-southeast-1 \
   --function-id <released-sandbox-function-id> \
+  --application-name <deterministic-name> \
   --run-id <non-secret-run-id> \
-  --evidence-file /secure/path/sandbox-runtime.json          # real VefaasSandboxProvider
+  --evidence-file /secure/path/sandbox-runtime.json          # real VefaasSandboxProvider via bp OAuth
 npm run byteplus:sandbox:cleanup -- \
   --profile dev --region ap-southeast-1 \
   --function-id <released-sandbox-function-id> --name <deterministic-name> \

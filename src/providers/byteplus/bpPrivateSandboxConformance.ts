@@ -42,7 +42,9 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
   private readonly runWebshell: WebshellRunner;
   private readonly websocketFactory: (endpoint: string) => PrivateWebSocket;
   private readonly sleepFn: (milliseconds: number) => Promise<void>;
+  private readonly afterKill: ((sandboxId: string) => Promise<void>) | undefined;
   private readonly observedRequestIds: string[] = [];
+  private readonly observedRequestMetadata: Array<{ action: string; requestId: string }> = [];
   private readonly expectedFileMarkers = new Map<string, string>();
   private readonly terminatedSandboxIds = new Set<string>();
   private observedInstance: PrivateSandboxInstanceEvidence | null = null;
@@ -55,6 +57,7 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
     runWebshell?: WebshellRunner;
     websocketFactory?: (endpoint: string) => PrivateWebSocket;
     sleep?: (milliseconds: number) => Promise<void>;
+    afterKill?: (sandboxId: string) => Promise<void>;
   }) {
     for (const [name, value] of [
       ['function ID', input.functionId],
@@ -71,6 +74,7 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
     this.executeBp = input.executeBp ?? executeBpCapture;
     this.runWebshell = input.runWebshell ?? runBpPrivateWebshellOperation;
     this.websocketFactory = input.websocketFactory ?? createNodePrivateWebSocket;
+    this.afterKill = input.afterKill;
     this.sleepFn = input.sleep ?? (async (milliseconds) => {
       await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
     });
@@ -78,6 +82,10 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
 
   requestIds(): string[] {
     return [...this.observedRequestIds];
+  }
+
+  requestMetadata(): Array<{ action: string; requestId: string }> {
+    return this.observedRequestMetadata.map((metadata) => ({ ...metadata }));
   }
 
   instanceEvidence(): PrivateSandboxInstanceEvidence | null {
@@ -168,6 +176,7 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
     }
     this.terminatedSandboxIds.add(handle.sandboxId);
     this.expectedFileMarkers.delete(handle.sandboxId);
+    await this.afterKill?.(handle.sandboxId);
   }
 
   async sleep(milliseconds: number): Promise<void> {
@@ -188,7 +197,13 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
       executeBp: this.executeBp,
       websocketFactory: this.websocketFactory,
     });
-    if (result.endpointRequestId) this.observedRequestIds.push(result.endpointRequestId);
+    if (result.endpointRequestId) {
+      this.observedRequestIds.push(result.endpointRequestId);
+      this.observedRequestMetadata.push({
+        action: 'GenWebshellEndpoint',
+        requestId: result.endpointRequestId,
+      });
+    }
   }
 
   private async call(action: string, args: string[]): Promise<Record<string, unknown>> {
@@ -223,6 +238,7 @@ export class BpPrivateSandboxConformanceProvider implements SandboxConformancePr
     const requestId = envelope.ResponseMetadata?.RequestId;
     if (typeof requestId === 'string' && /^[A-Za-z0-9._:-]{1,160}$/.test(requestId)) {
       this.observedRequestIds.push(requestId);
+      this.observedRequestMetadata.push({ action, requestId });
     }
     return envelope.Result as Record<string, unknown>;
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { BytePlusApiError } from '../src/providers/byteplus/signer.js';
+import { BpCliError } from '../src/providers/byteplus/privateWebshell.js';
 import { VefaasSandboxProvider } from '../src/providers/vefaasSandbox.js';
 
 describe('BytePlus private sandbox runtime provider', () => {
@@ -302,6 +303,35 @@ describe('BytePlus private sandbox runtime provider', () => {
       sandboxId: 'sandbox-terminating',
       baseUrl: 'private://webshell',
     })).rejects.toThrow('termination was not verified');
+  });
+
+  it('allows an explicit disposable cleanup hook to establish terminal absence', async () => {
+    let applicationDeleted = false;
+    const lifecycle = {
+      createSandbox: vi.fn(),
+      describeSandbox: vi.fn(async () => {
+        if (applicationDeleted) throw new BpCliError('ResourceNotFound', 'request-deleted');
+        return { Id: 'sandbox-fixture', Status: 'Terminating' };
+      }),
+      genWebshellEndpoint: vi.fn(),
+      killSandbox: vi.fn(async () => ({})),
+      listSandboxes: vi.fn(async () => ({ Sandboxes: [], Total: 0 })),
+      getApigDomains: vi.fn(),
+    };
+    const afterKill = vi.fn(async () => { applicationDeleted = true; });
+    const provider = new VefaasSandboxProvider(loadConfig({
+      VEFAAS_SANDBOX_FUNCTION_ID: 'function-fixture',
+      SANDBOX_TRANSPORT: 'private-webshell',
+    }), { lifecycle, sleep: async () => {}, afterKill });
+
+    await expect(provider.terminate({
+      sandboxId: 'sandbox-fixture',
+      baseUrl: 'private://webshell',
+    })).resolves.toBeUndefined();
+    expect(afterKill).toHaveBeenCalledWith({
+      sandboxId: 'sandbox-fixture',
+      baseUrl: 'private://webshell',
+    });
   });
 
   it('retries only idempotent private file operations after an uncertain transport timeout', async () => {

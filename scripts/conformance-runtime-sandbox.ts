@@ -1,13 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { loadConfig, requireConfig } from '../src/config.js';
+import { loadConfig } from '../src/config.js';
+import { createBpProvisioningApi } from '../src/providers/byteplus/bpProvisioningApi.js';
+import { BpVefaasLifecycle } from '../src/providers/byteplus/bpVefaasLifecycle.js';
+import { BpCliError } from '../src/providers/byteplus/privateWebshell.js';
 import { reserveEvidenceRecord } from '../src/providers/byteplus/provisioningEvidence.js';
-import { BytePlusApiError } from '../src/providers/byteplus/signer.js';
-import { VefaasClient, type VefaasResponseMetadata } from '../src/providers/byteplus/vefaas.js';
 import {
-  summarizeExactSandboxInventory,
-  waitForNoLiveSandboxes,
-} from '../src/providers/byteplus/sandboxInventory.js';
+  deletePrivateSandboxApplication,
+  type PrivateSandboxCleanupReceipt,
+  type VefaasProvisioningApi,
+} from '../src/providers/byteplus/sandboxApplication.js';
+import { summarizeExactSandboxInventory } from '../src/providers/byteplus/sandboxInventory.js';
 import { runSandboxConformance } from '../src/providers/sandboxConformance.js';
 import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
 import { VefaasSandboxProvider } from '../src/providers/vefaasSandbox.js';
@@ -18,14 +21,22 @@ const option = (name: string): string => {
   if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`);
   return value;
 };
+const profile = option('--profile');
+const region = option('--region');
 const functionId = option('--function-id');
+const applicationName = option('--application-name');
 const runId = option('--run-id');
 const evidenceFile = option('--evidence-file');
-for (const [name, value] of [['function ID', functionId], ['run ID', runId]] as const) {
-  if (!/^[A-Za-z0-9._-]{1,160}$/.test(value)) {
-    throw new Error(`Runtime sandbox ${name} is invalid`);
-  }
+for (const [name, value, pattern] of [
+  ['profile', profile, /^[A-Za-z0-9._-]{1,80}$/],
+  ['region', region, /^[A-Za-z0-9._-]{1,80}$/],
+  ['function ID', functionId, /^[A-Za-z0-9._-]{1,160}$/],
+  ['application name', applicationName, /^[a-z][a-z0-9-]{2,62}$/],
+  ['run ID', runId, /^[A-Za-z0-9._-]{1,160}$/],
+] as const) {
+  if (!pattern.test(value)) throw new Error(`Runtime sandbox ${name} is invalid`);
 }
+
 const readGit = (args: string[]): string | null => {
   try {
     return execFileSync('git', args, {
@@ -42,31 +53,14 @@ const source = resolveTosConformanceSource({
   gitCommit,
   gitStatus: gitCommit === null ? null : readGit(['status', '--porcelain']),
 });
-const cfg = loadConfig({
-  ...process.env,
-  VEFAAS_SANDBOX_FUNCTION_ID: functionId,
-  SANDBOX_TRANSPORT: 'private-webshell',
-});
-const required = requireConfig(cfg, [
-  'BYTEPLUS_ACCESS_KEY_ID',
-  'BYTEPLUS_SECRET_ACCESS_KEY',
-]);
-const responseMetadata: VefaasResponseMetadata[] = [];
-const client = new VefaasClient({
-  host: cfg.BYTEPLUS_OPENAPI_HOST,
-  region: cfg.BYTEPLUS_REGION,
-  accessKeyId: required.BYTEPLUS_ACCESS_KEY_ID,
-  secretAccessKey: required.BYTEPLUS_SECRET_ACCESS_KEY,
-  sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
-  onResponseMetadata: (metadata) => {
-    if (responseMetadata.length < 200) responseMetadata.push(metadata);
-  },
-});
-const provider = new VefaasSandboxProvider(cfg, { lifecycle: client });
 const bpVersion = execFileSync('bp', ['version'], {
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'ignore'],
 }).trim();
+if (!/^[A-Za-z0-9._-]{1,80}$/.test(bpVersion)) {
+  throw new Error('Runtime sandbox bp version was invalid');
+}
+
 const baseRecord = {
   schemaVersion: 1,
   evidenceId: `byteplus-runtime-sandbox-${runId}`,
@@ -76,17 +70,18 @@ const baseRecord = {
     commitOrigin: source.commitOrigin,
   },
   provider: 'byteplus-vefaas-private-sandbox-runtime',
-  region: cfg.BYTEPLUS_REGION,
+  region,
   retrievedAt: new Date().toISOString(),
   toolchain: {
     runtime: `node ${process.version}`,
     bpVersion,
+    controlPlane: 'credential-isolating bp profile',
     controlPlaneApiVersion: '2024-06-06',
     dataPlane: 'ticketed-private-webshell',
     publicRouteUsed: false,
     maximumInstanceLifetimeMinutes: 10,
   },
-  application: { functionId },
+  application: { functionId, name: applicationName, disposable: true },
   redaction: {
     credentialsSerialized: false,
     signedEndpointSerialized: false,
@@ -99,6 +94,37 @@ const receipt = reserveEvidenceRecord(evidenceFile, {
   ...baseRecord,
   status: 'pending',
   successfulRequestMetadata: [],
+});
+const provisioningRequestMetadata: Array<{ action: string; requestId: string }> = [];
+const rawApi = createBpProvisioningApi({ profile, region });
+const api: VefaasProvisioningApi = async (action, body) => {
+  const response = await rawApi(action, body);
+  if (response.requestId && provisioningRequestMetadata.length < 200) {
+    provisioningRequestMetadata.push({ action, requestId: response.requestId });
+  }
+  return response;
+};
+let applicationCleanup: PrivateSandboxCleanupReceipt | null = null;
+const lifecycleRequestMetadata: Array<{ action: string; requestId: string }> = [];
+const lifecycle = new BpVefaasLifecycle({
+  profile,
+  region,
+  onResponseMetadata: (metadata) => {
+    if (metadata.requestId && lifecycleRequestMetadata.length < 200) {
+      lifecycleRequestMetadata.push({ action: metadata.action, requestId: metadata.requestId });
+    }
+  },
+});
+const provider = new VefaasSandboxProvider(loadConfig({
+  ...process.env,
+  VEFAAS_SANDBOX_FUNCTION_ID: functionId,
+  BYTEPLUS_REGION: region,
+  SANDBOX_TRANSPORT: 'private-webshell',
+}), {
+  lifecycle,
+  afterKill: async () => {
+    applicationCleanup = await ensureDisposableApplicationAbsent();
+  },
 });
 let conformanceStage = 'provider-conformance';
 
@@ -118,28 +144,26 @@ try {
     timeoutMinutes: 10,
     marker: `runtime-${randomUUID()}`,
   });
-  conformanceStage = 'final-inventory';
-  const inventorySummary = await waitForNoLiveSandboxes({
-    list: () => client.listSandboxes(functionId, {
-      pageNumber: 1,
-      pageSize: 100,
-      metadata: { runId },
-    }),
-    target: { functionId, metadata: { runId } },
-    attempts: 10,
-    sleep: async (milliseconds) => {
-      await new Promise<void>((resolveSleep) => setTimeout(resolveSleep, milliseconds));
-    },
-  });
+  conformanceStage = 'application-cleanup';
+  const verifiedCleanup = applicationCleanup as PrivateSandboxCleanupReceipt | null;
+  if (verifiedCleanup === null || !verifiedCleanup.absent) {
+    throw new Error('Runtime sandbox disposable application cleanup was not verified');
+  }
   conformanceStage = 'request-metadata';
+  const successfulRequestMetadata = [
+    ...lifecycleRequestMetadata,
+    ...provisioningRequestMetadata,
+  ];
   for (const action of [
     'CreateSandbox',
     'DescribeSandbox',
     'GenWebshellEndpoint',
     'KillSandbox',
     'ListSandboxes',
+    'DeleteFunction',
+    'ListFunctions',
   ]) {
-    if (!responseMetadata.some((metadata) => metadata.action === action && metadata.requestId)) {
+    if (!successfulRequestMetadata.some((metadata) => metadata.action === action)) {
       throw new Error(`Runtime sandbox did not preserve ${action} request metadata`);
     }
   }
@@ -148,45 +172,80 @@ try {
   const record = {
     ...baseRecord,
     status: 'succeeded',
-    successfulRequestMetadata: responseMetadata,
+    successfulRequestMetadata,
     evidence,
-    finalInventory: inventorySummary,
+    finalInventory: {
+      liveInstances: 0,
+      terminatingTombstones: 0,
+      applicationAbsent: true,
+    },
+    applicationCleanup: verifiedCleanup,
   };
   conformanceStage = 'evidence-commit';
   receipt.commit(record);
   process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
 } catch (error) {
-  let liveInstances: number | null = null;
+  conformanceStage = applicationCleanup === null ? 'failure-cleanup' : conformanceStage;
   try {
-    const finalInventory = await client.listSandboxes(functionId, {
-      pageNumber: 1,
-      pageSize: 100,
-      metadata: { runId },
-    });
-    liveInstances = summarizeExactSandboxInventory(finalInventory, {
-      functionId,
-      metadata: { runId },
-    }).liveInstances;
+    applicationCleanup ??= await ensureDisposableApplicationAbsent();
   } catch {
-    // The failure receipt must still survive an unavailable final inventory read.
+    // The failure receipt remains explicit about unverified cleanup.
   }
   const record = {
     ...baseRecord,
     status: 'failed',
-    successfulRequestMetadata: responseMetadata,
+    successfulRequestMetadata: [
+      ...lifecycleRequestMetadata,
+      ...provisioningRequestMetadata,
+    ],
     failure: {
-      code: error instanceof BytePlusApiError ? error.code : 'RuntimeConformanceFailed',
-      requestId: error instanceof BytePlusApiError ? error.requestId : null,
+      code: error instanceof BpCliError ? error.code : 'RuntimeConformanceFailed',
+      requestId: error instanceof BpCliError ? error.requestId : null,
       reason: safeRuntimeFailureReason(error),
       stage: conformanceStage,
       sourceUnchanged: readGit(['rev-parse', 'HEAD']) === source.commit
         && !readGit(['status', '--porcelain']),
     },
-    finalInventory: { liveInstances },
+    finalInventory: {
+      liveInstances: applicationCleanup?.absent ? 0 : null,
+      applicationAbsent: applicationCleanup?.absent ?? false,
+    },
+    applicationCleanup,
   };
   receipt.commit(record);
   process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
   throw new Error('Runtime sandbox conformance failed; sanitized evidence was retained');
+}
+
+async function ensureDisposableApplicationAbsent(): Promise<PrivateSandboxCleanupReceipt> {
+  if (await applicationIsAbsent()) {
+    return { functionId, absent: true, requestIds: [] };
+  }
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const inventory = await api('ListSandboxes', {
+      FunctionId: functionId,
+      PageNumber: 1,
+      PageSize: 100,
+    });
+    const summary = summarizeExactSandboxInventory(inventory.result, { functionId });
+    if (summary.liveInstances === summary.terminatingTombstones) {
+      return await deletePrivateSandboxApplication({ functionId, name: applicationName }, api);
+    }
+    if (attempt < 19) {
+      await new Promise<void>((resolveSleep) => setTimeout(resolveSleep, 1_000));
+    }
+  }
+  throw new Error('Runtime sandbox disposable application did not become cleanup-safe');
+}
+
+async function applicationIsAbsent(): Promise<boolean> {
+  try {
+    await api('GetFunction', { Id: functionId });
+    return false;
+  } catch (error) {
+    if (error instanceof BpCliError && error.code === 'ResourceNotFound') return true;
+    throw error;
+  }
 }
 
 function assertSourceUnchanged(): void {
@@ -197,7 +256,7 @@ function assertSourceUnchanged(): void {
 
 function safeRuntimeFailureReason(error: unknown): string | null {
   if (!(error instanceof Error)) return null;
-  return /^Sandbox conformance (startup failed|startup timed out|execution failed|file roundtrip failed|(execution|file write|file read) request failed)$/.test(error.message)
+  return /^Sandbox conformance (startup failed|startup timed out|execution failed|file roundtrip failed|(execution|file write|file read) request failed|cleanup could not be verified)$/.test(error.message)
     ? error.message
     : null;
 }

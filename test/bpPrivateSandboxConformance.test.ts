@@ -222,4 +222,80 @@ describe('bp private sandbox conformance provider', () => {
       'deleted-request',
     ]);
   });
+
+  it('uses an explicit disposable-application cascade before reporting terminal cleanup', async () => {
+    let status = 'Creating';
+    let applicationDeleted = false;
+    const afterKill = vi.fn(async (sandboxId: string) => {
+      expect(sandboxId).toBe('sandbox-fixture');
+      expect(status).toBe('Terminating');
+      applicationDeleted = true;
+    });
+    const provider = new BpPrivateSandboxConformanceProvider({
+      functionId: 'function-fixture',
+      profile: 'dev',
+      region: 'ap-southeast-1',
+      executeBp: async (args) => {
+        const action = args[1];
+        if (action === 'CreateSandbox') {
+          return JSON.stringify({
+            ResponseMetadata: { RequestId: 'create-request' },
+            Result: { SandboxId: 'sandbox-fixture' },
+          });
+        }
+        if (action === 'DescribeSandbox') {
+          if (applicationDeleted) {
+            throw new BpCliError('ResourceNotFound', 'deleted-request');
+          }
+          return JSON.stringify({
+            ResponseMetadata: { RequestId: `describe-${status}` },
+            Result: status === 'Ready'
+              ? {
+                  Status: status,
+                  FunctionId: 'function-fixture',
+                  Id: 'sandbox-fixture',
+                  CpuMilli: 1000,
+                  MemoryMB: 2048,
+                  RevisionNumber: 1,
+                  CreatedAt: '2026-07-20T10:00:00Z',
+                  ExpireAt: '2026-07-20T10:10:00Z',
+                  ImageInfo: { Id: 'image-fixture' },
+                  InstanceType: 'pod',
+                }
+              : { Status: status },
+          });
+        }
+        if (action === 'KillSandbox') {
+          status = 'Terminating';
+          return JSON.stringify({
+            ResponseMetadata: { RequestId: 'kill-request' },
+            Result: {},
+          });
+        }
+        throw new Error(`unexpected action ${action}`);
+      },
+      runWebshell: vi.fn(async () => ({
+        markerMatched: true as const,
+        endpointRequestId: 'webshell-request',
+      })),
+      websocketFactory: () => { throw new Error('fixture does not open a socket'); },
+      sleep: vi.fn(async () => { status = 'Ready'; }),
+      afterKill,
+    });
+
+    await expect(runSandboxConformance(provider, {
+      runId: 'cascade-fixture',
+      timeoutMinutes: 10,
+      marker: 'private-marker',
+    })).resolves.toMatchObject({
+      controlPlane: { terminalStatus: 'Deleted' },
+      cleanup: { terminationVerified: true },
+    });
+    expect(afterKill).toHaveBeenCalledTimes(1);
+    expect(provider.requestMetadata()).toEqual(expect.arrayContaining([
+      { action: 'CreateSandbox', requestId: 'create-request' },
+      { action: 'GenWebshellEndpoint', requestId: 'webshell-request' },
+      { action: 'KillSandbox', requestId: 'kill-request' },
+    ]));
+  });
 });

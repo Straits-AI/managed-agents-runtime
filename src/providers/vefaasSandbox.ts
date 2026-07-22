@@ -5,6 +5,7 @@ import { VefaasClient } from './byteplus/vefaas.js';
 import type { CreateSandboxResult, SandboxInfo, WebshellEndpointResult } from './byteplus/vefaas.js';
 import { BytePlusApiError } from './byteplus/signer.js';
 import {
+  BpCliError,
   createNodePrivateWebSocket,
   runPrivateWebshellCommand,
   type PrivateWebSocket,
@@ -58,6 +59,7 @@ export interface VefaasSandboxProviderDependencies {
   websocketFactory?: (endpoint: string) => PrivateWebSocket;
   apigClientFactory?: (handle: SandboxHandle) => ApigSandboxClient;
   sleep?: (milliseconds: number) => Promise<void>;
+  afterKill?: (handle: SandboxHandle) => Promise<void>;
 }
 
 /**
@@ -78,23 +80,30 @@ export class VefaasSandboxProvider implements SandboxProvider {
   private readonly websocketFactory: (endpoint: string) => PrivateWebSocket;
   private readonly apigClientFactory: (handle: SandboxHandle) => ApigSandboxClient;
   private readonly sleepFn: (milliseconds: number) => Promise<void>;
+  private readonly afterKill: ((handle: SandboxHandle) => Promise<void>) | undefined;
   private readonly terminatedSandboxIds = new Set<string>();
   private domainCache: string | null = null;
 
   constructor(cfg: Config, dependencies: VefaasSandboxProviderDependencies = {}) {
-    const required = requireConfig(cfg, [
-      'BYTEPLUS_ACCESS_KEY_ID',
-      'BYTEPLUS_SECRET_ACCESS_KEY',
+    const { VEFAAS_SANDBOX_FUNCTION_ID: functionId } = requireConfig(cfg, [
       'VEFAAS_SANDBOX_FUNCTION_ID',
     ]);
-    this.vefaas = dependencies.lifecycle ?? new VefaasClient({
-      host: cfg.BYTEPLUS_OPENAPI_HOST,
-      region: cfg.BYTEPLUS_REGION,
-      accessKeyId: required.BYTEPLUS_ACCESS_KEY_ID,
-      secretAccessKey: required.BYTEPLUS_SECRET_ACCESS_KEY,
-      sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
-    });
-    this.functionId = required.VEFAAS_SANDBOX_FUNCTION_ID;
+    if (dependencies.lifecycle) {
+      this.vefaas = dependencies.lifecycle;
+    } else {
+      const required = requireConfig(cfg, [
+        'BYTEPLUS_ACCESS_KEY_ID',
+        'BYTEPLUS_SECRET_ACCESS_KEY',
+      ]);
+      this.vefaas = new VefaasClient({
+        host: cfg.BYTEPLUS_OPENAPI_HOST,
+        region: cfg.BYTEPLUS_REGION,
+        accessKeyId: required.BYTEPLUS_ACCESS_KEY_ID,
+        secretAccessKey: required.BYTEPLUS_SECRET_ACCESS_KEY,
+        sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
+      });
+    }
+    this.functionId = functionId;
     this.defaultImage = cfg.SANDBOX_IMAGE;
     this.defaultCommand = cfg.SANDBOX_STARTUP_COMMAND;
     this.defaultPort = cfg.SANDBOX_STARTUP_PORT;
@@ -112,6 +121,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
     this.sleepFn = dependencies.sleep ?? (async (milliseconds) => {
       await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
     });
+    this.afterKill = dependencies.afterKill;
   }
 
   /** Exposed for preflight checks. */
@@ -339,7 +349,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
       const info = await this.vefaas.describeSandbox(this.functionId, handle.sandboxId);
       return { status: (info.Status as string | undefined) ?? 'unknown' };
     } catch (error) {
-      if (error instanceof BytePlusApiError && error.code === 'ResourceNotFound') {
+      if (isResourceNotFound(error)) {
         return {
           status: this.terminatedSandboxIds.has(handle.sandboxId) ? 'Deleted' : 'Creating',
         };
@@ -352,9 +362,10 @@ export class VefaasSandboxProvider implements SandboxProvider {
     try {
       await this.vefaas.killSandbox(this.functionId, handle.sandboxId);
     } catch (error) {
-      if (!(error instanceof BytePlusApiError) || error.code !== 'ResourceNotFound') throw error;
+      if (!isResourceNotFound(error)) throw error;
     }
     this.terminatedSandboxIds.add(handle.sandboxId);
+    await this.afterKill?.(handle);
     await this.waitForTerminal(handle);
   }
 
@@ -445,7 +456,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
         );
         if (items.length === 0) return;
       } catch (error) {
-        if (error instanceof BytePlusApiError && error.code === 'ResourceNotFound') return;
+        if (isResourceNotFound(error)) return;
         throw error;
       }
       await this.sleepFn(1_000);
@@ -508,4 +519,9 @@ function isRetriablePrivateTransportError(error: unknown): boolean {
     'Private WebShell closed before result',
     'Private WebShell command timed out',
   ]).has(error.message);
+}
+
+function isResourceNotFound(error: unknown): boolean {
+  return (error instanceof BytePlusApiError || error instanceof BpCliError)
+    && error.code === 'ResourceNotFound';
 }

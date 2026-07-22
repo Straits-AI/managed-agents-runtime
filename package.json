@@ -18,7 +18,7 @@
     "container:smoke": "tsx scripts/smoke-container.ts",
     "container:evidence": "tsx scripts/write-container-evidence.ts",
     "byteplus:sandbox:provision": "tsx scripts/provision-sandbox-application.ts",
-    "byteplus:sandbox:conformance": "node --env-file=.env --import tsx scripts/conformance-runtime-sandbox.ts",
+    "byteplus:sandbox:conformance": "tsx scripts/conformance-runtime-sandbox.ts",
     "byteplus:sandbox:cleanup": "tsx scripts/cleanup-sandbox-application.ts",
     "release:version": "tsx scripts/check-release-version.ts"
   },

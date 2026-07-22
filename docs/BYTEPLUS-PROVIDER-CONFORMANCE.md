@@ -82,9 +82,10 @@ bounded request, token, finish, source, and redaction metadata.
 ## Private sandbox record generation
 
 The private workflow creates or reuses one exact, released CPU sandbox
-application, invokes the production `VefaasSandboxProvider` with one short-lived
-1-vCPU/2-GiB instance, and removes the application afterward. The signed WebShell
-endpoint remains only inside the credential-isolating process. Successful
+application, invokes the production `VefaasSandboxProvider` through an OAuth-backed
+`bp` lifecycle adapter with one short-lived 1-vCPU/2-GiB instance, and removes the
+explicitly disposable application as the verified post-kill cascade. The signed
+WebShell endpoint remains only inside the credential-isolating process. Successful
 provider calls retain only bounded action and request-ID metadata:
 
 ```bash
@@ -93,9 +94,10 @@ npm run byteplus:sandbox:provision -- \
   --name managed-agents-runtime-private-<date> \
   --evidence-file /secure/path/sandbox-provisioning.json
 
-python3 scripts/refresh-creds.py --profile dev --region ap-southeast-1
 npm run byteplus:sandbox:conformance -- \
+  --profile dev --region ap-southeast-1 \
   --function-id <released-sandbox-function-id> \
+  --application-name managed-agents-runtime-private-<date> \
   --run-id <non-secret-run-id> \
   --evidence-file /secure/path/sandbox-runtime.json
 
@@ -132,10 +134,12 @@ when every returned child belongs to the target function and is already
 `Terminating`; any active non-terminating, unknown, paginated, or cross-function
 child fails closed. Fresh function-inventory absence is then required.
 Runtime termination does not treat the provider's post-kill `Terminating` state
-as completion. It polls `DescribeSandbox` and an exact `SandboxId` inventory until
-`Terminated`, `Deleted`, `ResourceNotFound`, or complete exact absence. Retained
-`Terminating` records remain in `liveInstances`, and conformance fails rather than
-claiming verified termination.
+as completion. A reusable application polls `DescribeSandbox` and an exact
+`SandboxId` inventory until `Terminated`, `Deleted`, `ResourceNotFound`, or complete
+exact absence and otherwise fails closed. The live conformance application is
+instead explicitly disposable: after kill acceptance and exact `Terminating`-only
+inventory, its injected cleanup hook uses the documented cascading function delete
+and requires fresh function absence before the provider can observe `Deleted`.
 Transient private-WebShell failures are retried only for idempotent workspace
 and file operations. File chunks use fixed byte offsets so an uncertain retry
 cannot duplicate content; arbitrary shell commands are never retried.
