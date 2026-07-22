@@ -1,0 +1,9 @@
+{
+  "name": "@straits-ai/kertas-runtime-contract-client",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/contractDiscovery.ts"
+  }
+}

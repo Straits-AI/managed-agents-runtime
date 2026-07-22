@@ -1,0 +1,85 @@
+{
+  "currentOnly": {
+    "apiVersion": "kertas.runtime/contracts/v1",
+    "currentCompatibilityMode": "run-as-session/v1",
+    "contracts": [
+      {
+        "id": "run-as-session/v1",
+        "status": "compatibility",
+        "lifecycle": "supported",
+        "href": "/v1/contracts/run-as-session/v1",
+        "introducedAt": "2026-07-22",
+        "deprecatedAt": null,
+        "sunsetAt": null,
+        "replacement": "kertas.runtime/v1alpha1",
+        "features": { "managedSession": false }
+      }
+    ],
+    "plannedContracts": [
+      {
+        "id": "kertas.runtime/v1alpha1",
+        "lifecycle": "not_available",
+        "features": { "managedSession": false }
+      }
+    ],
+    "deprecationPolicy": {
+      "minimumNoticeDays": 90,
+      "compatibilityModeRemoval": "explicit_sunset_only"
+    }
+  },
+  "managedSessionAvailable": {
+    "apiVersion": "kertas.runtime/contracts/v1",
+    "currentCompatibilityMode": "run-as-session/v1",
+    "contracts": [
+      {
+        "id": "run-as-session/v1",
+        "status": "compatibility",
+        "lifecycle": "deprecated",
+        "href": "/v1/contracts/run-as-session/v1",
+        "introducedAt": "2026-07-22",
+        "deprecatedAt": "2026-10-01T00:00:00Z",
+        "sunsetAt": "2027-01-01T00:00:00Z",
+        "replacement": "kertas.runtime/v1alpha1",
+        "features": { "managedSession": false }
+      },
+      {
+        "id": "kertas.runtime/v1alpha1",
+        "status": "active",
+        "lifecycle": "supported",
+        "href": "/v1alpha1/contracts/kertas.runtime/v1alpha1",
+        "introducedAt": "2026-10-01",
+        "deprecatedAt": null,
+        "sunsetAt": null,
+        "replacement": null,
+        "features": { "managedSession": true }
+      }
+    ],
+    "plannedContracts": [],
+    "deprecationPolicy": {
+      "minimumNoticeDays": 90,
+      "compatibilityModeRemoval": "explicit_sunset_only"
+    }
+  },
+  "unsupportedOnly": {
+    "apiVersion": "kertas.runtime/contracts/v1",
+    "currentCompatibilityMode": "run-as-session/v1",
+    "contracts": [
+      {
+        "id": "unrelated/v9",
+        "status": "active",
+        "lifecycle": "supported",
+        "href": "/v9/contracts/unrelated/v9",
+        "introducedAt": "2026-07-22",
+        "deprecatedAt": null,
+        "sunsetAt": null,
+        "replacement": null,
+        "features": { "managedSession": false }
+      }
+    ],
+    "plannedContracts": [],
+    "deprecationPolicy": {
+      "minimumNoticeDays": 90,
+      "compatibilityModeRemoval": "explicit_sunset_only"
+    }
+  }
+}
