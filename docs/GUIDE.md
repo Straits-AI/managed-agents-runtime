@@ -189,7 +189,7 @@ curl -sN "localhost:8080/v1/runs/$RID/events/stream" -H "authorization: Bearer $
 # 4. Inspect + control
 curl -s localhost:8080/v1/runs/$RID -H "authorization: Bearer $TOKEN"           # status + attempts
 curl -s localhost:8080/v1/runs/$RID/usage -H "authorization: Bearer $TOKEN"     # tokens + est. cost
-curl -s localhost:8080/v1/runs/$RID/artifacts -H "authorization: Bearer $TOKEN" # workspace revisions
+curl -s localhost:8080/v1/runs/$RID/artifacts -H "authorization: Bearer $TOKEN" # immutable artifacts
 curl -XPOST localhost:8080/v1/runs/$RID/messages -d '{"message":"also check Y"}' ...
 curl -XPOST localhost:8080/v1/runs/$RID/cancel ...
 ```
@@ -209,8 +209,18 @@ curl -XPOST localhost:8080/v1/runs/$RID/cancel ...
 | POST | `/v1/runs/:id/cancel` | cancel (fences the live worker) |
 | POST | `/v1/runs/:id/fork` | branch a new run from this run's checkpoint |
 | GET | `/v1/runs/:id/usage`, `/v1/usage` | per-run / per-tenant tokens + cost |
-| GET | `/v1/runs/:id/artifacts`, `/export` | workspace revisions / portable bundle |
+| GET | `/v1/runs/:id/artifacts` | first-class artifact metadata and authorized content links |
+| GET | `/v1/runs/:id/artifacts/:artifactId/content` | authorized artifact content (proxy or short-lived redirect) |
+| GET | `/v1/runs/:id/export` | portable run bundle with digest-checked artifact bytes and lineage |
 | GET | `/healthz`, `/readyz` | liveness / readiness (unauthenticated) |
+
+`RunCompleted.payload.artifacts` contains stable `art_…` IDs, never workspace
+paths or object-store keys. Artifact metadata includes content digest, MIME type,
+byte size, logical role, producer Run/Attempt/step, source, verification, and
+evidence references under `schemaVersion: 1`. Provider locators remain private;
+clients retrieve bytes only through the tenant-authorized content endpoint. Run
+bundle format v2 inlines artifact bytes and rejects digest, size, source-path, or
+producer-lineage tampering before import.
 
 ## 4. Multi-tenancy
 

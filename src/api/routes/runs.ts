@@ -7,8 +7,8 @@ import { getAgentVersion, getAgentDefinition } from '../../store/agents.js';
 import { listEvents } from '../../store/events.js';
 import { listAttempts } from '../../store/attempts.js';
 import { listApprovals, decideApproval, getApproval } from '../../store/approvals.js';
-import { listRevisions } from '../../store/workspaces.js';
 import { listGrants } from '../../store/grants.js';
+import { getArtifactForTenant, listArtifactsForRun } from '../../store/artifacts.js';
 import { runUsage, tenantUsage } from '../../store/usage.js';
 import { RunAdmissionRejectedError } from '../../store/admissions.js';
 import { appendEvent, transitionRun } from '../../core/transition.js';
@@ -467,18 +467,50 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
     async (req, reply) => {
       const run = await getRun(pool, req.params.runId, req.tenantId);
       if (!run) return reply.code(404).send({ error: 'run not found' });
-      const revisions = run.workspace_id
-        ? await listRevisions(pool, run.workspace_id)
-        : [];
-      const withUrls = await Promise.all(
-        revisions.map(async (r) => ({
-          ...r,
-          downloadUrl: deps.presignGet
-            ? await deps.presignGet(r.tos_key, 3600)
-            : null,
+      const artifacts = await listArtifactsForRun(pool, run.id, req.tenantId);
+      return {
+        artifacts: artifacts.map((artifact) => ({
+          id: artifact.id,
+          schemaVersion: artifact.schema_version,
+          digest: artifact.digest,
+          mimeType: artifact.mime_type,
+          sizeBytes: artifact.size_bytes,
+          logicalRole: artifact.logical_role,
+          producer: {
+            runId: artifact.producer_run_id,
+            attemptId: artifact.producer_attempt_id,
+            step: artifact.producer_step,
+          },
+          sourcePath: artifact.source_path,
+          sourceRefs: artifact.source_refs,
+          verificationRefs: artifact.verification_refs,
+          evidenceRefs: artifact.evidence_refs,
+          contentUrl: `/v1/runs/${run.id}/artifacts/${artifact.id}/content`,
+          createdAt: artifact.created_at.toISOString(),
         })),
-      );
-      return { revisions: withUrls };
+      };
+    },
+  );
+
+  app.get<{ Params: { runId: string; artifactId: string } }>(
+    '/v1/runs/:runId/artifacts/:artifactId/content',
+    async (req, reply) => {
+      const artifact = await getArtifactForTenant(pool, req.params.artifactId, req.tenantId);
+      if (!artifact || artifact.producer_run_id !== req.params.runId) {
+        return reply.code(404).send({ error: 'artifact not found' });
+      }
+      if (deps.presignGet) {
+        const url = await deps.presignGet(artifact.object_key, 300);
+        return reply.redirect(url);
+      }
+      if (!deps.objectStore) {
+        return reply.code(501).send({ error: 'artifact content requires an object store' });
+      }
+      const bytes = await deps.objectStore.get(artifact.object_key);
+      return reply
+        .type(artifact.mime_type)
+        .header('content-length', String(bytes.byteLength))
+        .send(bytes);
     },
   );
 }

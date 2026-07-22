@@ -2,7 +2,7 @@
 
 **Baseline:** `c58e94c2d23220653959eda3f382a0fdd711d16f`  
 **Release level:** controlled multi-tenant alpha  
-**Last reviewed:** 2026-07-19
+**Last reviewed:** 2026-07-22
 
 This register is the release-boundary record for the Managed Agents Runtime. It
 distinguishes proven closure from remaining public-beta and production work.
@@ -132,16 +132,18 @@ README claims fail the provider-claims check.
 
 ### MAR-P1-007 — first-class runtime artifacts
 
-**Status:** open — [Issue #27](https://github.com/Straits-AI/managed-agents-runtime/issues/27)  
+**Status:** closed — [Issue #27](https://github.com/Straits-AI/managed-agents-runtime/issues/27)
 **Owner:** runtime
 
-Completed Runs expose declared output paths mapped to object-store keys. Workspace
-revisions already have stable IDs, digests, and byte sizes, but declared logical
-outputs lack their own artifact identity, content digest, MIME/type metadata,
-producer step, source mapping, verification state, and publication lineage.
+Completed Runs now reference immutable `art_…` resources. Each record persists a
+content digest, MIME type, byte size, logical role, producer Run/Attempt/step,
+source mapping, and explicit verification/evidence references. Provider object
+keys remain internal and artifact bytes are reachable only through a
+tenant-authorized API.
 
-**Closure:** introduce versioned artifact resources/manifests; make Run results and
-exports reference them; verify digest and provenance on import/export.
+**Closure:** migration `0016_artifacts.sql`, atomic artifact/Run completion,
+authorized metadata/content APIs, run-bundle v2 digest and lineage verification,
+and pre-migration compatibility fixtures.
 
 ### MAR-P1-008 — bounded delegated results and lineage
 
