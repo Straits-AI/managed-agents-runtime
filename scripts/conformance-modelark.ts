@@ -2,8 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  createModelArkTemporaryKeyRequest,
+  type ModelArkKeyResourceType,
   parseBoundedProviderFailure,
+  resolveModelArkKeyResourceBindings,
   runModelArkConformance,
+  runModelArkExpectedFailure,
 } from '../src/providers/modelArkConformance.js';
 import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
 
@@ -16,9 +20,13 @@ const option = (name: string, fallback?: string): string => {
 
 const profile = option('--profile', 'dev');
 const region = option('--region', 'ap-southeast-1');
-const model = option('--model', 'seed-2-0-lite-260228');
-const resourceType = option('--resource-type');
-const keyResourceId = option('--key-resource-id');
+const model = option('--model', 'seed-2-0-mini-260428');
+const negativeModel = option('--negative-model', 'seed-2-0-lite-260228');
+const expectedFailureCode = option('--expected-failure-code', 'ModelNotOpen');
+const resourceType = option('--resource-type', 'presetendpoint') as ModelArkKeyResourceType;
+const keyResourceId = option('--key-resource-id', model);
+const negativeKeyResourceId = option('--negative-key-resource-id', negativeModel);
+const projectName = option('--project-name', 'default');
 const evidenceFile = option('--evidence-file');
 const durationSeconds = 900;
 const baseUrl = 'https://ark.ap-southeast.bytepluses.com/api/v3';
@@ -36,14 +44,25 @@ const source = resolveTosConformanceSource({
   gitCommit,
   gitStatus: gitCommit === null ? null : readGit(['status', '--porcelain']),
 });
+const keyBindings = resolveModelArkKeyResourceBindings({
+  resourceType,
+  model,
+  keyResourceId,
+  negativeModel,
+  negativeKeyResourceId,
+});
 
-const evidence = await runModelArkConformance({
-  async getTemporaryKey() {
-    const body = JSON.stringify({
-      DurationSeconds: durationSeconds,
-      ResourceType: resourceType,
-      ResourceIds: [keyResourceId],
-    });
+const dependencies = {
+  async getTemporaryKey(input: { model: string }) {
+    const resourceId = input.model === model
+      ? keyBindings.positiveResourceId
+      : keyBindings.negativeResourceId;
+    const body = JSON.stringify(createModelArkTemporaryKeyRequest({
+      durationSeconds,
+      resourceType,
+      resourceIds: [resourceId],
+      projectName,
+    }));
     let stdout: string;
     try {
       stdout = execFileSync('bp', [
@@ -93,7 +112,7 @@ const evidence = await runModelArkConformance({
       expiresAt: new Date(Date.now() + durationSeconds * 1_000),
     };
   },
-  async invoke({ apiKey, model: selectedModel }) {
+  async invoke({ apiKey, model: selectedModel }: { apiKey: string; model: string }) {
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -144,7 +163,12 @@ const evidence = await runModelArkConformance({
       output,
     };
   },
-}, { model });
+};
+const evidence = await runModelArkConformance(dependencies, { model });
+const expectedFailure = await runModelArkExpectedFailure(dependencies, {
+  model: negativeModel,
+  expectedCode: expectedFailureCode,
+});
 
 const sourceAfter = readGit(['rev-parse', 'HEAD']);
 if (sourceAfter !== source.commit || readGit(['status', '--porcelain'])) {
@@ -161,8 +185,20 @@ const record = {
   provider: 'byteplus-modelark',
   region,
   retrievedAt: new Date().toISOString(),
-  toolchain: { runtime: `node ${process.version}`, api: 'chat-completions', maxOutputTokens: 32 },
+  toolchain: {
+    runtime: `node ${process.version}`,
+    controlApi: 'GetApiKey 2024-01-01',
+    inferenceApi: 'chat-completions',
+    maxOutputTokens: 32,
+    keyScope: {
+      resourceType,
+      projectName: resourceType === 'presetendpoint' ? projectName : null,
+      positiveResourceId: keyBindings.positiveResourceId,
+      negativeResourceId: keyBindings.negativeResourceId,
+    },
+  },
   evidence,
+  expectedFailure,
 };
 writeFileSync(resolve(evidenceFile), `${JSON.stringify(record, null, 2)}\n`, {
   encoding: 'utf8', flag: 'wx', mode: 0o600,

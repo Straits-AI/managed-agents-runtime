@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "provider": "byteplus",
+  "releaseCandidate": "0.1.0-alpha.1",
+  "surfaces": [
+    {
+      "id": "tos",
+      "capability": "TOS object storage",
+      "implementation": "TosObjectStore and scripts/provision-tos.ts",
+      "classification": "verified",
+      "sharedDeploymentClaim": "Verified for the bounded object operations named in the retained record",
+      "evidence": [{
+        "evidenceId": "byteplus-tos-attestation-56861a83-c502-4814-a17a-ba7e60d3661a",
+        "sourceCommit": "e2665c98cb14333ca5f17e4f5064af81e8638df4",
+        "region": "ap-southeast-1",
+        "retrievedAt": "2026-07-19T16:24:46.520Z",
+        "toolchain": "Node.js v24.14.0, native fetch, TOS4-HMAC-SHA256",
+        "recordPath": "provider-conformance/evidence/tos-2026-07-19.json",
+        "recordSha256": "fc25fc4c45567fcfc20deb1862b15b5fc7feb9e9ec2b56abb16f9f1feffb300c",
+        "controlPlane": ["bucket HEAD", "create-if-missing"],
+        "dataPlane": ["direct PUT/GET/HEAD", "presigned GET/PUT"],
+        "failure": ["expected post-delete 404 with bounded provider metadata"],
+        "redaction": ["no credentials, authorization material, payload, or presigned URL serialized"],
+        "cleanup": ["both disposable objects independently verified absent", "configured bucket retained"]
+      }],
+      "limitations": ["bucket ACL and policy", "encryption attestation", "multipart upload", "versioning", "bucket deletion"]
+    },
+    {
+      "id": "modelark",
+      "capability": "ModelArk inference",
+      "implementation": "ModelArkModel and scripts/conformance-modelark.ts",
+      "classification": "verified",
+      "sharedDeploymentClaim": "Verified for one bounded activated preset-model chat invocation",
+      "evidence": [{
+        "evidenceId": "byteplus-modelark-021784694981398d82d61e1341a38f1d55b18f5893f198bb3a585",
+        "sourceCommit": "7c2526d9648a4f6bdfa0292340c03d18f7f10fab",
+        "region": "ap-southeast-1",
+        "retrievedAt": "2026-07-22T04:36:24.861Z",
+        "toolchain": "Node.js v22.23.0, GetApiKey 2024-01-01, Chat Completions",
+        "recordPath": "provider-conformance/evidence/modelark-2026-07-22.json",
+        "recordSha256": "0dbc029ac3c0625ea55aec70c335def2838941d509bad2c96a15efbaddfc1423",
+        "controlPlane": ["15-minute presetendpoint key scoped to project default"],
+        "dataPlane": ["seed-2-0-mini-260428 marker response", "bounded usage and finish metadata"],
+        "failure": ["unactivated seed-2-0-lite-260228 returned sanitized ModelNotOpen"],
+        "redaction": ["temporary key remained in memory", "prompt and model output were not serialized"],
+        "cleanup": ["temporary key expires automatically", "no persistent resource created"]
+      }],
+      "limitations": ["no provisioned endpoint lifecycle", "no image or video generation", "no throughput or failover claim"]
+    },
+    {
+      "id": "vefaas-private-sandbox",
+      "capability": "veFaaS private Cloud Sandbox",
+      "implementation": "VefaasSandboxProvider with ticketed private WebShell",
+      "classification": "verified",
+      "sharedDeploymentClaim": "Verified for one bounded private CPU sandbox lifecycle with exact cleanup",
+      "evidence": [{
+        "evidenceId": "byteplus-runtime-sandbox-runtime-903655c",
+        "sourceCommit": "903655c21fee06089054367c79f300aaa88992e3",
+        "region": "ap-southeast-1",
+        "retrievedAt": "2026-07-22T04:19:08.320Z",
+        "toolchain": "Node.js v22.23.0, bp 1.0.17, veFaaS 2024-06-06, private WebShell",
+        "recordPath": "provider-conformance/evidence/sandbox-runtime-2026-07-22.json",
+        "recordSha256": "c66ad648444b2bcdd68e8a1320a18bb48c15b780374fb26383769ec8f2472bb3",
+        "relatedRecords": [{
+          "evidenceId": "byteplus-sandbox-application-managed-agents-903655c",
+          "recordPath": "provider-conformance/evidence/sandbox-provisioning-2026-07-22.json",
+          "recordSha256": "507939debabf817ce4a47fa37e7ff823132509eedaa4dada2172a103f2e3776c"
+        }],
+        "controlPlane": ["provision/reuse and stable release readback", "create/describe/kill and exact inventory"],
+        "dataPlane": ["private command marker", "fixed-offset file write/read"],
+        "failure": ["bounded pending receipts and exact-run reconciliation", "Terminating is not accepted as terminal"],
+        "redaction": ["no credentials, signed endpoint, ticket, command payload, file content, or response body serialized"],
+        "cleanup": ["sandbox terminal state Deleted", "zero live or terminating instances", "disposable application and final regional function inventory absent"]
+      }],
+      "limitations": ["no APIG/public route", "no VPC or mounts", "no warm capacity or GPU", "maximum instance lifetime 10 minutes"]
+    },
+    {
+      "id": "agentkit-memory",
+      "capability": "AgentKit Memory",
+      "implementation": "AgentKitMemory",
+      "classification": "unavailable",
+      "sharedDeploymentClaim": "No release-current adapter/version record; do not present as currently verified",
+      "evidence": [],
+      "limitations": ["historical write/extract/recall demonstration only; unavailable as a release-current BytePlus claim"]
+    },
+    {
+      "id": "agentkit-knowledge",
+      "capability": "AgentKit Knowledge",
+      "implementation": "AgentKitKnowledge",
+      "classification": "unavailable",
+      "sharedDeploymentClaim": "Fail-closed in shared deployments until deployment and tenant bindings are attested",
+      "evidence": [],
+      "limitations": ["no current shared-deployment isolation attestation"]
+    },
+    {
+      "id": "skills-mcp",
+      "capability": "Skills and MCP",
+      "implementation": "Registry implementations and adapter seams",
+      "classification": "local-only",
+      "sharedDeploymentClaim": "Local registry semantics only; no BytePlus-hosted Skills or MCP claim",
+      "evidence": [],
+      "limitations": ["BytePlus-hosted integrations not live-verified"]
+    },
+    {
+      "id": "kafka",
+      "capability": "Message Queue for Kafka",
+      "implementation": "KafkaEventPublisher",
+      "classification": "unavailable",
+      "sharedDeploymentClaim": "No release-current cluster/API-version record; do not present as currently verified",
+      "evidence": [],
+      "limitations": ["historical provision/publish/consume/cleanup demonstration only; unavailable as a release-current BytePlus claim"]
+    },
+    {
+      "id": "kms",
+      "capability": "KMS credential cipher",
+      "implementation": "KmsCipher",
+      "classification": "unavailable",
+      "sharedDeploymentClaim": "No release-current key/API-version record; do not present as currently verified",
+      "evidence": [],
+      "limitations": ["historical encrypt/decrypt demonstration only; unavailable as a release-current BytePlus claim"]
+    }
+  ]
+}

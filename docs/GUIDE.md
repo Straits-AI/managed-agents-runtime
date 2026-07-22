@@ -6,10 +6,10 @@ operating it in production. For the architecture overview see the
 see [COURSE-MATERIAL.md](./COURSE-MATERIAL.md) and [articles/](./articles/).
 
 > **Built with the [byteplus-cloud skill](https://github.com/Straits-AI/byteplus-cloud-skill).**
-> Every BytePlus resource in this project — ModelArk, veFaaS Cloud Sandbox, TOS,
-> APIG, RDS PostgreSQL, VikingDB/Viking Memory, Message Queue for Kafka, and KMS —
-> was provisioned and verified through that skill's operating contract
-> (read-before-write, verify-after-write, least-privilege, cost disclosure).
+> BytePlus operations follow that skill's operating contract. Only capabilities
+> marked `verified` in the
+> [versioned provider-conformance matrix](./BYTEPLUS-PROVIDER-CONFORMANCE.md)
+> carry a release-current live claim.
 
 ---
 
