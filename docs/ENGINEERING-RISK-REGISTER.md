@@ -116,17 +116,19 @@ operations and agreed repository checks.
 
 ### MAR-P1-006 — provider claims and live conformance
 
-**Status:** partial — [Issue #26](https://github.com/Straits-AI/managed-agents-runtime/issues/26)  
+**Status:** closed — [Issue #26](https://github.com/Straits-AI/managed-agents-runtime/issues/26)
 **Owner:** runtime/provider adapters
 
-ModelArk, sandbox, TOS, memory, Kafka, and KMS have historical live evidence, but
-not every current adapter/version is revalidated by the controlled-alpha gate.
-AgentKit Knowledge remains disabled for shared deployments without attestation;
-Skills/MCP are registry implementations or seams unless separately proven live.
+The versioned BytePlus manifest records exact-source, region, retrieval time,
+toolchain, control/data/failure/redaction/cleanup evidence for the current TOS,
+ModelArk, and private veFaaS sandbox claims. AgentKit Memory, Kafka, and KMS are
+explicitly historical-only; Skills/MCP are local-only; AgentKit Knowledge remains
+unavailable and fail-closed for shared deployments without attestation. README
+and runbook matrices are checked mechanically against the manifest.
 
-**Closure:** version a live-validation record for every claimed provider surface,
-record failure boundaries and retrieval date, and keep unsupported surfaces
-fail-closed and accurately labelled.
+**Closure:** release-current live claims have bounded retained evidence, every
+other surface has an explicit non-verified classification, and contradictory
+README claims fail the provider-claims check.
 
 ### MAR-P1-007 — first-class runtime artifacts
 

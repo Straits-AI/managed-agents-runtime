@@ -20,7 +20,8 @@
     "byteplus:sandbox:provision": "tsx scripts/provision-sandbox-application.ts",
     "byteplus:sandbox:conformance": "tsx scripts/conformance-runtime-sandbox.ts",
     "byteplus:sandbox:cleanup": "tsx scripts/cleanup-sandbox-application.ts",
-    "release:version": "tsx scripts/check-release-version.ts"
+    "release:version": "tsx scripts/check-release-version.ts",
+    "provider:claims": "tsx scripts/check-provider-claims.ts"
   },
   "dependencies": {
     "@agent-infra/sandbox": "^1.0.17",

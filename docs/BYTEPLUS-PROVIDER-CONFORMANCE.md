@@ -6,16 +6,24 @@ attest a changed adapter, tool version, API surface, region, or deployment.
 
 ## Current matrix
 
-| Capability | Implementation | Current evidence | Shared-deployment claim |
+<!-- byteplus-conformance-matrix:start -->
+| Capability | Classification | Current evidence | Shared-deployment claim |
 | --- | --- | --- | --- |
-| TOS object storage | `TosObjectStore` plus `scripts/provision-tos.ts` | Automated direct and presigned runner is unit-tested locally; a fresh live record is pending operator authentication | Blocked until the live record is retained |
-| ModelArk inference | `ModelArkModel` plus `scripts/conformance-modelark.ts` | Bounded temporary-key runner is locally gated; live inference requires a current endpoint resource ID | Historical demonstration only |
-| veFaaS Cloud Sandbox | `VefaasSandboxProvider`, private WebShell, the idempotent application provisioner, and `scripts/conformance-runtime-sandbox.ts` | Exact-source provisioning, runtime, and cleanup records are required together; provider-focused promotion review remains pending | Live-tested only at the source named by the linked retained records; not yet promoted for shared deployment |
-| AgentKit Memory | `AgentKitMemory` | Historical write/extract/recall result only; current adapter-version record pending | Historical demonstration only |
-| AgentKit Knowledge | `AgentKitKnowledge` | No current shared-deployment isolation attestation | Fail-closed unless `AGENTKIT_KNOWLEDGE_LIVE_VERIFIED=1` for that deployment |
-| Skills and MCP | Registry implementations and adapter seams | Local contract evidence; no BytePlus-hosted Skills/MCP claim | Local/registry semantics only |
-| Message Queue for Kafka | `KafkaEventPublisher` | Historical provision/publish/consume/cleanup result only; current rerun pending | Historical demonstration only |
-| KMS credential cipher | `KmsCipher` | Historical encrypt/decrypt result only; current key/API-version rerun pending | Historical demonstration only |
+| TOS object storage | `verified` | byteplus-tos-56861a83-c502-4814-a17a-ba7e60d3661a at `e2665c98cb14` | Verified for the bounded object operations named in the retained record |
+| ModelArk inference | `verified` | byteplus-modelark-02178469277476285f4608cdee6bbc8f8aaf952504d48fd33e718 at `89222e4ed893` | Verified for one bounded activated preset-model chat invocation |
+| veFaaS private Cloud Sandbox | `verified` | byteplus-runtime-sandbox-runtime-f19114f at `f19114f6f409` | Verified for one bounded private CPU sandbox lifecycle with exact cleanup |
+| AgentKit Memory | `historical-only` | No release-current live record | No release-current adapter/version record; do not present as currently verified |
+| AgentKit Knowledge | `unavailable` | No release-current live record | Fail-closed in shared deployments until deployment and tenant bindings are attested |
+| Skills and MCP | `local-only` | No release-current live record | Local registry semantics only; no BytePlus-hosted Skills or MCP claim |
+| Message Queue for Kafka | `historical-only` | No release-current live record | No release-current cluster/API-version record; do not present as currently verified |
+| KMS credential cipher | `historical-only` | No release-current live record | No release-current key/API-version record; do not present as currently verified |
+<!-- byteplus-conformance-matrix:end -->
+
+The machine-readable source is
+[`provider-conformance/byteplus.v1.json`](../provider-conformance/byteplus.v1.json).
+`npm run provider:claims` validates both this table and the README against that
+manifest. A `verified` row is limited to the named evidence and limitations; it
+does not promote every operation offered by the product.
 
 This document records status, not secrets or live resource inventory. Operator
 evidence must be retained outside the repository unless its resource metadata

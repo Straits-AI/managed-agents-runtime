@@ -123,9 +123,9 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
 - **Event transport** (`src/store/outbox.ts`, `src/bin/relay.ts`): every event
   writes a transactional outbox row; the `relay` process drains it to a pluggable
   `EventPublisher` (`FOR UPDATE SKIP LOCKED`, at-least-once). In-process by
-  default; `PUBLISHER=kafka` uses the real `KafkaPublisher` (kafkajs) — verified
-  end-to-end against a live BytePlus Message Queue for Kafka cluster
-  (publish→consume roundtrip) (`npm run relay`).
+  default; `PUBLISHER=kafka` uses the real `KafkaPublisher` (kafkajs). A historical
+  BytePlus cluster run completed a publish/consume roundtrip, but this release has
+  no current cluster/API-version record (`npm run relay`).
 - **Credential broker** (`src/providers/credentialBroker.ts`): per-tenant secrets
   encrypted at rest, released to a run's outbound tool call only after verifying
   tenant + action + resource + expiry + call-limit, and injected into the tool
@@ -167,6 +167,23 @@ for role, probe, migration, and rollback contracts.
 Copy `.env.example` to `.env` and fill it in. Provisioning and credential helpers
 live in [`scripts/`](./scripts/). Keep deployment-specific resource IDs in a
 private operator inventory rather than committing them to this repository:
+
+<!-- byteplus-conformance-matrix:start -->
+| Capability | Classification | Current evidence | Shared-deployment claim |
+| --- | --- | --- | --- |
+| TOS object storage | `verified` | byteplus-tos-56861a83-c502-4814-a17a-ba7e60d3661a at `e2665c98cb14` | Verified for the bounded object operations named in the retained record |
+| ModelArk inference | `verified` | byteplus-modelark-02178469277476285f4608cdee6bbc8f8aaf952504d48fd33e718 at `89222e4ed893` | Verified for one bounded activated preset-model chat invocation |
+| veFaaS private Cloud Sandbox | `verified` | byteplus-runtime-sandbox-runtime-f19114f at `f19114f6f409` | Verified for one bounded private CPU sandbox lifecycle with exact cleanup |
+| AgentKit Memory | `historical-only` | No release-current live record | No release-current adapter/version record; do not present as currently verified |
+| AgentKit Knowledge | `unavailable` | No release-current live record | Fail-closed in shared deployments until deployment and tenant bindings are attested |
+| Skills and MCP | `local-only` | No release-current live record | Local registry semantics only; no BytePlus-hosted Skills or MCP claim |
+| Message Queue for Kafka | `historical-only` | No release-current live record | No release-current cluster/API-version record; do not present as currently verified |
+| KMS credential cipher | `historical-only` | No release-current live record | No release-current key/API-version record; do not present as currently verified |
+<!-- byteplus-conformance-matrix:end -->
+
+The versioned source and detailed limitations are in
+[`provider-conformance/byteplus.v1.json`](./provider-conformance/byteplus.v1.json)
+and [the conformance runbook](./docs/BYTEPLUS-PROVIDER-CONFORMANCE.md).
 
 | Setting | How to obtain |
 | --- | --- |
@@ -298,23 +315,24 @@ changes; consult the provider conformance matrix for the current release gate.
 | M9 survival benchmark | ✅ **PASSED on the live stack** (TOS + ModelArk + Cloud Sandbox via APIG), 2026-07-17 — 57-event gapless history, exactly-once external write |
 | Controlled multi-tenant alpha | ✅ automated P0 gate: fail-closed configuration, tenant inheritance, atomic admission, knowledge isolation, governed HTTP/MCP, credentials, concurrency, and crash recovery. Machine-readable evidence is retained by CI. This is not a public-beta or production-ready claim. |
 | Phase 2A: harden what we own | ✅ tool-level observability, budget-exhaustion enforcement, denied-approval, external signals + scheduled runs — all tested |
-| Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres adapter (default) behind a provider-neutral `MemoryProvider`; the AgentKit adapter (`src/providers/agentkitMemory.ts`) is proven live (next row). |
-| Phase 2 — AgentKit Memory binding | ✅ **live**: `MEMORY_PROVIDER=agentkit` writes/recalls via Viking Memory (AgentKit's memory backend) through a path-based SignerV4 client. Confirmed end-to-end (write → async AI extraction → recall). |
+| Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres is the release-current default behind a provider-neutral `MemoryProvider`; AgentKit remains selectable but is not release-current live-verified. |
+| Phase 2 — AgentKit Memory binding | ⚠️ historical-only write/extract/recall demonstration. `MEMORY_PROVIDER=agentkit` is implemented, but no current adapter/version record exists for this release. |
 | Phase 2 — Knowledge / Skills / MCP | ✅ Postgres knowledge, registry Skills, and policy-classified registry MCP are implemented. The AgentKit Knowledge adapter is tenant-bound but remains fail-closed in shared deployments until live conformance is attested; AgentKit Skills/MCP remain adapter seams, not live-verified integrations. |
 | Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. |
 | Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). |
 | Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. |
 | Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. |
 | Controlled-alpha operations | ✅ multi-tenant auth, atomic per-tenant admission, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Public-beta and production gates remain open. Cost reference in [`docs/COST.md`](./docs/COST.md). |
-| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, outbox relay + `EventPublisher` with a **live-verified** Kafka adapter, and a credential broker (encrypted per-tenant secrets injected into tool calls, never the model) with **local + BytePlus KMS** ciphers. |
+| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, outbox relay + `EventPublisher`, and a credential broker are implemented. BytePlus Kafka and KMS evidence is historical-only for this release; local/provider-neutral contracts remain tested. |
 
 Built well beyond the original Phase 1 cut: subagents (Phase 3), signals +
 scheduling, AgentKit Memory/Knowledge/Skills/MCP (Phase 2), the semantic
 supervisor (Phase 5), multi-tenant auth + quotas + cost attribution
 (Productionization), and the full deferral sweep — streaming, forking, global
 rate limiting, the event-publisher relay with a **Kafka adapter proven live**
-against a real BytePlus cluster (provisioned, publish→consume verified, torn
-down), and the credential broker with a **BytePlus KMS** cipher. Remaining
+in a historical BytePlus cluster run (provisioned, publish→consume verified,
+torn down), and the credential broker with a **BytePlus KMS** cipher. Those
+Kafka and KMS demonstrations are historical-only for this release. Remaining
 external-infra items: FileNAS, and RocketMQ (the Kafka adapter covers the
 event-bus case). The KMS cipher requires the KMS service enabled on the account
 before use.
