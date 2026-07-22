@@ -201,6 +201,42 @@ describe('BytePlus private sandbox runtime provider', () => {
     expect(states).toHaveLength(0);
   });
 
+  it('retries only idempotent private file operations after an uncertain transport timeout', async () => {
+    const lifecycle = {
+      createSandbox: vi.fn(),
+      describeSandbox: vi.fn(),
+      genWebshellEndpoint: vi.fn(async () => ({
+        Endpoint: 'wss://sandbox.example/webshell?ticket=runtime-secret',
+      })),
+      killSandbox: vi.fn(),
+      listSandboxes: vi.fn(),
+      getApigDomains: vi.fn(),
+    };
+    const privateCommand = vi.fn()
+      .mockRejectedValueOnce(new Error('Private WebShell command timed out'))
+      .mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    const sleep = vi.fn(async () => {});
+    const provider = new VefaasSandboxProvider(loadConfig({
+      BYTEPLUS_ACCESS_KEY_ID: 'fixture-ak',
+      BYTEPLUS_SECRET_ACCESS_KEY: 'fixture-sk',
+      VEFAAS_SANDBOX_FUNCTION_ID: 'function-fixture',
+      SANDBOX_TRANSPORT: 'private-webshell',
+    }), { lifecycle, privateCommand, sleep });
+    const handle = { sandboxId: 'sandbox-fixture', baseUrl: 'private://webshell' };
+
+    await expect(provider.writeFile(
+      handle,
+      '/home/gem/workspace/retry.txt',
+      'retry-safe-content',
+    )).resolves.toBeUndefined();
+    expect(sleep).toHaveBeenCalledWith(500);
+    expect(privateCommand).toHaveBeenCalledTimes(3);
+    expect(privateCommand.mock.calls[0]?.[0].command)
+      .toBe(privateCommand.mock.calls[1]?.[0].command);
+    expect(privateCommand.mock.calls[2]?.[0].command).toContain('dd ');
+    expect(privateCommand.mock.calls[2]?.[0].command).not.toContain('>>');
+  });
+
   it('terminates a Ready instance when explicit APIG discovery fails', async () => {
     const states: Array<Record<string, unknown>> = [
       { Id: 'sandbox-apig', Status: 'Ready' },

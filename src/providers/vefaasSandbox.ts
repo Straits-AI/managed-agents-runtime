@@ -285,7 +285,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
         throw new Error('private file.writeFile content exceeded 100000-byte bound');
       }
       const encodedPath = Buffer.from(path, 'utf8').toString('base64');
-      const initialize = await this.execPrivate(
+      const initialize = await this.execPrivateIdempotent(
         handle,
         `ma_path=$(printf '%s' '${encodedPath}' | base64 -d) && ` +
           `mkdir -p -- "$(dirname -- "$ma_path")" && ` +
@@ -297,10 +297,11 @@ export class VefaasSandboxProvider implements SandboxProvider {
       }
       for (let offset = 0; offset < bytes.byteLength; offset += 24 * 1024) {
         const encodedChunk = bytes.subarray(offset, offset + 24 * 1024).toString('base64');
-        const append = await this.execPrivate(
+        const append = await this.execPrivateIdempotent(
           handle,
           `ma_path=$(printf '%s' '${encodedPath}' | base64 -d) && ` +
-            `printf '%s' '${encodedChunk}' | base64 -d >> "$ma_path"`,
+            `printf '%s' '${encodedChunk}' | base64 -d | ` +
+            `dd of="$ma_path" bs=1 seek=${offset} conv=notrunc status=none`,
           { timeoutSec: 60, cwd: WORKSPACE_DIR },
         );
         if (append.exitCode !== 0) {
@@ -321,7 +322,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
   async readFile(handle: SandboxHandle, path: string): Promise<string> {
     if (this.transport === 'private-webshell') {
       const encodedPath = Buffer.from(path, 'utf8').toString('base64');
-      const result = await this.execPrivate(
+      const result = await this.execPrivateIdempotent(
         handle,
         `ma_path=$(printf '%s' '${encodedPath}' | base64 -d) && cat -- "$ma_path"`,
         { timeoutSec: 60, cwd: WORKSPACE_DIR },
@@ -398,12 +399,28 @@ export class VefaasSandboxProvider implements SandboxProvider {
     });
   }
 
+  private async execPrivateIdempotent(
+    handle: SandboxHandle,
+    command: string,
+    opts: { timeoutSec?: number; cwd?: string },
+  ): Promise<ExecResult> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.execPrivate(handle, command, opts);
+      } catch (error) {
+        if (attempt === 2 || !isRetriablePrivateTransportError(error)) throw error;
+        await this.sleepFn(500);
+      }
+    }
+    throw new Error('Private WebShell idempotent command exhausted retries');
+  }
+
   private async ensureWorkspace(handle: SandboxHandle): Promise<void> {
-    const result = await this.exec(
-      handle,
-      `mkdir -p -- '${WORKSPACE_DIR}'`,
-      { timeoutSec: 60, cwd: '/' },
-    );
+    const command = `mkdir -p -- '${WORKSPACE_DIR}'`;
+    const opts = { timeoutSec: 60, cwd: '/' };
+    const result = this.transport === 'private-webshell'
+      ? await this.execPrivateIdempotent(handle, command, opts)
+      : await this.exec(handle, command, opts);
     if (result.exitCode !== 0) {
       throw new Error(
         `could not initialize sandbox workspace: ${result.stderr.slice(0, 200)}`,
@@ -431,4 +448,12 @@ export class VefaasSandboxProvider implements SandboxProvider {
     }
     throw new Error('sandbox termination was not verified before deadline');
   }
+}
+
+function isRetriablePrivateTransportError(error: unknown): boolean {
+  return error instanceof Error && new Set([
+    'Private WebShell connection failed',
+    'Private WebShell closed before result',
+    'Private WebShell command timed out',
+  ]).has(error.message);
 }

@@ -132,6 +132,9 @@ cross-function child fails closed before `DeleteFunction`.
 Runtime termination likewise treats the provider's post-kill `Terminating`
 state as accepted termination, but final evidence separately reports live
 instances and retained tombstones and requires exact function and run metadata.
+Transient private-WebShell failures are retried only for idempotent workspace
+and file operations. File chunks use fixed byte offsets so an uncertain retry
+cannot duplicate content; arbitrary shell commands are never retried.
 
 This proves private WebShell execution, not public HTTP. It does not create or
 use an API Gateway route. Provisioning omits `InstanceType`, verifies the draft
