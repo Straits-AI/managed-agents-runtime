@@ -349,6 +349,27 @@ the same mutation MUST NOT be independently committed by both systems.
 - Kertas and runtime releases MUST declare the contract versions they require and
   provide.
 
+### `run-as-session/v1` migration and deprecation policy
+
+`run-as-session/v1` remains a supported compatibility contract while
+`deprecatedAt` and `sunsetAt` are `null` in authenticated `GET /v1/contracts`
+discovery. A planned contract is informational and MUST NOT be treated as
+available; clients feature-detect `features.managedSession` only on entries in
+the supported `contracts` list.
+
+When `kertas.runtime/v1alpha1` becomes supported, the runtime MAY mark
+`run-as-session/v1` as `deprecated`. That change MUST publish an absolute
+`deprecatedAt`, an absolute `sunsetAt` at least 90 days later, and the replacement
+contract in discovery. The compatibility routes remain operational until the
+published sunset. Removal requires an explicit catalog change after that time;
+absence, a planned target, or a documentation edit cannot silently remove the
+contract.
+
+Migration is client-side public-contract feature detection. It never permits a
+Kertas client to read runtime tables, import migrations, or infer a
+ManagedSession from internal Run state. Existing in-flight Runs keep their
+published Run contract; no database rewrite is a Kertas migration mechanism.
+
 Provider choice follows the versioned
 [provider portability contract](./PROVIDER-PORTABILITY.md). Kertas MUST express
 required capability IDs and minimum assurance. It MUST NOT make BytePlus, AWS,

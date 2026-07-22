@@ -44,8 +44,25 @@ export function runtimeContractCatalog() {
       {
         id: CURRENT_COMPATIBILITY_MODE,
         status: 'compatibility' as const,
+        lifecycle: 'supported' as const,
         href: '/v1/contracts/run-as-session/v1',
+        introducedAt: '2026-07-22',
+        deprecatedAt: null,
+        sunsetAt: null,
+        replacement: 'kertas.runtime/v1alpha1',
+        features: { managedSession: false },
       },
     ],
+    plannedContracts: [
+      {
+        id: 'kertas.runtime/v1alpha1',
+        lifecycle: 'not_available' as const,
+        features: { managedSession: false },
+      },
+    ],
+    deprecationPolicy: {
+      minimumNoticeDays: 90,
+      compatibilityModeRemoval: 'explicit_sunset_only' as const,
+    },
   };
 }
