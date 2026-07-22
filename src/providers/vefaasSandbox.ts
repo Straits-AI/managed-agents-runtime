@@ -149,19 +149,29 @@ export class VefaasSandboxProvider implements SandboxProvider {
     cpuMilli?: number;
     memoryMB?: number;
   }): Promise<SandboxHandle> {
-    const result = await this.vefaas.createSandbox({
-      functionId: this.functionId,
-      timeoutMinutes: req.timeoutMinutes,
-      envs: req.envs,
-      // Only override the image per-call; otherwise the instance inherits the
-      // released app's image AND startup command. Overriding Image without also
-      // supplying Command is a 400 ("Command is empty").
-      image: req.image,
-      command: req.image ? this.defaultCommand : undefined,
-      cpuMilli: req.cpuMilli,
-      memoryMB: req.memoryMB,
-      metadata: { runId: req.runId },
-    });
+    let result: CreateSandboxResult;
+    try {
+      result = await this.vefaas.createSandbox({
+        functionId: this.functionId,
+        timeoutMinutes: req.timeoutMinutes,
+        envs: req.envs,
+        // Only override the image per-call; otherwise the instance inherits the
+        // released app's image AND startup command. Overriding Image without also
+        // supplying Command is a 400 ("Command is empty").
+        image: req.image,
+        command: req.image ? this.defaultCommand : undefined,
+        cpuMilli: req.cpuMilli,
+        memoryMB: req.memoryMB,
+        metadata: { runId: req.runId },
+      });
+    } catch (error) {
+      try {
+        await this.cleanupAmbiguousCreate(req.runId);
+      } catch {
+        throw new Error('CreateSandbox failed and exact-run cleanup was not verified');
+      }
+      throw error;
+    }
     const sandboxId = (result.SandboxId ?? result.Id) as string | undefined;
     if (!sandboxId) {
       throw new Error(`CreateSandbox returned no sandbox id: ${JSON.stringify(result)}`);
@@ -182,6 +192,53 @@ export class VefaasSandboxProvider implements SandboxProvider {
     } catch (error) {
       await this.terminate(privateHandle).catch(() => {});
       throw error;
+    }
+  }
+
+  private async cleanupAmbiguousCreate(runId: string): Promise<void> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const inventory = await this.vefaas.listSandboxes(this.functionId, {
+        pageNumber: 1,
+        pageSize: 100,
+        metadata: { runId },
+      });
+      const exact = (inventory.Sandboxes ?? []).filter((sandbox) => {
+        const metadata = sandbox.Metadata;
+        return sandbox.FunctionId === this.functionId
+          && typeof sandbox.Id === 'string'
+          && /^[A-Za-z0-9._-]{1,240}$/.test(sandbox.Id)
+          && typeof metadata === 'object'
+          && metadata !== null
+          && !Array.isArray(metadata)
+          && (metadata as Record<string, unknown>).runId === runId;
+      });
+      if (exact.length > 10) {
+        throw new Error('Ambiguous CreateSandbox cleanup exceeded instance bound');
+      }
+      if (exact.length === 0) {
+        if (attempt < 4) await this.sleepFn(1_000);
+        continue;
+      }
+      for (const sandbox of exact) {
+        await this.vefaas.killSandbox(this.functionId, sandbox.Id as string);
+      }
+      const after = await this.vefaas.listSandboxes(this.functionId, {
+        pageNumber: 1,
+        pageSize: 100,
+        metadata: { runId },
+      });
+      const remaining = (after.Sandboxes ?? []).some((sandbox) => {
+        const metadata = sandbox.Metadata;
+        return sandbox.FunctionId === this.functionId
+          && typeof metadata === 'object'
+          && metadata !== null
+          && !Array.isArray(metadata)
+          && (metadata as Record<string, unknown>).runId === runId;
+      });
+      if (remaining) {
+        throw new Error('Ambiguous CreateSandbox cleanup was not verified');
+      }
+      return;
     }
   }
 

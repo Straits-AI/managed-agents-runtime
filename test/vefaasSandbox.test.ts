@@ -4,6 +4,62 @@ import { BytePlusApiError } from '../src/providers/byteplus/signer.js';
 import { VefaasSandboxProvider } from '../src/providers/vefaasSandbox.js';
 
 describe('BytePlus private sandbox runtime provider', () => {
+  it('finds and kills an exact run-owned instance after an ambiguous create error', async () => {
+    let listed = 0;
+    const lifecycle = {
+      createSandbox: vi.fn(async () => {
+        throw new BytePlusApiError(
+          'CreateSandbox',
+          'InvalidOperation',
+          'startup failed',
+          403,
+          'request-create-failed',
+        );
+      }),
+      describeSandbox: vi.fn(),
+      genWebshellEndpoint: vi.fn(),
+      killSandbox: vi.fn(async () => ({})),
+      listSandboxes: vi.fn(async () => {
+        listed += 1;
+        return listed === 1
+          ? {
+              Sandboxes: [{
+                Id: 'sandbox-failed-create',
+                FunctionId: 'function-fixture',
+                Metadata: { runId: 'run-ambiguous' },
+                Status: 'Failed',
+              }],
+              Total: 1,
+            }
+          : { Sandboxes: [], Total: 0 };
+      }),
+      getApigDomains: vi.fn(),
+    };
+    const cfg = loadConfig({
+      BYTEPLUS_ACCESS_KEY_ID: 'fixture-ak',
+      BYTEPLUS_SECRET_ACCESS_KEY: 'fixture-sk',
+      VEFAAS_SANDBOX_FUNCTION_ID: 'function-fixture',
+      SANDBOX_TRANSPORT: 'private-webshell',
+    });
+    const provider = new VefaasSandboxProvider(cfg, {
+      lifecycle,
+      sleep: async () => {},
+    });
+
+    await expect(provider.create({
+      runId: 'run-ambiguous',
+      timeoutMinutes: 10,
+    })).rejects.toThrow('startup failed');
+    expect(lifecycle.listSandboxes).toHaveBeenCalledWith(
+      'function-fixture',
+      expect.objectContaining({ metadata: { runId: 'run-ambiguous' } }),
+    );
+    expect(lifecycle.killSandbox).toHaveBeenCalledWith(
+      'function-fixture',
+      'sandbox-failed-create',
+    );
+  });
+
   it('waits for Ready, executes privately, and verifies termination', async () => {
     const states: Array<Record<string, unknown> | Error> = [
       new BytePlusApiError(

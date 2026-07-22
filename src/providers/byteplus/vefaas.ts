@@ -107,13 +107,19 @@ export class VefaasClient {
 
   listSandboxes(
     functionId: string,
-    opts: { pageNumber?: number; pageSize?: number; status?: string } = {},
+    opts: {
+      pageNumber?: number;
+      pageSize?: number;
+      status?: string;
+      metadata?: Record<string, string>;
+    } = {},
   ): Promise<{ Sandboxes?: SandboxInfo[]; Total?: number }> {
     return this.call('vefaas', 'ListSandboxes', {
       FunctionId: functionId,
       PageNumber: opts.pageNumber ?? 1,
       PageSize: opts.pageSize ?? 10,
       Status: opts.status,
+      Metadata: opts.metadata,
     });
   }
 

@@ -562,7 +562,7 @@ function matchingRevision(revisionNumber: number): Record<string, unknown> {
     FunctionType: 'sandbox',
     Runtime: 'native/v1',
     SourceType: 'image',
-    Source: 'enterprise-public-ap-southeast-1.cr.volces.com/vefaas-public/code-cli:0.0.7',
+    Source: 'enterprise-public-ap-southeast-1.cr.volces.com/vefaas-public/all-in-one-sandbox:1.0.0.159',
     Command: '/opt/gem/run.sh',
     Port: 8080,
     CpuStrategy: 'always',

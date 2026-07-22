@@ -187,7 +187,9 @@ private operator inventory rather than committing them to this repository:
 > private commands return at most 100,000 bytes across stdout/stderr, and the
 > UTF-8 text-file seam is bounded to 100,000 bytes per file;
 > `CreateSandbox` uses `InstanceImageInfo.{Image,Command}` (not `ImageUrl`) and
-> inherits the released app image when omitted; the AIO sandbox runs as user
+> inherits the released app image when omitted; the released image is the
+> exact pre-cached BytePlus All-in-one image whose documented startup command
+> is `/opt/gem/run.sh`; the AIO sandbox runs as user
 > `gem`, so the workspace lives under `/home/gem/workspace`.
 
 Then verify every surface:

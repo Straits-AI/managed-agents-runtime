@@ -114,6 +114,11 @@ success or sanitized failure evidence replaces that receipt atomically.
 BytePlus may omit default CPU allocation, empty environment variables, and a
 disabled VPC from application/revision readback; omission is accepted only for
 those canonical defaults, while any returned conflicting value fails closed.
+The released image is an exact, pre-cached BytePlus All-in-one image using the
+documented `/opt/gem/run.sh` startup contract. Runtime conformance also reserves
+a pending receipt before creation. If creation fails after BytePlus allocates an
+instance, the provider inventories by the exact run metadata, kills only those
+instances, verifies their absence, and records a sanitized failure receipt.
 
 This proves private WebShell execution, not public HTTP. It does not create or
 use an API Gateway route. Provisioning omits `InstanceType`, verifies the draft

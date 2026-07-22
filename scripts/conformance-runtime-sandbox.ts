@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { loadConfig, requireConfig } from '../src/config.js';
+import { reserveEvidenceRecord } from '../src/providers/byteplus/provisioningEvidence.js';
+import { BytePlusApiError } from '../src/providers/byteplus/signer.js';
 import { VefaasClient, type VefaasResponseMetadata } from '../src/providers/byteplus/vefaas.js';
 import { runSandboxConformance } from '../src/providers/sandboxConformance.js';
 import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
@@ -59,44 +59,11 @@ const client = new VefaasClient({
   },
 });
 const provider = new VefaasSandboxProvider(cfg, { lifecycle: client });
-const evidence = await runSandboxConformance({
-  create: provider.create.bind(provider),
-  describe: provider.describe.bind(provider),
-  exec: provider.exec.bind(provider),
-  writeFile: provider.writeFile.bind(provider),
-  readFile: provider.readFile.bind(provider),
-  terminate: provider.terminate.bind(provider),
-  sleep: async (milliseconds) => {
-    await new Promise<void>((resolveSleep) => setTimeout(resolveSleep, milliseconds));
-  },
-}, {
-  runId,
-  timeoutMinutes: 10,
-  marker: `runtime-${randomUUID()}`,
-});
-const finalInventory = await client.listSandboxes(functionId, { pageNumber: 1, pageSize: 100 });
-if (finalInventory.Total !== 0 || (finalInventory.Sandboxes?.length ?? 0) !== 0) {
-  throw new Error('Runtime sandbox final instance inventory was not empty');
-}
-for (const action of [
-  'CreateSandbox',
-  'DescribeSandbox',
-  'GenWebshellEndpoint',
-  'KillSandbox',
-  'ListSandboxes',
-]) {
-  if (!responseMetadata.some((metadata) => metadata.action === action && metadata.requestId)) {
-    throw new Error(`Runtime sandbox did not preserve ${action} request metadata`);
-  }
-}
-if (readGit(['rev-parse', 'HEAD']) !== source.commit || readGit(['status', '--porcelain'])) {
-  throw new Error('Runtime sandbox source revision changed during the live run');
-}
 const bpVersion = execFileSync('bp', ['version'], {
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'ignore'],
 }).trim();
-const record = {
+const baseRecord = {
   schemaVersion: 1,
   evidenceId: `byteplus-runtime-sandbox-${runId}`,
   source: {
@@ -116,9 +83,6 @@ const record = {
     maximumInstanceLifetimeMinutes: 10,
   },
   application: { functionId },
-  successfulRequestMetadata: responseMetadata,
-  evidence,
-  finalInventory: { liveInstances: 0 },
   redaction: {
     credentialsSerialized: false,
     signedEndpointSerialized: false,
@@ -127,10 +91,87 @@ const record = {
     fileContentSerialized: false,
   },
 };
-const serialized = `${JSON.stringify(record, null, 2)}\n`;
-writeFileSync(resolve(evidenceFile), serialized, {
-  encoding: 'utf8',
-  flag: 'wx',
-  mode: 0o600,
+const receipt = reserveEvidenceRecord(evidenceFile, {
+  ...baseRecord,
+  status: 'pending',
+  successfulRequestMetadata: [],
 });
-process.stdout.write(serialized);
+
+try {
+  const evidence = await runSandboxConformance({
+    create: provider.create.bind(provider),
+    describe: provider.describe.bind(provider),
+    exec: provider.exec.bind(provider),
+    writeFile: provider.writeFile.bind(provider),
+    readFile: provider.readFile.bind(provider),
+    terminate: provider.terminate.bind(provider),
+    sleep: async (milliseconds) => {
+      await new Promise<void>((resolveSleep) => setTimeout(resolveSleep, milliseconds));
+    },
+  }, {
+    runId,
+    timeoutMinutes: 10,
+    marker: `runtime-${randomUUID()}`,
+  });
+  const finalInventory = await client.listSandboxes(functionId, {
+    pageNumber: 1,
+    pageSize: 100,
+  });
+  if (finalInventory.Total !== 0 || (finalInventory.Sandboxes?.length ?? 0) !== 0) {
+    throw new Error('Runtime sandbox final instance inventory was not empty');
+  }
+  for (const action of [
+    'CreateSandbox',
+    'DescribeSandbox',
+    'GenWebshellEndpoint',
+    'KillSandbox',
+    'ListSandboxes',
+  ]) {
+    if (!responseMetadata.some((metadata) => metadata.action === action && metadata.requestId)) {
+      throw new Error(`Runtime sandbox did not preserve ${action} request metadata`);
+    }
+  }
+  assertSourceUnchanged();
+  const record = {
+    ...baseRecord,
+    status: 'succeeded',
+    successfulRequestMetadata: responseMetadata,
+    evidence,
+    finalInventory: { liveInstances: 0 },
+  };
+  receipt.commit(record);
+  process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
+} catch (error) {
+  let liveInstances: number | null = null;
+  try {
+    const finalInventory = await client.listSandboxes(functionId, {
+      pageNumber: 1,
+      pageSize: 100,
+      metadata: { runId },
+    });
+    liveInstances = finalInventory.Sandboxes?.length ?? finalInventory.Total ?? null;
+  } catch {
+    // The failure receipt must still survive an unavailable final inventory read.
+  }
+  const record = {
+    ...baseRecord,
+    status: 'failed',
+    successfulRequestMetadata: responseMetadata,
+    failure: {
+      code: error instanceof BytePlusApiError ? error.code : 'RuntimeConformanceFailed',
+      requestId: error instanceof BytePlusApiError ? error.requestId : null,
+      sourceUnchanged: readGit(['rev-parse', 'HEAD']) === source.commit
+        && !readGit(['status', '--porcelain']),
+    },
+    finalInventory: { liveInstances },
+  };
+  receipt.commit(record);
+  process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
+  throw new Error('Runtime sandbox conformance failed; sanitized evidence was retained');
+}
+
+function assertSourceUnchanged(): void {
+  if (readGit(['rev-parse', 'HEAD']) !== source.commit || readGit(['status', '--porcelain'])) {
+    throw new Error('Runtime sandbox source revision changed during the live run');
+  }
+}

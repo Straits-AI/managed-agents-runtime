@@ -49,8 +49,8 @@ export class PrivateSandboxConfigurationError extends Error {
   }
 }
 
-const CODE_IMAGE =
-  'enterprise-public-ap-southeast-1.cr.volces.com/vefaas-public/code-cli:0.0.7';
+const AIO_IMAGE =
+  'enterprise-public-ap-southeast-1.cr.volces.com/vefaas-public/all-in-one-sandbox:1.0.0.159';
 const MANAGED_TAGS = [
   { Key: 'managed-by', Value: 'managed-agents-runtime' },
   { Key: 'managed-purpose', Value: 'private-sandbox' },
@@ -65,7 +65,7 @@ export function defaultPrivateSandboxApplicationPlan(
   return {
     name,
     description: 'Private BytePlus runtime conformance application',
-    image: CODE_IMAGE,
+    image: AIO_IMAGE,
     command: '/opt/gem/run.sh',
     port: 8080,
     cpuMilli: 1000,
