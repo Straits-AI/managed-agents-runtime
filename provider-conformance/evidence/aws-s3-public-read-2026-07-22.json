@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "evidenceId": "aws-public-s3-ec76925f517a",
+  "evidenceId": "aws-public-s3-c44fdceae6aa",
   "source": {
     "repository": "https://github.com/Straits-AI/managed-agents-runtime",
-    "commit": "ec76925f517a195bc34bfc658ded8b36093ed80f",
+    "commit": "c44fdceae6aa224cd0e5c35f42c182b71ea88127",
     "commitOrigin": "git-clean-worktree",
     "unchangedFiles": [
       {
@@ -22,7 +22,7 @@
   },
   "provider": "aws-s3-public",
   "region": "us-east-1",
-  "retrievedAt": "2026-07-22T05:56:55.268Z",
+  "retrievedAt": "2026-07-22T06:18:15.811Z",
   "target": {
     "registry": "AWS Registry of Open Data",
     "bucket": "noaa-goes16",
@@ -37,13 +37,13 @@
       "key": "index.html",
       "head": {
         "status": 200,
-        "requestId": "4J48AC740XHRT1E7",
+        "requestId": "GN71NAV1JRM09ERE",
         "etag": "\"3b4b4277037c1127ed4ba68e26461b2e\"",
         "contentLength": 32357
       },
       "get": {
         "status": 200,
-        "requestId": "N5RF9CVV9M6P2P8E",
+        "requestId": "AJT00S4S7JXM4NAK",
         "etag": "\"3b4b4277037c1127ed4ba68e26461b2e\"",
         "contentLength": 32357
       },
@@ -51,16 +51,16 @@
       "bodySha256": "e8c692bc3d0db082d4203662882cebdf4442661f191c5f1ce5c1541b39174c11"
     },
     "negative": {
-      "key": "managed-agents-portability-missing-ec76925f517a",
+      "key": "managed-agents-portability-missing-c44fdceae6aa",
       "head": {
         "status": 404,
-        "requestId": "SY9NJS1CGW6FRFQ4",
+        "requestId": "K2SP9ZPBT1PGAYKN",
         "etag": null,
         "contentLength": null
       },
       "get": {
         "status": 404,
-        "requestId": "SY9HJE24XQ9J9DJX"
+        "requestId": "QCYB5RHPYM24H3V2"
       }
     }
   },

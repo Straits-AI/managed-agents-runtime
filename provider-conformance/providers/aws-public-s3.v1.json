@@ -28,7 +28,7 @@
         "level": "live",
         "tests": ["test/awsPublicS3Reader.test.ts"],
         "evidencePath": "provider-conformance/evidence/aws-s3-public-read-2026-07-22.json",
-        "evidenceSha256": "f7360b83e9143db389bbdac103e82dd23a2092d2e3973afd2dd05739a195f259"
+        "evidenceSha256": "f4e1596430bc02b83810dbef93d9a8dcdbc1e4261cb72a2d952d5178e1cc568f"
       },
       "failureBoundary": "Anonymous HEAD/GET are bounded before buffering; 404 is absence and every other transport/provider failure rejects with status and request ID only.",
       "limitations": ["one public NOAA bucket proof", "no list, version, authenticated read, availability, or performance claim"]
