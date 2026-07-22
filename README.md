@@ -173,14 +173,27 @@ private operator inventory rather than committing them to this repository:
 | `BYTEPLUS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN` | `python3 scripts/refresh-creds.py` syncs STS creds from `bp login` (~15 min TTL; rerun before a cloud batch) |
 | `TOS_BUCKET` | `scripts/provision-tos.ts` (idempotent create plus direct/presigned conformance, bounded failure-path evidence, verified object cleanup, and a versioned provenance record) |
 | `ARK_API_KEY` / `ARK_MODEL` | activate a model in the console, then `scripts/get-ark-key.py --endpoint-id ep-…` (key + endpoint id → `.env`) |
-| `VEFAAS_SANDBOX_FUNCTION_ID` | sandbox application created in the console (only surface that sets `FunctionType: sandbox`); instances are then fully programmatic |
-| `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | APIG serverless gateway + Key Auth route fronting the sandbox; key registered via `bp apig CreateConsumerCredential` |
+| `VEFAAS_SANDBOX_FUNCTION_ID` | `npm run byteplus:sandbox:provision -- --profile dev --region ap-southeast-1 --name <deterministic-name> --evidence-file <owner-only-path>` creates or safely reuses an exact released CPU sandbox application |
+| `SANDBOX_TRANSPORT` | `private-webshell` by default; set `apig` only for an explicitly reviewed public gateway deployment |
+| `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | optional public APIG route for the runtime's AIO REST adapter; private conformance uses secret-isolated WebShell and does not require APIG |
 
-> **Provisioning notes learned the hard way:** sandbox applications and the
-> APIG gateway are console-only to create;
+> **Provisioning notes learned the hard way:** sandbox application fields omitted
+> from older CLI help are sent through one structured body and immediately read
+> back; CPU applications omit `InstanceType` because BytePlus documents every
+> non-empty value as a specific GPU type; application `MaxConcurrency` is 10,
+> the documented API minimum, while release `MaxInstance` remains 1; exact-name
+> resources are reused only after full configuration and stable-revision validation;
+> APIG is a separate public-exposure decision, not a private sandbox prerequisite;
+> the OAuth-backed `bp` lifecycle rejects per-run environment values because
+> `bp --body` is an argv transport; configure non-secret defaults on the released
+> application and use a credential-isolating provider channel for runtime secrets;
+> private commands return at most 100,000 bytes across stdout/stderr, and the
+> UTF-8 text-file seam is bounded to 100,000 bytes per file;
 > `CreateSandbox` uses `InstanceImageInfo.{Image,Command}` (not `ImageUrl`) and
-> inherits the released app image when omitted; the AIO sandbox runs as user
-> `gem`, so the workspace lives under `/home/gem/workspace`.
+> inherits the released app image when omitted; the released image is the exact
+> pre-cached SandboxFusion image using its documented
+> `bash /root/sandbox/scripts/run.sh`, port 8080, and `HOME=/home/tiger`
+> contract. Kertas initializes its own workspace directory independently.
 
 Then verify every surface:
 
@@ -189,8 +202,26 @@ npm run preflight       # control-plane PASS/FAIL per provider
 node --env-file=.env --import tsx scripts/provision-tos.ts \
   --evidence-file /tmp/tos-conformance.json               # TOS live evidence
 node --env-file=.env --import tsx scripts/smoke-ark.ts       # ModelArk chat (≤32 tokens)
-node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→exec→file r/w→terminate via gateway
+node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→private exec→file r/w→verified terminate
+npm run byteplus:sandbox:provision -- \
+  --profile dev --region ap-southeast-1 --name <deterministic-name> \
+  --evidence-file /secure/path/sandbox-provisioning.json
+npm run byteplus:sandbox:conformance -- \
+  --profile dev --region ap-southeast-1 \
+  --function-id <released-sandbox-function-id> \
+  --application-name <deterministic-name> \
+  --run-id <non-secret-run-id> \
+  --evidence-file /secure/path/sandbox-runtime.json          # real VefaasSandboxProvider via bp OAuth
+npm run byteplus:sandbox:cleanup -- \
+  --profile dev --region ap-southeast-1 \
+  --function-id <released-sandbox-function-id> --name <deterministic-name> \
+  --evidence-file /secure/path/sandbox-cleanup.json
 ```
+
+Provisioning reserves an owner-only `pending` evidence record before its first
+cloud call. The record includes a unique non-secret attempt ID that is also
+attached to newly created applications, so an interrupted or eventually
+consistent create can be identified without adopting unrelated resources.
 
 Interactive `bp login` belongs in the operator's normal host browser. Containers
 may run these non-interactive checks only after the resulting credentials have

@@ -79,7 +79,7 @@ export interface ModelProvider {
 
 export interface SandboxHandle {
   sandboxId: string;
-  /** Base URL of the in-sandbox REST API (without instance routing). */
+  /** Non-secret transport locator; never a signed endpoint or credential. */
   baseUrl: string;
 }
 
@@ -103,7 +103,9 @@ export interface SandboxProvider {
     command: string,
     opts?: { timeoutSec?: number; cwd?: string },
   ): Promise<ExecResult>;
+  /** UTF-8 text-file operations are bounded to 100,000 encoded bytes. */
   writeFile(handle: SandboxHandle, path: string, content: string): Promise<void>;
+  /** UTF-8 text-file operations are bounded to 100,000 encoded bytes. */
   readFile(handle: SandboxHandle, path: string): Promise<string>;
   describe(handle: SandboxHandle): Promise<{ status: string }>;
   terminate(handle: SandboxHandle): Promise<void>;

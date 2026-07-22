@@ -16,6 +16,6 @@
     "src/**/*.ts",
     "test/**/*.ts",
     "bench/**/*.ts",
-    "scripts/release-gate.ts"
+    "scripts/**/*.ts"
   ]
 }

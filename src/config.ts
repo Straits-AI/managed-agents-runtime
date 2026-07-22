@@ -71,7 +71,14 @@ const configSchema = z.object({
   // Required alongside SANDBOX_IMAGE only when overriding the app's image
   // per-run; the API rejects an image override without a startup command.
   SANDBOX_STARTUP_COMMAND: z.string().optional(),
+  SANDBOX_STARTUP_PORT: z.coerce.number().int().refine(
+    (value) => value === -1 || (value >= 1024 && value <= 65_535),
+    'SANDBOX_STARTUP_PORT must be -1 or between 1024 and 65535',
+  ).default(8080),
   SANDBOX_TIMEOUT_MINUTES: intFromEnv(60),
+  // Private WebShell is the default data plane. Public APIG remains available
+  // only as an explicit deployment choice.
+  SANDBOX_TRANSPORT: z.enum(['private-webshell', 'apig']).default('private-webshell'),
   // APIG serverless-gateway route fronting the sandbox app. Set the domain to
   // skip APIG discovery; the API key satisfies the route's Key Auth plugin
   // (sent as the Authorization header the plugin is configured to read).

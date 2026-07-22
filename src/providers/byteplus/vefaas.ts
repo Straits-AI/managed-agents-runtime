@@ -1,4 +1,4 @@
-import { signedCall } from './signer.js';
+import { signedCallWithMetadata } from './signer.js';
 
 /**
  * veFaaS Cloud Sandbox lifecycle client (control plane). API shape
@@ -11,6 +11,13 @@ export interface VefaasClientOptions {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken?: string;
+  onResponseMetadata?: (metadata: VefaasResponseMetadata) => void;
+}
+
+export interface VefaasResponseMetadata {
+  service: 'vefaas' | 'apig';
+  action: string;
+  requestId: string | null;
 }
 
 const VEFAAS_VERSION = '2024-06-06';
@@ -29,15 +36,20 @@ export interface SandboxInfo {
   [k: string]: unknown;
 }
 
+export interface WebshellEndpointResult {
+  Endpoint?: string;
+  [k: string]: unknown;
+}
+
 export class VefaasClient {
   constructor(private readonly opts: VefaasClientOptions) {}
 
-  private call<T>(
+  private async call<T>(
     service: 'vefaas' | 'apig',
     action: string,
     body: Record<string, unknown>,
   ): Promise<T> {
-    return signedCall<T>({
+    const response = await signedCallWithMetadata<T>({
       host: this.opts.host,
       region: this.opts.region,
       service,
@@ -48,6 +60,16 @@ export class VefaasClient {
       secretAccessKey: this.opts.secretAccessKey,
       sessionToken: this.opts.sessionToken,
     });
+    try {
+      this.opts.onResponseMetadata?.({
+        service,
+        action,
+        requestId: response.requestId,
+      });
+    } catch {
+      // Evidence observers must not change runtime lifecycle semantics.
+    }
+    return response.result;
   }
 
   createSandbox(input: {
@@ -56,6 +78,7 @@ export class VefaasClient {
     envs?: Record<string, string>;
     image?: string;
     command?: string;
+    port?: number;
     cpuMilli?: number;
     memoryMB?: number;
     metadata?: Record<string, string>;
@@ -63,12 +86,14 @@ export class VefaasClient {
     return this.call<CreateSandboxResult>('vefaas', 'CreateSandbox', {
       FunctionId: input.functionId,
       Timeout: input.timeoutMinutes,
-      Envs: input.envs,
+      Envs: input.envs === undefined
+        ? undefined
+        : Object.entries(input.envs).map(([Key, Value]) => ({ Key, Value })),
       // Official InstanceImageInfoForCreateSandboxInput fields are `Image`
-      // (URL) and `Command`; an image override without a command is a 400
-      // ("Command is empty"). Omit entirely to inherit the released app.
+      // (URL), `Command`, and `Port`; an incomplete override is rejected.
+      // Omit entirely to inherit the released app.
       InstanceImageInfo: input.image
-        ? { Image: input.image, Command: input.command }
+        ? { Image: input.image, Command: input.command, Port: input.port }
         : undefined,
       CpuMilli: input.cpuMilli,
       MemoryMB: input.memoryMB,
@@ -85,13 +110,21 @@ export class VefaasClient {
 
   listSandboxes(
     functionId: string,
-    opts: { pageNumber?: number; pageSize?: number; status?: string } = {},
+    opts: {
+      pageNumber?: number;
+      pageSize?: number;
+      sandboxId?: string;
+      status?: string;
+      metadata?: Record<string, string>;
+    } = {},
   ): Promise<{ Sandboxes?: SandboxInfo[]; Total?: number }> {
     return this.call('vefaas', 'ListSandboxes', {
       FunctionId: functionId,
       PageNumber: opts.pageNumber ?? 1,
       PageSize: opts.pageSize ?? 10,
+      SandboxId: opts.sandboxId,
       Status: opts.status,
+      Metadata: opts.metadata,
     });
   }
 
@@ -111,6 +144,16 @@ export class VefaasClient {
     return this.call('vefaas', 'KillSandbox', {
       FunctionId: functionId,
       SandboxId: sandboxId,
+    });
+  }
+
+  genWebshellEndpoint(
+    functionId: string,
+    instanceName: string,
+  ): Promise<WebshellEndpointResult> {
+    return this.call<WebshellEndpointResult>('vefaas', 'GenWebshellEndpoint', {
+      FunctionId: functionId,
+      InstanceName: instanceName,
     });
   }
 

@@ -1,7 +1,7 @@
 /**
- * End-to-end sandbox smoke test through the real APIG gateway:
+ * End-to-end sandbox smoke test through the configured runtime transport:
  * create instance -> wait Ready -> exec a marker command -> write+read a
- * file -> terminate. Proves lifecycle + gateway auth + AIO data plane.
+ * file -> terminate. Private WebShell is the default; APIG is explicit.
  *
  *   node --env-file=.env --import tsx scripts/smoke-sandbox.ts
  */
@@ -11,8 +11,6 @@ import { VefaasSandboxProvider } from '../src/providers/vefaasSandbox.js';
 const cfg = loadConfig();
 requireConfig(cfg, [
   'VEFAAS_SANDBOX_FUNCTION_ID',
-  'SANDBOX_GATEWAY_DOMAIN',
-  'SANDBOX_GATEWAY_API_KEY',
 ]);
 
 const provider = new VefaasSandboxProvider(cfg);
@@ -21,7 +19,7 @@ const marker = `marker-${Math.floor(Date.now() / 1000)}`;
 const handle = await provider.create({ runId: 'smoke', timeoutMinutes: 10 });
 console.log(`created sandbox ${handle.sandboxId}`);
 try {
-  // Poll to Ready.
+  // create() already waits for Ready; this read verifies the public contract.
   for (let i = 0; i < 40; i++) {
     const { status } = await provider.describe(handle);
     if (status === 'Ready') break;
