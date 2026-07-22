@@ -78,6 +78,7 @@ export class VefaasClient {
     envs?: Record<string, string>;
     image?: string;
     command?: string;
+    port?: number;
     cpuMilli?: number;
     memoryMB?: number;
     metadata?: Record<string, string>;
@@ -85,12 +86,14 @@ export class VefaasClient {
     return this.call<CreateSandboxResult>('vefaas', 'CreateSandbox', {
       FunctionId: input.functionId,
       Timeout: input.timeoutMinutes,
-      Envs: input.envs,
+      Envs: input.envs === undefined
+        ? undefined
+        : Object.entries(input.envs).map(([Key, Value]) => ({ Key, Value })),
       // Official InstanceImageInfoForCreateSandboxInput fields are `Image`
-      // (URL) and `Command`; an image override without a command is a 400
-      // ("Command is empty"). Omit entirely to inherit the released app.
+      // (URL), `Command`, and `Port`; an incomplete override is rejected.
+      // Omit entirely to inherit the released app.
       InstanceImageInfo: input.image
-        ? { Image: input.image, Command: input.command }
+        ? { Image: input.image, Command: input.command, Port: input.port }
         : undefined,
       CpuMilli: input.cpuMilli,
       MemoryMB: input.memoryMB,

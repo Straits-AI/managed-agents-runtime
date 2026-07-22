@@ -52,4 +52,36 @@ describe('veFaaS successful response metadata', () => {
       requestId: null,
     }]);
   });
+
+  it('serializes sandbox env maps and the complete image override shape', async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({
+      ResponseMetadata: { RequestId: 'request-create-2' },
+      Result: { SandboxId: 'sandbox-2' },
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new VefaasClient({
+      host: 'open.byteplusapi.com',
+      region: 'ap-southeast-1',
+      accessKeyId: 'fixture-ak',
+      secretAccessKey: 'fixture-sk',
+    });
+
+    await client.createSandbox({
+      functionId: 'function-1',
+      timeoutMinutes: 10,
+      envs: { HOME: '/home/tiger' },
+      image: 'registry.example/sandbox:1',
+      command: 'bash /run.sh',
+      port: 8080,
+    });
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      Envs: [{ Key: 'HOME', Value: '/home/tiger' }],
+      InstanceImageInfo: {
+        Image: 'registry.example/sandbox:1',
+        Command: 'bash /run.sh',
+        Port: 8080,
+      },
+    });
+  });
 });

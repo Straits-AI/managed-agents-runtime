@@ -70,6 +70,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
   private readonly functionId: string;
   private readonly defaultImage: string | undefined;
   private readonly defaultCommand: string | undefined;
+  private readonly defaultPort: number;
   private readonly configuredDomain: string | undefined;
   private readonly gatewayApiKey: string | undefined;
   private readonly transport: 'private-webshell' | 'apig';
@@ -96,6 +97,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
     this.functionId = required.VEFAAS_SANDBOX_FUNCTION_ID;
     this.defaultImage = cfg.SANDBOX_IMAGE;
     this.defaultCommand = cfg.SANDBOX_STARTUP_COMMAND;
+    this.defaultPort = cfg.SANDBOX_STARTUP_PORT;
     this.configuredDomain = cfg.SANDBOX_GATEWAY_DOMAIN;
     this.gatewayApiKey = cfg.SANDBOX_GATEWAY_API_KEY;
     this.transport = cfg.SANDBOX_TRANSPORT;
@@ -160,6 +162,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
         // supplying Command is a 400 ("Command is empty").
         image: req.image,
         command: req.image ? this.defaultCommand : undefined,
+        port: req.image ? this.defaultPort : undefined,
         cpuMilli: req.cpuMilli,
         memoryMB: req.memoryMB,
         metadata: { runId: req.runId },

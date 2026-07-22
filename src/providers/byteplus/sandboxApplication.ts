@@ -21,6 +21,7 @@ export interface PrivateSandboxApplicationPlan {
   maxConcurrency: number;
   requestTimeoutSeconds: number;
   initializerSeconds: number;
+  envs: ReadonlyArray<{ Key: string; Value: string }>;
   tags: ReadonlyArray<{ Key: string; Value: string }>;
 }
 
@@ -49,8 +50,8 @@ export class PrivateSandboxConfigurationError extends Error {
   }
 }
 
-const AIO_IMAGE =
-  'enterprise-public-ap-southeast-1.cr.volces.com/vefaas-public/all-in-one-sandbox:1.0.0.159';
+const SANDBOX_FUSION_IMAGE =
+  'vefaas-ap-southeast-1.cr.volces.com/vefaas-public/sandbox-fusion:vefaas-latest';
 const MANAGED_TAGS = [
   { Key: 'managed-by', Value: 'managed-agents-runtime' },
   { Key: 'managed-purpose', Value: 'private-sandbox' },
@@ -65,14 +66,15 @@ export function defaultPrivateSandboxApplicationPlan(
   return {
     name,
     description: 'Private BytePlus runtime conformance application',
-    image: AIO_IMAGE,
-    command: '/opt/gem/run.sh',
+    image: SANDBOX_FUSION_IMAGE,
+    command: 'bash /root/sandbox/scripts/run.sh',
     port: 8080,
     cpuMilli: 1000,
     memoryMB: 2048,
     maxConcurrency: 10,
     requestTimeoutSeconds: 900,
     initializerSeconds: 120,
+    envs: [{ Key: 'HOME', Value: '/home/tiger' }],
     tags: MANAGED_TAGS,
   };
 }
@@ -310,7 +312,7 @@ function createBody(
       ...plan.tags,
       { Key: 'provisioning-attempt', Value: attemptId },
     ],
-    Envs: [],
+    Envs: plan.envs,
     VpcConfig: {
       EnableVpc: false,
       EnableSharedInternetAccess: false,
@@ -367,7 +369,9 @@ function assertRevisionMatches(
   }
   if (revision.Envs !== undefined
     && revision.Envs !== null
-    && (!Array.isArray(revision.Envs) || revision.Envs.length !== 0)) {
+    && (!Array.isArray(revision.Envs)
+      || revision.Envs.length !== plan.envs.length
+      || !plan.envs.every((env) => hasTag(revision.Envs, env.Key, env.Value)))) {
     mismatches.push('Envs');
   }
   if (!plan.tags.every((tag) => hasTag(revision.Tags, tag.Key, tag.Value))) {

@@ -103,6 +103,7 @@ const baseRecord = {
     maxConcurrency: plan.maxConcurrency,
     requestTimeoutSeconds: plan.requestTimeoutSeconds,
     initializerSeconds: plan.initializerSeconds,
+    envs: plan.envs,
     instanceType: 'cpu-empty',
     tags: plan.tags,
     vpcEnabled: false,
@@ -134,11 +135,11 @@ try {
   const imageItems = Array.isArray(images.result.Images) ? images.result.Images : [];
   const selectedImage = imageItems.find((item) => typeof item === 'object'
     && item !== null
-    && (item as Record<string, unknown>).ImageGroup === 'All-in-one'
+    && (item as Record<string, unknown>).ImageGroup === 'Code'
     && (item as Record<string, unknown>).ImageUrl === plan.image
     && (item as Record<string, unknown>).PrecacheStatus === 'success');
   if (!selectedImage) {
-    throw new Error('The planned BytePlus All-in-one image is not currently pre-cached');
+    throw new Error('The planned BytePlus SandboxFusion image is not currently pre-cached');
   }
   const receipt = await provisionPrivateSandboxApplication(plan, api, {
     attemptId: provisioningAttemptId,
