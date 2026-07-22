@@ -103,6 +103,32 @@ describe('controlled-alpha GitHub Actions supply chain', () => {
     expect(publishAlpha).toContain("'https://spdx.dev/Document'");
   });
 
+  it('passes the pulled immutable digest to container smoke and evidence generation', () => {
+    const exportImage = publishAlpha.indexOf(
+      'echo "CONTAINER_IMAGE=${registry_image_with_digest}" >> "${GITHUB_ENV}"',
+    );
+    const smoke = publishAlpha.indexOf('npm run container:smoke');
+    const evidence = publishAlpha.indexOf('npm run container:evidence');
+
+    expect(exportImage).toBeGreaterThan(-1);
+    expect(smoke).toBeGreaterThan(exportImage);
+    expect(evidence).toBeGreaterThan(smoke);
+  });
+
+  it('proves the release digest can be pulled without registry credentials', () => {
+    const logout = publishAlpha.indexOf('docker logout ghcr.io');
+    const anonymousConfig = publishAlpha.indexOf('anonymous_docker_config="$(mktemp -d)"');
+    const anonymousPull = publishAlpha.indexOf(
+      'DOCKER_CONFIG="${anonymous_docker_config}" docker pull "${REGISTRY_IMAGE_WITH_DIGEST}"',
+    );
+    const smoke = publishAlpha.indexOf('npm run container:smoke');
+
+    expect(logout).toBeGreaterThan(-1);
+    expect(anonymousConfig).toBeGreaterThan(logout);
+    expect(anonymousPull).toBeGreaterThan(anonymousConfig);
+    expect(smoke).toBeGreaterThan(anonymousPull);
+  });
+
   it('attaches the exact-commit kernel evidence to the prerelease', () => {
     expect(publishAlpha).toContain('controlled-alpha-kernel-evidence.tar.gz');
     expect(publishAlpha).toContain('release-evidence/kernel/summary.json');

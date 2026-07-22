@@ -100,10 +100,12 @@ current `main` commit after that commit's push gate has passed. Validation runs
 with read-only permissions and no persisted checkout credential. A separate
 publish job pushes an unpromoted candidate, resolves and pulls its immutable
 digest, verifies its native BuildKit SBOM and maximum-mode provenance, removes
-registry credentials, and runs the real-container smoke against those exact
-bytes. Only a passing digest is promoted to release tags. The workflow attaches
-the kernel evidence bundle and retains all registry and release evidence for 90
-days. See
+registry credentials, proves the digest is anonymously pullable with an
+isolated Docker configuration, and runs the real-container smoke against those
+exact bytes. Only a passing public digest is promoted to release tags. A first
+publication may require the documented one-time package-visibility bootstrap
+and rerun before this gate can pass. The workflow attaches the kernel evidence
+bundle and retains all registry and release evidence for 90 days. See
 [`CONTROLLED-ALPHA-DEPLOYMENT.md`](./CONTROLLED-ALPHA-DEPLOYMENT.md).
 
 ### GitHub Action provenance

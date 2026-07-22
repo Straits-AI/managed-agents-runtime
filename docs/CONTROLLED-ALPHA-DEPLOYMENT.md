@@ -26,12 +26,22 @@ Buildx client versions are recorded by workflow logs and provenance.
 The release workflow first pushes a commit-scoped candidate Linux `amd64`
 manifest with BuildKit SBOM and provenance attestations. It resolves and pulls
 that immutable digest, verifies both attestations, removes registry credentials,
-and exercises the exact pulled bytes through the complete container smoke. Only
-then does it promote the same digest to the version tags. GitHub release evidence
+proves the digest can be pulled with a fresh anonymous Docker configuration, and
+exercises the exact pulled bytes through the complete container smoke. Only then
+does it promote the same digest to the version tags. GitHub release evidence
 records that registry digest, image configuration digest, CycloneDX application
 SBOM, source commit, labels, user, entrypoint, kernel gate bundle, and artifact
 hashes. A later release may add a multi-architecture manifest; do not assume one
 for this alpha.
+
+GitHub Container Registry creates a newly published organization package as
+private. On the first publication only, the workflow is therefore expected to
+stop at the anonymous-pull gate after the candidate exists. An organization
+owner must review the candidate package and change its visibility to **Public**
+in the GitHub package settings, acknowledging that GitHub does not allow a
+public package to be made private again. Rerun the same tag workflow after that
+one-time bootstrap. Do not create a GitHub release, promote version tags, or
+accept the release until the isolated anonymous pull passes.
 
 Always deploy by digest after resolving the tag:
 
@@ -166,9 +176,13 @@ must remain blocked until it has an explicit data migration and recovery plan.
 5. Only then is the annotated `v0.1.0-alpha.1` tag created.
 6. The tag workflow rejects a tag that is not annotated, is not the exact
    current `main` commit, or lacks a successful exact-commit `main` gate.
-7. The publish job pushes an unpromoted candidate, verifies and smokes its
-   immutable registry digest, promotes that digest to the release tags, and
-   creates the GitHub prerelease with kernel and container evidence attached.
+7. The publish job pushes an unpromoted candidate, verifies its attestations,
+   proves an isolated anonymous pull, and smokes its immutable registry digest.
+8. For the first package publication only, an organization owner changes the
+   reviewed package to public after the expected anonymous-pull failure, then
+   reruns the same tag workflow.
+9. Only a publicly pullable and passing digest is promoted to the release tags
+   and used to create the GitHub prerelease with kernel and container evidence.
 
 The package version, changelog heading, release tag, image version label, and
 GitHub prerelease title must agree exactly.
