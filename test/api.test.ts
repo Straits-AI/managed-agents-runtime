@@ -5,6 +5,7 @@ import { spawnWorker, waitFor, type SpawnedWorker } from './helpers/worker.js';
 import { buildServer } from '../src/api/server.js';
 import { loadConfig } from '../src/config.js';
 import { countActiveAttempts } from '../src/store/attempts.js';
+import { latestCheckpoint } from '../src/store/checkpoints.js';
 import type { ScriptOp } from '../src/harness/scriptedEpoch.js';
 
 let db: TestDb;
@@ -225,6 +226,18 @@ describe('API', () => {
     ).json().approvals;
     expect(approvals).toHaveLength(1);
     expect(approvals[0].status).toBe('PENDING');
+    const approvalCheckpoint = await latestCheckpoint(db.pool, runId);
+    expect(approvalCheckpoint).toMatchObject({
+      schema_version: 2,
+      agent_state: {
+        commitments: {
+          pendingApprovalIds: [approvals[0].id],
+          pendingWork: {
+            blocked: [{ item: 'external.http.post', reason: 'approval pending' }],
+          },
+        },
+      },
+    });
 
     const decide = await app.inject({
       method: 'POST',

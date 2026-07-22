@@ -30,6 +30,32 @@ Postgres plus workspace checkpoints in TOS. Workers are disposable; a killed run
 resumes on another worker from its last checkpoint, and committed external
 actions never re-execute.
 
+### Checkpoint compatibility and security contract
+
+The durable checkpoint envelope is explicitly versioned. Existing unversioned
+rows are schema v1; the runtime upgrades them in memory to the current v2 shape
+without rewriting historical rows. New checkpoints are always v2. Restore
+accepts only versions listed in `SUPPORTED_CHECKPOINT_VERSIONS`; a future or
+malformed version fails closed before a worker allocates execution state.
+
+V2 persists the minimum state needed to resume safely:
+
+- execution position, transcript object reference, supervisor state, and a
+  suspended tool call;
+- the awaited signal, pending approvals, active children, and structured pending
+  work;
+- complete child lineage, artifact IDs, and event evidence references; and
+- the exact context-selection decision (strategy version, transcript bounds,
+  selected memory IDs, user/approval counts, and pinned skill references).
+
+The event ledger, first-class resources, receipts, and checkpoint commitments
+are durable truth. The model prompt is a reconstructable view selected from that
+truth; a checkpoint does not persist a hidden model context as authority.
+Checkpoint validation recursively rejects secret-like fields and provider-signed
+or credential-bearing URLs. Persist stable resource IDs and object keys only;
+credentials and signed transport URLs must be reacquired through the credential
+broker or provider adapter after restore.
+
 ## 2. Run it locally (no BytePlus needed)
 
 ```bash

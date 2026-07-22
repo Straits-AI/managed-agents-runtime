@@ -161,16 +161,19 @@ without raw-event parsing, and success/failure/replacement/oversize/tenant tests
 
 ### MAR-P1-009 — durable context and checkpoint evolution
 
-**Status:** open — [Issue #29](https://github.com/Straits-AI/managed-agents-runtime/issues/29)  
+**Status:** implementation complete; merge and post-merge gates pending — [Issue #29](https://github.com/Straits-AI/managed-agents-runtime/issues/29)
 **Owner:** runtime
 
-Checkpoint state covers transcript, summary, step, supervisor state, and one
-pending tool call. Active commitments, child/evidence references, context
-selection, and schema-evolution behavior are not yet a complete contract.
+Checkpoint schema v2 preserves execution position, active commitments, pending
+work, approval/signal/child state, artifact/evidence references, and the exact
+context-selection decision. Historical v1 rows upgrade in memory without a
+destructive rewrite; unsupported versions, malformed envelopes, secret-bearing
+fields, and signed transport URLs fail closed.
 
-**Closure:** version checkpoint schemas; distinguish durable truth from rebuilt
-model context; add forwards/backwards restore fixtures and interrupted-upgrade
-tests.
+**Candidate closure:** migration `0018_checkpoint_envelopes.sql`, versioned v1/v2 restore
+fixtures, interrupted-upgrade coverage, runtime suspend/resume commitment tests,
+strict shape validation, and explicit documentation separating durable truth
+from reconstructed model context.
 
 ### MAR-P1-010 — actual portability boundary
 

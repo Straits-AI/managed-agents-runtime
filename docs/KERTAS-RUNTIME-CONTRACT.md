@@ -114,7 +114,7 @@ contract.
 | Inbound session event queue | Signals target an existing Run | Deduplicated ordered session events create/resume Runs |
 | Run/Attempt execution | Implemented internally with leases and fencing | Existing behavior exposed through versioned schemas; Attempt need not be a direct public mutation surface |
 | Runtime event ledger | Implemented per Run | Versioned session/Run events with resource sequence, correlation, and causation |
-| Workspace recovery | Run checkpoint/snapshot implemented | Session workspace lineage plus explicit Kertas snapshot transfer |
+| Workspace recovery | Versioned v1/v2 Run checkpoints preserve commitments, resource/evidence refs, and context-selection decisions; workspace snapshots implemented | Session workspace lineage plus explicit Kertas snapshot transfer |
 | Artifact output | First-class content-addressed Artifact resources implemented | Versioned Kertas ingestion through the public contract |
 | Child delegation | Bounded results, artifact/evidence refs, usage, replacement, and queryable lineage implemented | Versioned session-scoped projection through the public contract |
 | Public schemas/client fixtures | TypeScript/API behavior exists without a published machine-readable contract | Discoverable schemas, compatibility fixtures, and Kertas SDK conformance |

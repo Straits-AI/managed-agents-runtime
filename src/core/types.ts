@@ -152,21 +152,4 @@ export interface SemanticAction {
   risk?: 'read' | 'workspace_write' | 'external_write';
 }
 
-export interface CheckpointAgentState {
-  transcriptTosKey?: string;
-  contextSummary?: string;
-  step: number;
-  /**
-   * Semantic-supervisor rolling state (memo §25). Persisted so loop/stagnation
-   * detection and the escalation ladder survive worker crashes and resume
-   * exactly where they left off. Typed as unknown here to avoid a harness→core
-   * dependency; the harness reads it as SupervisorState.
-   */
-  supervisor?: unknown;
-  /**
-   * A tool call that suspended the run (e.g. awaiting approval). On resume
-   * the epoch re-dispatches it deterministically instead of relying on the
-   * model to re-propose it.
-   */
-  pendingToolCall?: { id: string; name: string; arguments: Record<string, unknown> };
-}
+export type CheckpointAgentState = import('./checkpoints.js').CheckpointEnvelopeV2;
