@@ -180,10 +180,10 @@ exact merge commit `8a347cba8d7b21d5ce064ff0f095066272df61ac` passed the retaine
 
 ### MAR-P1-010 — actual portability boundary
 
-**Status:** closure candidate — [Issue #30](https://github.com/Straits-AI/managed-agents-runtime/issues/30)
+**Status:** closed — [Issue #30](https://github.com/Straits-AI/managed-agents-runtime/issues/30)
 **Owner:** runtime/provider adapters
 
-The candidate publishes 11 versioned capability contracts, complete local and
+The implementation publishes 11 versioned capability contracts, complete local and
 BytePlus manifests, and a deliberately narrow AWS anonymous S3 read profile.
 Required, optional, and unsupported semantics are machine-checked; live evidence
 is digest-bound; object read/write/presign affinity prevents dishonest mixed
@@ -192,10 +192,13 @@ minimum assurance rather than brand-specific inputs. The deployed authenticated
 API exposes the same discovery and resolution contract, including selected
 failure boundaries and limitations.
 
-**Closure:** publish capability-level model/sandbox/object/event/credential/
-knowledge/memory/tool contracts; test local plus at least two non-identical
-providers; declare unsupported semantics in deployment manifests. Closure still
-requires independent review, merged CI, and the exact post-merge main gate.
+**Closure:** capability-level model/sandbox/object/event/credential/knowledge/
+memory/tool contracts are published and tested across local, BytePlus, and a
+deliberately read-only AWS S3 profile. Unsupported semantics are explicit in the
+deployment manifests. Independent review passed on
+[PR #47](https://github.com/Straits-AI/managed-agents-runtime/pull/47), and the
+exact merge commit `c01f71e39a15569d1004fdef68e19784b83d8d1a` passed the retained
+[post-merge controlled-alpha gate](https://github.com/Straits-AI/managed-agents-runtime/actions/runs/29896559270).
 
 ## P2 backlog
 
