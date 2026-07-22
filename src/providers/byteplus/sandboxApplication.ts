@@ -120,11 +120,17 @@ export async function provisionPrivateSandboxApplication(
     if (status.Status !== 'done' || stableRevisionNumber === null || !releaseRecordId) {
       throw new Error('Existing private sandbox application is not stably released');
     }
+    const application = await call('GetFunction', { Id: functionId });
     const revision = await call('GetRevision', {
       FunctionId: functionId,
       RevisionNumber: stableRevisionNumber,
     });
-    assertRevisionMatches(plan, functionId, revision, stableRevisionNumber);
+    assertRevisionMatches(
+      plan,
+      functionId,
+      { ...application, ...revision },
+      stableRevisionNumber,
+    );
     return {
       disposition: 'reused',
       attemptId,
@@ -172,8 +178,9 @@ export async function provisionPrivateSandboxApplication(
   if (!functionId) throw new Error('CreateFunction returned an invalid function ID');
 
   try {
+    const application = await call('GetFunction', { Id: functionId });
     const draft = await call('GetRevision', { FunctionId: functionId, RevisionNumber: 0 });
-    assertRevisionMatches(plan, functionId, draft, 0);
+    assertRevisionMatches(plan, functionId, { ...application, ...draft }, 0);
 
     const released = await call('Release', {
       FunctionId: functionId,
@@ -198,7 +205,12 @@ export async function provisionPrivateSandboxApplication(
           FunctionId: functionId,
           RevisionNumber: stableRevisionNumber,
         });
-        assertRevisionMatches(plan, functionId, stable, stableRevisionNumber);
+        assertRevisionMatches(
+          plan,
+          functionId,
+          { ...application, ...stable },
+          stableRevisionNumber,
+        );
         return {
           disposition: 'created',
           attemptId,

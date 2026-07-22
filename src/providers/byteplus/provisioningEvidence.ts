@@ -1,5 +1,4 @@
 import {
-  chmodSync,
   closeSync,
   fsyncSync,
   openSync,
@@ -8,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 export interface ReservedEvidenceRecord {
   path: string;
@@ -20,27 +19,17 @@ export function reserveEvidenceRecord(
   pendingRecord: Record<string, unknown>,
 ): ReservedEvidenceRecord {
   const path = resolve(requestedPath);
-  const descriptor = openSync(path, 'wx', 0o600);
-  try {
-    writeFileSync(descriptor, serialize(pendingRecord), { encoding: 'utf8' });
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-  chmodSync(path, 0o600);
+  writeDurableExclusive(path, pendingRecord);
+  syncDirectory(dirname(path));
 
   return {
     path,
     commit(record) {
       const temporaryPath = `${path}.tmp-${process.pid}-${randomUUID()}`;
       try {
-        writeFileSync(temporaryPath, serialize(record), {
-          encoding: 'utf8',
-          flag: 'wx',
-          mode: 0o600,
-        });
-        chmodSync(temporaryPath, 0o600);
+        writeDurableExclusive(temporaryPath, record);
         renameSync(temporaryPath, path);
+        syncDirectory(dirname(path));
       } catch (error) {
         try {
           unlinkSync(temporaryPath);
@@ -51,6 +40,25 @@ export function reserveEvidenceRecord(
       }
     },
   };
+}
+
+function writeDurableExclusive(path: string, record: Record<string, unknown>): void {
+  const descriptor = openSync(path, 'wx', 0o600);
+  try {
+    writeFileSync(descriptor, serialize(record), { encoding: 'utf8' });
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function syncDirectory(path: string): void {
+  const descriptor = openSync(path, 'r');
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function serialize(record: Record<string, unknown>): string {

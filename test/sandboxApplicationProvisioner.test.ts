@@ -18,6 +18,7 @@ describe('private sandbox application provisioner', () => {
       });
       if (action === 'ListFunctions') return response({ Items: [], Total: 0 });
       if (action === 'CreateFunction') return response({ Id: 'function-1' });
+      if (action === 'GetFunction') return response(matchingRevision(0));
       if (action === 'GetRevision') return response(
         matchingRevision(Number(body.RevisionNumber)),
       );
@@ -70,6 +71,7 @@ describe('private sandbox application provisioner', () => {
     expect(calls.map((call) => call.action)).toEqual([
       'ListFunctions',
       'CreateFunction',
+      'GetFunction',
       'GetRevision',
       'Release',
       'GetReleaseStatus',
@@ -83,6 +85,8 @@ describe('private sandbox application provisioner', () => {
       actions.push(action);
       const result = action === 'ListFunctions'
         ? { Items: [{ Id: 'function-1', Name: 'managed-agents-runtime-test' }], Total: 1 }
+        : action === 'GetFunction'
+          ? matchingRevision(1)
         : action === 'GetRevision'
           ? matchingRevision(1)
           : action === 'GetReleaseStatus'
@@ -104,7 +108,12 @@ describe('private sandbox application provisioner', () => {
       stableRevisionNumber: 1,
       releaseRecordId: 'release-1',
     });
-    expect(actions).toEqual(['ListFunctions', 'GetReleaseStatus', 'GetRevision']);
+    expect(actions).toEqual([
+      'ListFunctions',
+      'GetReleaseStatus',
+      'GetFunction',
+      'GetRevision',
+    ]);
   });
 
   it('checks every reported inventory page before deciding to create', async () => {
@@ -132,6 +141,10 @@ describe('private sandbox application provisioner', () => {
       if (action === 'GetRevision') return {
         result: matchingRevision(1),
         requestId: 'request-revision',
+      };
+      if (action === 'GetFunction') return {
+        result: matchingRevision(1),
+        requestId: 'request-function',
       };
       if (action === 'GetReleaseStatus') return {
         result: {
@@ -170,6 +183,10 @@ describe('private sandbox application provisioner', () => {
         result: { ...matchingRevision(1), InstanceType: 'nvidia-tesla-l4' },
         requestId: 'request-revision',
       };
+      if (action === 'GetFunction') return {
+        result: matchingRevision(1),
+        requestId: 'request-function',
+      };
       if (action === 'GetReleaseStatus') return {
         result: {
           Status: 'done',
@@ -191,7 +208,12 @@ describe('private sandbox application provisioner', () => {
       expect(error).toBeInstanceOf(PrivateSandboxConfigurationError);
       expect((error as PrivateSandboxConfigurationError).fields).toEqual(['InstanceType']);
     }
-    expect(actions).toEqual(['ListFunctions', 'GetReleaseStatus', 'GetRevision']);
+    expect(actions).toEqual([
+      'ListFunctions',
+      'GetReleaseStatus',
+      'GetFunction',
+      'GetRevision',
+    ]);
   });
 
   it.each([
@@ -225,6 +247,8 @@ describe('private sandbox application provisioner', () => {
               StableRevisionNumber: 1,
               ReleaseRecordId: 'release-1',
             }
+        : action === 'GetFunction'
+          ? matchingRevision(1)
         : action === 'GetRevision'
           ? { ...matchingRevision(1), ...patch }
           : (() => { throw new Error(`unexpected action ${action}`); })(),
@@ -255,6 +279,10 @@ describe('private sandbox application provisioner', () => {
         result: { Id: 'function-created-by-run' },
         requestId: 'request-create',
       };
+      if (action === 'GetFunction') return {
+        result: { ...matchingRevision(0), Id: 'function-created-by-run' },
+        requestId: 'request-function',
+      };
       if (action === 'GetRevision') return {
         result: { ...matchingRevision(0), Id: 'function-created-by-run', Port: 9000 },
         requestId: 'request-revision',
@@ -272,6 +300,7 @@ describe('private sandbox application provisioner', () => {
     expect(actions).toEqual([
       'ListFunctions',
       'CreateFunction',
+      'GetFunction',
       'GetRevision',
       'DeleteFunction',
       'ListFunctions',
