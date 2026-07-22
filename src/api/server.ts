@@ -6,9 +6,11 @@ import type { ObjectStore } from '../providers/types.js';
 import { registerAgentRoutes } from './routes/agents.js';
 import { registerRunRoutes } from './routes/runs.js';
 import { registerHealthRoutes } from './routes/health.js';
+import { registerProviderRoutes } from './routes/providers.js';
 import { resolveTenant } from './auth.js';
 import { rateLimiter } from './rateLimit.js';
 import { log } from '../log.js';
+import type { ProviderPortabilityBundle } from '../providers/portability.js';
 
 // The authenticated tenant, attached by the auth hook and read by every handler.
 declare module 'fastify' {
@@ -24,6 +26,8 @@ export interface ApiDeps {
   presignGet?: (tosKey: string, ttlSec: number) => Promise<string>;
   /** Object store for run-bundle export (workspace snapshots). */
   objectStore?: ObjectStore;
+  /** Versioned provider contracts exposed to capability-based clients such as Kertas. */
+  providerPortability?: ProviderPortabilityBundle;
 }
 
 /** Paths served without authentication (liveness/readiness probes). */
@@ -91,6 +95,7 @@ export function buildServer(deps: ApiDeps): FastifyInstance {
   });
 
   registerHealthRoutes(app, deps);
+  registerProviderRoutes(app, deps);
   registerAgentRoutes(app, deps);
   registerRunRoutes(app, deps);
   return app;

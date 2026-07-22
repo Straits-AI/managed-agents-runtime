@@ -111,13 +111,22 @@ export interface SandboxProvider {
   terminate(handle: SandboxHandle): Promise<void>;
 }
 
-export interface ObjectStore {
-  put(key: string, body: Buffer): Promise<{ etag: string | null }>;
+export interface ReadableObjectStore {
   get(key: string): Promise<Buffer>;
   exists(key: string): Promise<boolean>;
+}
+
+export interface WritableObjectStore {
+  put(key: string, body: Buffer): Promise<{ etag: string | null }>;
+}
+
+export interface PresigningObjectStore {
   presignPut(key: string, ttlSec: number): Promise<string>;
   presignGet(key: string, ttlSec: number): Promise<string>;
 }
+
+export interface ObjectStore
+  extends ReadableObjectStore, WritableObjectStore, PresigningObjectStore {}
 
 /**
  * Long-term agent memory (memo §9.3, §21): semantic/episodic facts that persist

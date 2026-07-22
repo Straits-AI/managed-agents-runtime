@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "aws-public-s3-ec76925f517a",
+  "source": {
+    "repository": "https://github.com/Straits-AI/managed-agents-runtime",
+    "commit": "ec76925f517a195bc34bfc658ded8b36093ed80f",
+    "commitOrigin": "git-clean-worktree",
+    "unchangedFiles": [
+      {
+        "path": "src/providers/aws/publicS3Reader.ts",
+        "sha256": "b2eb3436685f2dc8559188a983f3ab8a4d60974ddee0c228e42364e96c6381c1"
+      },
+      {
+        "path": "scripts/conformance-aws-public-s3.ts",
+        "sha256": "3bdbd1b40991e8343699f4fcb649790e24ed80087a5d049edfc8248dd20dd293"
+      },
+      {
+        "path": "test/awsPublicS3Reader.test.ts",
+        "sha256": "2e3ccd004921fded183f36a4d2ac090a3cada5f520cdf7c3ffc7d5c7a8da78a5"
+      }
+    ]
+  },
+  "provider": "aws-s3-public",
+  "region": "us-east-1",
+  "retrievedAt": "2026-07-22T05:56:55.268Z",
+  "target": {
+    "registry": "AWS Registry of Open Data",
+    "bucket": "noaa-goes16",
+    "access": "anonymous-read-only"
+  },
+  "controlPlane": {
+    "credentialsUsed": false,
+    "resourcesCreated": false
+  },
+  "dataPlane": {
+    "positive": {
+      "key": "index.html",
+      "head": {
+        "status": 200,
+        "requestId": "4J48AC740XHRT1E7",
+        "etag": "\"3b4b4277037c1127ed4ba68e26461b2e\"",
+        "contentLength": 32357
+      },
+      "get": {
+        "status": 200,
+        "requestId": "N5RF9CVV9M6P2P8E",
+        "etag": "\"3b4b4277037c1127ed4ba68e26461b2e\"",
+        "contentLength": 32357
+      },
+      "bodyBytes": 32357,
+      "bodySha256": "e8c692bc3d0db082d4203662882cebdf4442661f191c5f1ce5c1541b39174c11"
+    },
+    "negative": {
+      "key": "managed-agents-portability-missing-ec76925f517a",
+      "head": {
+        "status": 404,
+        "requestId": "SY9NJS1CGW6FRFQ4",
+        "etag": null,
+        "contentLength": null
+      },
+      "get": {
+        "status": 404,
+        "requestId": "SY9HJE24XQ9J9DJX"
+      }
+    }
+  },
+  "redaction": {
+    "responseBodySerialized": false,
+    "responseHeadersAllowlisted": [
+      "status",
+      "x-amz-request-id",
+      "etag",
+      "content-length"
+    ],
+    "credentialsSerialized": false,
+    "signedUrlsSerialized": false
+  },
+  "cleanup": {
+    "required": false,
+    "reason": "read-only public dataset; no resource or object was created"
+  },
+  "limitations": [
+    "anonymous object GET and HEAD only",
+    "no write, delete, list, version, presign, encryption, availability, or performance claim"
+  ]
+}

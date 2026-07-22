@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "provider-manifest/v1",
+  "providerId": "aws",
+  "profileId": "public-s3-read",
+  "displayName": "AWS public S3 read-only subset",
+  "providerClass": "cloud",
+  "releaseVersion": "0.1.0-alpha.1",
+  "capabilities": [
+    {
+      "contract": "model.chat/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "This profile exposes no AWS model-inference adapter.",
+      "limitations": ["object-read subset only"]
+    },
+    {
+      "contract": "sandbox.workspace/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "This profile exposes no AWS sandbox lifecycle.",
+      "limitations": ["object-read subset only"]
+    },
+    {
+      "contract": "object.read/v1",
+      "status": "required",
+      "implementation": "AwsPublicS3Reader",
+      "assurance": {
+        "level": "live",
+        "tests": ["test/awsPublicS3Reader.test.ts"],
+        "evidencePath": "provider-conformance/evidence/aws-s3-public-read-2026-07-22.json",
+        "evidenceSha256": "f7360b83e9143db389bbdac103e82dd23a2092d2e3973afd2dd05739a195f259"
+      },
+      "failureBoundary": "Anonymous HEAD/GET are bounded before buffering; 404 is absence and every other transport/provider failure rejects with status and request ID only.",
+      "limitations": ["one public NOAA bucket proof", "no list, version, authenticated read, availability, or performance claim"]
+    },
+    {
+      "contract": "object.write/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "The adapter has no write method and cannot satisfy a checkpoint or artifact writer requirement.",
+      "limitations": ["read-only by type and manifest"]
+    },
+    {
+      "contract": "object.presign/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "The anonymous reader neither accepts credentials nor issues signed URLs.",
+      "limitations": ["no presign support"]
+    },
+    {
+      "contract": "event.publish/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "This profile exposes no AWS event publisher.",
+      "limitations": ["object-read subset only"]
+    },
+    {
+      "contract": "credential.resolve/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "The anonymous reader intentionally has no credential path.",
+      "limitations": ["public objects only"]
+    },
+    {
+      "contract": "knowledge.retrieve/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "This profile exposes no AWS knowledge provider.",
+      "limitations": ["object-read subset only"]
+    },
+    {
+      "contract": "memory.semantic/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "This profile exposes no AWS memory provider.",
+      "limitations": ["object-read subset only"]
+    },
+    {
+      "contract": "tool.skill.resolve/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "This profile exposes no AWS Skill provider.",
+      "limitations": ["object-read subset only"]
+    },
+    {
+      "contract": "tool.mcp.invoke/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "This profile exposes no AWS MCP provider.",
+      "limitations": ["object-read subset only"]
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTestDb, type TestDb } from './helpers/db.js';
@@ -78,6 +78,28 @@ describe('local execution stack (no BytePlus)', () => {
     expect(await (await fetch(getUrl)).text()).toBe('via-presign');
   });
 
+  it('FsObjectStore bounds direct and presigned reads and writes before buffering', async () => {
+    const boundedDir = mkdtempSync(join(tmpdir(), 'ma-fsstore-bounded-'));
+    const bounded = new FsObjectStore(boundedDir, 8);
+    await bounded.start();
+    try {
+      await expect(bounded.put('too-large-direct', Buffer.alloc(9))).rejects.toThrow(/byte limit/);
+      writeFileSync(join(boundedDir, 'too-large-read'), Buffer.alloc(9));
+      await expect(bounded.get('too-large-read')).rejects.toThrow(/byte limit/);
+      const getUrl = await bounded.presignGet('too-large-read', 60);
+      expect((await fetch(getUrl)).status).toBe(413);
+
+      const putUrl = await bounded.presignPut('too-large-http', 60);
+      const response = await fetch(putUrl, { method: 'PUT', body: Buffer.alloc(9) });
+      expect(response.status).toBe(413);
+      expect(await bounded.exists('too-large-http')).toBe(false);
+      await expect(bounded.presignGet('invalid-ttl', 0)).rejects.toThrow(/TTL/);
+    } finally {
+      await bounded.close();
+      rmSync(boundedDir, { recursive: true, force: true });
+    }
+  });
+
   it('LocalSandbox execs commands and maps the workspace dir', async () => {
     const sandbox = new LocalSandboxProvider();
     const h = await sandbox.create({ runId: 'r', timeoutMinutes: 5 });
@@ -90,8 +112,16 @@ describe('local execution stack (no BytePlus)', () => {
       expect(res.stdout).toContain('content');
       const fail = await sandbox.exec(h, 'exit 7');
       expect(fail.exitCode).toBe(7);
+      await expect(sandbox.writeFile(h, `${WORKSPACE_DIR}/large.txt`, 'x'.repeat(100_001)))
+        .rejects.toThrow(/100000-byte limit/);
+      expect((await sandbox.exec(h, 'head -c 100001 /dev/zero > large.txt')).exitCode).toBe(0);
+      await expect(sandbox.readFile(h, `${WORKSPACE_DIR}/large.txt`))
+        .rejects.toThrow(/100000-byte limit/);
     } finally {
       await sandbox.terminate(h);
+      expect(await sandbox.describe(h)).toEqual({ status: 'Killed' });
+      await sandbox.terminate(h);
+      expect(await sandbox.describe(h)).toEqual({ status: 'Killed' });
     }
   });
 

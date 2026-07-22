@@ -2,6 +2,7 @@ import { loadConfig } from '../config.js';
 import { createPool } from '../db/pool.js';
 import { buildServer } from '../api/server.js';
 import { log } from '../log.js';
+import { loadProviderPortability } from '../providers/portability.js';
 
 const cfg = loadConfig();
 const pool = createPool(cfg.DATABASE_URL);
@@ -15,7 +16,11 @@ if (cfg.TOS_BUCKET && cfg.BYTEPLUS_ACCESS_KEY_ID) {
   presignGet = (key: string, ttl: number) => objectStore!.presignGet(key, ttl);
 }
 
-const app = buildServer({ pool, cfg, presignGet, objectStore });
+// Test sources are intentionally absent from the runtime image; CI verifies
+// every referenced path before image publication. Runtime still verifies the
+// schemas, selections, and digest-bound live evidence copied into the image.
+const providerPortability = loadProviderPortability(process.cwd(), { verifyTestFiles: false });
+const app = buildServer({ pool, cfg, presignGet, objectStore, providerPortability });
 
 await app.listen({ port: cfg.API_PORT, host: cfg.API_HOST });
 logger.info('listening', { host: cfg.API_HOST, port: cfg.API_PORT });

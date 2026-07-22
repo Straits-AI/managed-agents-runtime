@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "provider-deployment/v1",
+  "deploymentId": "kertas-managed",
+  "description": "Capability-selected managed runtime using only live cloud core surfaces and integration-tested local control-plane services.",
+  "requirements": [
+    { "contract": "model.chat/v1", "minimumAssurance": "live" },
+    { "contract": "sandbox.workspace/v1", "minimumAssurance": "live" },
+    { "contract": "object.read/v1", "minimumAssurance": "live" },
+    { "contract": "object.write/v1", "minimumAssurance": "live" },
+    { "contract": "object.presign/v1", "minimumAssurance": "live" },
+    { "contract": "event.publish/v1", "minimumAssurance": "integration" },
+    { "contract": "credential.resolve/v1", "minimumAssurance": "integration" },
+    { "contract": "knowledge.retrieve/v1", "minimumAssurance": "integration" },
+    { "contract": "memory.semantic/v1", "minimumAssurance": "integration" },
+    { "contract": "tool.skill.resolve/v1", "minimumAssurance": "integration" },
+    { "contract": "tool.mcp.invoke/v1", "minimumAssurance": "integration" }
+  ],
+  "resolvedSelection": {
+    "schemaVersion": "provider-selection/v1",
+    "bindings": [
+      { "contract": "credential.resolve/v1", "providerId": "local", "profileId": "reference", "implementation": "CredentialBroker with LocalCipher", "assurance": "integration", "failureBoundary": "Key custody is an operator-supplied local AES key rather than managed HSM/KMS custody.", "limitations": ["operator-managed encryption key"] },
+      { "contract": "event.publish/v1", "providerId": "local", "profileId": "reference", "implementation": "InProcessPublisher", "assurance": "integration", "failureBoundary": "Publication drains the outbox without external delivery; consumers must read the durable API ledger.", "limitations": ["no external subscriber delivery"] },
+      { "contract": "knowledge.retrieve/v1", "providerId": "local", "profileId": "reference", "implementation": "PgKnowledgeProvider", "assurance": "integration", "failureBoundary": "Evidence availability and ranking depend on the deployment PostgreSQL instance.", "limitations": ["lexical PostgreSQL reference implementation"] },
+      { "contract": "memory.semantic/v1", "providerId": "local", "profileId": "reference", "implementation": "PgMemoryProvider", "assurance": "integration", "failureBoundary": "Memory availability shares the runtime PostgreSQL failure domain.", "limitations": ["PostgreSQL ranking reference implementation"] },
+      { "contract": "model.chat/v1", "providerId": "byteplus", "profileId": "managed-runtime", "implementation": "ModelArkProvider", "assurance": "live", "failureBoundary": "The retained live proof covers one activated preset-model chat invoked with a 32-token request ceiling; the provider reported 48 output tokens, so the claim is request forwarding rather than provider-side ceiling enforcement.", "limitations": ["provider usage may exceed the requested max_tokens value", "no image/video claim", "no throughput or regional failover claim"] },
+      { "contract": "object.presign/v1", "providerId": "byteplus", "profileId": "managed-runtime", "implementation": "TosObjectStore TOS4 presigning", "assurance": "live", "failureBoundary": "Presigned URLs are bearer credentials, cannot be revoked by the runtime, and must never enter checkpoints or evidence.", "limitations": ["no per-URL revocation"] },
+      { "contract": "object.read/v1", "providerId": "byteplus", "profileId": "managed-runtime", "implementation": "TosObjectStore", "assurance": "live", "failureBoundary": "GET/HEAD are bounded; absence is 404, while other provider failures reject with sanitized metadata.", "limitations": ["no versioned-read or multipart claim"] },
+      { "contract": "object.write/v1", "providerId": "byteplus", "profileId": "managed-runtime", "implementation": "TosObjectStore", "assurance": "live", "failureBoundary": "PUT uses bounded attempts and payload size; bucket policy, versioning, and conditional writes are outside the claim.", "limitations": ["no multipart or conditional-put claim"] },
+      { "contract": "sandbox.workspace/v1", "providerId": "byteplus", "profileId": "managed-runtime", "implementation": "VefaasSandboxProvider private WebShell transport", "assurance": "live", "failureBoundary": "The private CPU sandbox is bounded to the retained lifecycle and fixed file/command limits; Terminating is not terminal cleanup.", "limitations": ["no APIG/public route", "no VPC, mounts, GPU, or warm-capacity claim", "10-minute live-proof lifetime"] },
+      { "contract": "tool.mcp.invoke/v1", "providerId": "local", "profileId": "reference", "implementation": "RegistryMcpProvider", "assurance": "integration", "failureBoundary": "Only in-process registered toolsets are reachable; provider recovery policy remains mandatory.", "limitations": ["no hosted MCP gateway"] },
+      { "contract": "tool.skill.resolve/v1", "providerId": "local", "profileId": "reference", "implementation": "RegistrySkillProvider", "assurance": "integration", "failureBoundary": "Only skills registered in the current process are resolvable.", "limitations": ["no remote registry or cross-process distribution"] }
+    ]
+  },
+  "failurePolicy": "reject-unsatisfied-capabilities"
+}

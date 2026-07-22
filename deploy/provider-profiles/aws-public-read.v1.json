@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "provider-deployment/v1",
+  "deploymentId": "aws-public-read",
+  "description": "Read-only public-data activity profile; not a complete managed-agent runtime.",
+  "requirements": [
+    { "contract": "object.read/v1", "minimumAssurance": "live" }
+  ],
+  "resolvedSelection": {
+    "schemaVersion": "provider-selection/v1",
+    "bindings": [
+      {
+        "contract": "object.read/v1",
+        "providerId": "aws",
+        "profileId": "public-s3-read",
+        "implementation": "AwsPublicS3Reader",
+        "assurance": "live",
+        "failureBoundary": "Anonymous HEAD/GET are bounded before buffering; 404 is absence and every other transport/provider failure rejects with status and request ID only.",
+        "limitations": ["one public NOAA bucket proof", "no list, version, authenticated read, availability, or performance claim"]
+      }
+    ]
+  },
+  "failurePolicy": "reject-unsatisfied-capabilities"
+}

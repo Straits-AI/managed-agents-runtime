@@ -1,0 +1,118 @@
+{
+  "schemaVersion": "provider-contracts/v1",
+  "contracts": [
+    {
+      "id": "model.chat/v1",
+      "group": "model",
+      "summary": "Bounded chat inference with tool calls, cancellation, and metered usage.",
+      "requiredSemantics": [
+        "returns one assistant message and non-negative token usage",
+        "preserves structured tool calls or an explicitly rejected malformed argument",
+        "forwards AbortSignal and the requested output ceiling to the provider request"
+      ]
+    },
+    {
+      "id": "sandbox.workspace/v1",
+      "group": "sandbox",
+      "summary": "Disposable workspace-provider lifecycle and bounded command/file operations.",
+      "requiredSemantics": [
+        "create, describe, exec, UTF-8 read/write, and terminate share one opaque handle",
+        "command and file operations are bounded and return structured failures",
+        "termination is idempotent and terminal cleanup is observable"
+      ]
+    },
+    {
+      "id": "object.read/v1",
+      "group": "object-store",
+      "affinity": "object-store",
+      "summary": "Bounded binary object reads and existence checks.",
+      "requiredSemantics": [
+        "get returns exact bytes and enforces a pre-buffer size limit",
+        "exists distinguishes absence from provider failure",
+        "errors expose bounded non-secret provider metadata"
+      ]
+    },
+    {
+      "id": "object.write/v1",
+      "group": "object-store",
+      "affinity": "object-store",
+      "summary": "Bounded binary object writes with an opaque integrity identifier.",
+      "requiredSemantics": [
+        "put stores exact bytes under the supplied logical key",
+        "success returns an opaque ETag or null",
+        "retry and maximum-object behavior are declared"
+      ]
+    },
+    {
+      "id": "object.presign/v1",
+      "group": "object-store",
+      "affinity": "object-store",
+      "summary": "Time-limited object GET and PUT transport URLs.",
+      "requiredSemantics": [
+        "GET and PUT URLs are scoped to one key and bounded expiry",
+        "signed URLs are treated as secrets and never persisted in runtime state",
+        "the provider declares whether revocation is available"
+      ]
+    },
+    {
+      "id": "event.publish/v1",
+      "group": "event",
+      "summary": "Batch publication from the transactional outbox.",
+      "requiredSemantics": [
+        "publish accepts stable event IDs, topics, and ordering keys",
+        "failure rejects the batch so the outbox can retry",
+        "delivery and per-key ordering guarantees are declared"
+      ]
+    },
+    {
+      "id": "credential.resolve/v1",
+      "group": "credential",
+      "summary": "Execution-scoped credential release after policy authorization.",
+      "requiredSemantics": [
+        "resolution binds tenant, caller lineage, purpose, action, resource, and approval",
+        "consumption is atomic and bounded by expiry and use count",
+        "secret material never enters model context, arguments, results, or receipts"
+      ]
+    },
+    {
+      "id": "knowledge.retrieve/v1",
+      "group": "knowledge",
+      "summary": "Tenant-scoped evidence retrieval through logical knowledge references.",
+      "requiredSemantics": [
+        "provider coordinates resolve server-side from tenant-owned logical names",
+        "results are bounded, scored evidence with provenance metadata",
+        "missing or unattested tenant bindings fail closed"
+      ]
+    },
+    {
+      "id": "memory.semantic/v1",
+      "group": "memory",
+      "summary": "Tenant-and-agent-scoped semantic memory search and write.",
+      "requiredSemantics": [
+        "search and write enforce the complete tenant and agent scope",
+        "result count and stored entries are bounded",
+        "memory is non-authoritative and never replaces the execution ledger"
+      ]
+    },
+    {
+      "id": "tool.skill.resolve/v1",
+      "group": "tool",
+      "summary": "Immutable version-pinned Skill resolution.",
+      "requiredSemantics": [
+        "latest or mutable references are rejected during execution",
+        "resolved files remain identical across resume",
+        "materialization stays within the workspace boundary"
+      ]
+    },
+    {
+      "id": "tool.mcp.invoke/v1",
+      "group": "tool",
+      "summary": "Governed MCP discovery, policy, bounded invocation, and reconciliation.",
+      "requiredSemantics": [
+        "server policy classifies each tool as read or mutation before exposure",
+        "responses stream through byte bounds before buffering",
+        "mutations declare idempotent, reconcile, or manual recovery semantics"
+      ]
+    }
+  ]
+}
