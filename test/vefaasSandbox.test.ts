@@ -235,6 +235,7 @@ describe('BytePlus private sandbox runtime provider', () => {
       .toBe(privateCommand.mock.calls[1]?.[0].command);
     expect(privateCommand.mock.calls[2]?.[0].command).toContain('dd ');
     expect(privateCommand.mock.calls[2]?.[0].command).not.toContain('>>');
+    expect(privateCommand.mock.calls[2]?.[0].command).not.toContain('status=none');
   });
 
   it('terminates a Ready instance when explicit APIG discovery fails', async () => {

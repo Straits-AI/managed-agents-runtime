@@ -299,9 +299,9 @@ export class VefaasSandboxProvider implements SandboxProvider {
         const encodedChunk = bytes.subarray(offset, offset + 24 * 1024).toString('base64');
         const append = await this.execPrivateIdempotent(
           handle,
-          `ma_path=$(printf '%s' '${encodedPath}' | base64 -d) && ` +
+            `ma_path=$(printf '%s' '${encodedPath}' | base64 -d) && ` +
             `printf '%s' '${encodedChunk}' | base64 -d | ` +
-            `dd of="$ma_path" bs=1 seek=${offset} conv=notrunc status=none`,
+            `dd of="$ma_path" bs=1 seek=${offset} conv=notrunc`,
           { timeoutSec: 60, cwd: WORKSPACE_DIR },
         );
         if (append.exitCode !== 0) {
