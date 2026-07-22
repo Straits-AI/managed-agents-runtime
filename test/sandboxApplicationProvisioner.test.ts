@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   defaultPrivateSandboxApplicationPlan,
   deletePrivateSandboxApplication,
+  PrivateSandboxConfigurationError,
   provisionPrivateSandboxApplication,
   type VefaasProvisioningApi,
 } from '../src/providers/byteplus/sandboxApplication.js';
@@ -180,10 +181,16 @@ describe('private sandbox application provisioner', () => {
       throw new Error(`unexpected mutation ${action}`);
     };
 
-    await expect(provisionPrivateSandboxApplication(
-      defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
-      api,
-    )).rejects.toThrow('InstanceType');
+    try {
+      await provisionPrivateSandboxApplication(
+        defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
+        api,
+      );
+      expect.unreachable('configuration drift should fail closed');
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrivateSandboxConfigurationError);
+      expect((error as PrivateSandboxConfigurationError).fields).toEqual(['InstanceType']);
+    }
     expect(actions).toEqual(['ListFunctions', 'GetReleaseStatus', 'GetRevision']);
   });
 

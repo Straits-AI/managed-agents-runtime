@@ -5,6 +5,7 @@ import { BpCliError } from '../src/providers/byteplus/privateWebshell.js';
 import { reserveEvidenceRecord } from '../src/providers/byteplus/provisioningEvidence.js';
 import {
   defaultPrivateSandboxApplicationPlan,
+  PrivateSandboxConfigurationError,
   provisionPrivateSandboxApplication,
 } from '../src/providers/byteplus/sandboxApplication.js';
 import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
@@ -162,8 +163,15 @@ try {
     application: { functionId: createdFunctionId },
     requests: requestObservations,
     failure: {
-      code: error instanceof BpCliError ? error.code : 'ProvisioningFailed',
+      code: error instanceof BpCliError
+        ? error.code
+        : error instanceof PrivateSandboxConfigurationError
+          ? 'ConfigurationMismatch'
+          : 'ProvisioningFailed',
       requestId: error instanceof BpCliError ? error.requestId : null,
+      invariantFields: error instanceof PrivateSandboxConfigurationError
+        ? error.fields
+        : undefined,
       sourceUnchanged: readGit(['rev-parse', 'HEAD']) === source.commit
         && !readGit(['status', '--porcelain']),
     },

@@ -39,6 +39,16 @@ export interface PrivateSandboxCleanupReceipt {
   requestIds: Array<{ action: string; requestId: string | null }>;
 }
 
+export class PrivateSandboxConfigurationError extends Error {
+  readonly fields: readonly string[];
+
+  constructor(fields: readonly string[]) {
+    super(`Private sandbox configuration readback mismatch: ${fields.join(',')}`);
+    this.name = 'PrivateSandboxConfigurationError';
+    this.fields = [...fields];
+  }
+}
+
 const CODE_IMAGE =
   'enterprise-public-ap-southeast-1.cr.volces.com/vefaas-public/code-cli:0.0.7';
 const MANAGED_TAGS = [
@@ -308,6 +318,7 @@ function assertRevisionMatches(
   revision: Record<string, unknown>,
   revisionNumber: number,
 ): void {
+  const mismatches: string[] = [];
   const expected: Array<[string, unknown]> = [
     ['Id', functionId],
     ['Name', plan.name],
@@ -330,31 +341,34 @@ function assertRevisionMatches(
   ];
   for (const [key, value] of expected) {
     if (revision[key] !== value) {
-      throw new Error(`Private sandbox draft mismatch: ${key}`);
+      mismatches.push(key);
     }
   }
   if (revision.InstanceType !== ''
     && revision.InstanceType !== undefined
     && revision.InstanceType !== null) {
-    throw new Error('Private sandbox draft mismatch: InstanceType');
+    mismatches.push('InstanceType');
   }
   if (!Array.isArray(revision.Envs) || revision.Envs.length !== 0) {
-    throw new Error('Private sandbox draft mismatch: Envs');
+    mismatches.push('Envs');
   }
   if (!plan.tags.every((tag) => hasTag(revision.Tags, tag.Key, tag.Value))) {
-    throw new Error('Private sandbox draft mismatch: Tags');
+    mismatches.push('Tags');
   }
   if (!disabledVpc(revision.VpcConfig)) {
-    throw new Error('Private sandbox draft mismatch: VpcConfig');
+    mismatches.push('VpcConfig');
   }
   if (!disabledTls(revision.TlsConfig)) {
-    throw new Error('Private sandbox draft mismatch: TlsConfig');
+    mismatches.push('TlsConfig');
   }
   if (!disabledMount(revision.NasStorage, 'EnableNas', 'NasConfigs')) {
-    throw new Error('Private sandbox draft mismatch: NasStorage');
+    mismatches.push('NasStorage');
   }
   if (!disabledMount(revision.TosMountConfig, 'EnableTos', 'MountPoints')) {
-    throw new Error('Private sandbox draft mismatch: TosMountConfig');
+    mismatches.push('TosMountConfig');
+  }
+  if (mismatches.length > 0) {
+    throw new PrivateSandboxConfigurationError(mismatches);
   }
 }
 
