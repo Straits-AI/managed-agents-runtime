@@ -56,12 +56,21 @@ export async function runSandboxConformance(
     }
     if (!ready) throw new Error('Sandbox conformance startup timed out');
 
-    const execution = await provider.exec(handle, `printf %s ${options.marker}`);
+    const execution = await boundedStage(
+      'execution',
+      () => provider.exec(handle, `printf %s ${options.marker}`),
+    );
     if (execution.exitCode !== 0 || !execution.stdout.includes(options.marker)) {
       throw new Error('Sandbox conformance execution failed');
     }
-    await provider.writeFile(handle, '/tmp/managed-agents-conformance.txt', options.marker);
-    const readBack = await provider.readFile(handle, '/tmp/managed-agents-conformance.txt');
+    await boundedStage(
+      'file write',
+      () => provider.writeFile(handle, '/tmp/managed-agents-conformance.txt', options.marker),
+    );
+    const readBack = await boundedStage(
+      'file read',
+      () => provider.readFile(handle, '/tmp/managed-agents-conformance.txt'),
+    );
     if (readBack !== options.marker) {
       throw new Error('Sandbox conformance file roundtrip failed');
     }
@@ -99,7 +108,15 @@ export async function runSandboxConformance(
 
 function safeSandboxFailure(message: string): string {
   if (message === 'Private sandbox Ready response was incomplete') return message;
-  return /^Sandbox conformance (startup failed|startup timed out|execution failed|file roundtrip failed)$/.test(message)
+  return /^Sandbox conformance (startup failed|startup timed out|execution failed|file roundtrip failed|(execution|file write|file read) request failed)$/.test(message)
     ? message
     : 'Sandbox conformance failed';
+}
+
+async function boundedStage<T>(stage: 'execution' | 'file write' | 'file read', run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch {
+    throw new Error(`Sandbox conformance ${stage} request failed`);
+  }
 }

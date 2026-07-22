@@ -168,6 +168,7 @@ try {
     failure: {
       code: error instanceof BytePlusApiError ? error.code : 'RuntimeConformanceFailed',
       requestId: error instanceof BytePlusApiError ? error.requestId : null,
+      reason: safeRuntimeFailureReason(error),
       sourceUnchanged: readGit(['rev-parse', 'HEAD']) === source.commit
         && !readGit(['status', '--porcelain']),
     },
@@ -182,4 +183,11 @@ function assertSourceUnchanged(): void {
   if (readGit(['rev-parse', 'HEAD']) !== source.commit || readGit(['status', '--porcelain'])) {
     throw new Error('Runtime sandbox source revision changed during the live run');
   }
+}
+
+function safeRuntimeFailureReason(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  return /^Sandbox conformance (startup failed|startup timed out|execution failed|file roundtrip failed|(execution|file write|file read) request failed)$/.test(error.message)
+    ? error.message
+    : null;
 }

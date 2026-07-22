@@ -49,4 +49,16 @@ describe('private sandbox live conformance seam', () => {
     await expect(provider.describe({ sandboxId: 'sandbox-fixture', baseUrl: 'private://fixture' }))
       .resolves.toEqual({ status: 'Killed' });
   });
+
+  it('reports only the bounded failing stage when a provider operation throws', async () => {
+    const provider = fixture();
+    provider.writeFile.mockRejectedValue(new Error('secret path and endpoint'));
+
+    await expect(runSandboxConformance(provider, {
+      runId: 'failed-write-run',
+      timeoutMinutes: 10,
+      marker: 'canary-marker',
+    })).rejects.toThrow('Sandbox conformance file write request failed');
+    expect(provider.terminate).toHaveBeenCalledTimes(1);
+  });
 });
