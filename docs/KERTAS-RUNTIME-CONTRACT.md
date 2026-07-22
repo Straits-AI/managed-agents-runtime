@@ -104,6 +104,13 @@ Until the target resource is implemented:
 No database migration or internal table access is part of this compatibility
 contract.
 
+The existing compatibility surface is machine-readable through authenticated
+`GET /v1/contracts` discovery and
+`GET /v1/contracts/run-as-session/v1`. The packaged JSON schemas and fixtures
+live under `contracts/` and are included in the runtime image. They describe
+execution resources only: a terminal Run never asserts that Kertas accepted an
+Outcome or created a Release.
+
 ## Current versus target capability
 
 | Capability | Current controlled-alpha runtime | `v1alpha1` target |

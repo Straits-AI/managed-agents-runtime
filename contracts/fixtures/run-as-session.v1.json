@@ -1,0 +1,132 @@
+{
+  "valid": {
+    "runCreate": {
+      "agentVersionId": "av_example",
+      "goal": "Process one bounded objective",
+      "input": { "source": "fixture" },
+      "maxSteps": 20,
+      "tokenBudget": 1000,
+      "scheduledFor": "2026-07-22T00:00:00.000Z",
+      "debugFaultPoints": []
+    },
+    "runResource": {
+      "id": "run_example",
+      "tenant_id": "tenant_example",
+      "agent_version_id": "av_example",
+      "parent_run_id": null,
+      "replaces_run_id": null,
+      "replacement_generation": 0,
+      "forked_from_run_id": null,
+      "goal": "Process one bounded objective",
+      "input": { "source": "fixture" },
+      "status": "QUEUED",
+      "status_reason": null,
+      "result": null,
+      "result_size_bytes": null,
+      "progress": {},
+      "workspace_id": "ws_example",
+      "current_attempt_id": null,
+      "last_event_seq": "2",
+      "max_steps": 20,
+      "token_budget": "1000",
+      "tokens_used": "0",
+      "awaited_signal": null,
+      "scheduled_for": null,
+      "debug_fault_points": [],
+      "created_at": "2026-07-22T00:00:00.000Z",
+      "updated_at": "2026-07-22T00:00:00.000Z"
+    },
+    "runEvent": {
+      "run_id": "run_example",
+      "seq": "1",
+      "type": "RunCreated",
+      "payload": {
+        "goal": "Process one bounded objective",
+        "agentVersionId": "av_example"
+      },
+      "attempt_id": null,
+      "created_at": "2026-07-22T00:00:00.000Z"
+    },
+    "runEventsResponse": {
+      "events": [
+        {
+          "run_id": "run_example",
+          "seq": "1",
+          "type": "RunCreated",
+          "payload": {
+            "goal": "Process one bounded objective",
+            "agentVersionId": "av_example"
+          },
+          "attempt_id": null,
+          "created_at": "2026-07-22T00:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "invalid": {
+    "runCreateReservedInput": {
+      "agentVersionId": "av_example",
+      "goal": "Attempt an internal workspace seed",
+      "input": { "parentWorkspaceId": "ws_other_tenant" }
+    },
+    "runMissingTenant": {
+      "id": "run_example",
+      "agent_version_id": "av_example",
+      "goal": "Missing ownership",
+      "input": {},
+      "status": "QUEUED",
+      "progress": {},
+      "last_event_seq": "2",
+      "max_steps": 20,
+      "tokens_used": "0",
+      "created_at": "2026-07-22T00:00:00.000Z",
+      "updated_at": "2026-07-22T00:00:00.000Z"
+    },
+    "runUnexpectedField": {
+      "id": "run_example",
+      "tenant_id": "tenant_example",
+      "agent_version_id": "av_example",
+      "parent_run_id": null,
+      "replaces_run_id": null,
+      "replacement_generation": 0,
+      "forked_from_run_id": null,
+      "goal": "Unexpected compatibility field",
+      "input": {},
+      "status": "QUEUED",
+      "status_reason": null,
+      "result": null,
+      "result_size_bytes": null,
+      "progress": {},
+      "workspace_id": "ws_example",
+      "current_attempt_id": null,
+      "last_event_seq": "2",
+      "max_steps": 20,
+      "token_budget": null,
+      "tokens_used": "0",
+      "awaited_signal": null,
+      "scheduled_for": null,
+      "debug_fault_points": [],
+      "created_at": "2026-07-22T00:00:00.000Z",
+      "updated_at": "2026-07-22T00:00:00.000Z",
+      "kertasOutcome": "satisfied"
+    },
+    "runCreateInvalidSchedule": {
+      "agentVersionId": "av_example",
+      "goal": "Invalid schedule",
+      "scheduledFor": "not-a-date"
+    },
+    "runCreateOffsetSchedule": {
+      "agentVersionId": "av_example",
+      "goal": "Offset schedule rejected by the existing API",
+      "scheduledFor": "2026-07-22T08:00:00+08:00"
+    },
+    "eventUnknownType": {
+      "run_id": "run_example",
+      "seq": "1",
+      "type": "KertasReleaseCreated",
+      "payload": {},
+      "attempt_id": null,
+      "created_at": "2026-07-22T00:00:00.000Z"
+    }
+  }
+}
