@@ -106,6 +106,12 @@ npm run byteplus:sandbox:cleanup -- \
   --evidence-file /secure/path/sandbox-cleanup.json
 ```
 
+The application uses BytePlus's documented minimum `MaxConcurrency` of 10 but
+releases with `MaxInstance: 1`; this permits no more than one warm application
+instance. Before any cloud call, provisioning reserves an owner-only pending
+receipt containing the unique attempt ID used as an application tag. Final
+success or sanitized failure evidence replaces that receipt atomically.
+
 This proves private WebShell execution, not public HTTP. It does not create or
 use an API Gateway route. Provisioning omits `InstanceType`, verifies the draft
 as CPU-only before release, and refuses to adopt a differing exact-name

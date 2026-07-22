@@ -180,8 +180,9 @@ private operator inventory rather than committing them to this repository:
 > **Provisioning notes learned the hard way:** sandbox application fields omitted
 > from older CLI help are sent through one structured body and immediately read
 > back; CPU applications omit `InstanceType` because BytePlus documents every
-> non-empty value as a specific GPU type; exact-name resources are reused only
-> after full configuration and stable-revision validation;
+> non-empty value as a specific GPU type; application `MaxConcurrency` is 10,
+> the documented API minimum, while release `MaxInstance` remains 1; exact-name
+> resources are reused only after full configuration and stable-revision validation;
 > APIG is a separate public-exposure decision, not a private sandbox prerequisite;
 > private commands return at most 100,000 bytes across stdout/stderr, and the
 > UTF-8 text-file seam is bounded to 100,000 bytes per file;
@@ -210,6 +211,11 @@ npm run byteplus:sandbox:cleanup -- \
   --function-id <released-sandbox-function-id> --name <deterministic-name> \
   --evidence-file /secure/path/sandbox-cleanup.json
 ```
+
+Provisioning reserves an owner-only `pending` evidence record before its first
+cloud call. The record includes a unique non-secret attempt ID that is also
+attached to newly created applications, so an interrupted or eventually
+consistent create can be identified without adopting unrelated resources.
 
 Interactive `bp login` belongs in the operator's normal host browser. Containers
 may run these non-interactive checks only after the resulting credentials have

@@ -38,6 +38,7 @@ describe('private sandbox application provisioner', () => {
 
     expect(receipt).toMatchObject({
       disposition: 'created',
+      attemptId: 'attempt-fixture',
       functionId: 'function-1',
       stableRevisionNumber: 1,
       releaseRecordId: 'release-1',
@@ -52,6 +53,7 @@ describe('private sandbox application provisioner', () => {
       Port: 8080,
       CpuMilli: 1000,
       MemoryMB: 2048,
+      MaxConcurrency: 10,
       RequestTimeout: 900,
       VpcConfig: { EnableVpc: false, EnableSharedInternetAccess: false },
       TlsConfig: { EnableLog: false },
@@ -186,6 +188,7 @@ describe('private sandbox application provisioner', () => {
   });
 
   it.each([
+    ['description', { Description: 'unexpected description' }],
     ['initializer', { InitializerSec: 60 }],
     ['VPC identifiers', {
       VpcConfig: {
@@ -312,6 +315,58 @@ describe('private sandbox application provisioner', () => {
     ]);
   });
 
+  it('retries bounded inventory lookup before cleaning up an eventually visible create', async () => {
+    const actions: string[] = [];
+    let listed = 0;
+    const sleep = vi.fn(async () => {});
+    const api: VefaasProvisioningApi = async (action) => {
+      actions.push(action);
+      if (action === 'ListFunctions') {
+        listed += 1;
+        const present = listed === 4;
+        return {
+          result: {
+            Items: present
+              ? [{
+                  Id: 'function-eventually-visible',
+                  Name: 'managed-agents-runtime-test',
+                  Tags: [{ Key: 'provisioning-attempt', Value: 'attempt-fixture' }],
+                }]
+              : [],
+            Total: present ? 1 : 0,
+          },
+          requestId: `request-list-${listed}`,
+        };
+      }
+      if (action === 'CreateFunction') throw new Error('connection closed');
+      if (action === 'DeleteFunction') return {
+        result: {},
+        requestId: 'request-delete',
+      };
+      throw new Error(`unexpected action ${action}`);
+    };
+
+    await expect(provisionPrivateSandboxApplication(
+      defaultPrivateSandboxApplicationPlan('managed-agents-runtime-test'),
+      api,
+      {
+        attemptId: 'attempt-fixture',
+        ambiguousCreateInventoryAttempts: 4,
+        sleep,
+      },
+    )).rejects.toThrow('connection closed');
+    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(actions).toEqual([
+      'ListFunctions',
+      'CreateFunction',
+      'ListFunctions',
+      'ListFunctions',
+      'ListFunctions',
+      'DeleteFunction',
+      'ListFunctions',
+    ]);
+  });
+
   it('does not delete an ambiguous exact-name function without the attempt tag', async () => {
     const actions: string[] = [];
     let listed = 0;
@@ -405,7 +460,8 @@ function matchingRevision(revisionNumber: number): Record<string, unknown> {
     CpuStrategy: 'always',
     CpuMilli: 1000,
     MemoryMB: 2048,
-    MaxConcurrency: 1,
+    MaxConcurrency: 10,
+    Description: 'Private BytePlus runtime conformance application',
     RequestTimeout: 900,
     InitializerSec: 120,
     ExclusiveMode: false,

@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createBpProvisioningApi } from '../src/providers/byteplus/bpProvisioningApi.js';
 import { BpCliError } from '../src/providers/byteplus/privateWebshell.js';
+import { reserveEvidenceRecord } from '../src/providers/byteplus/provisioningEvidence.js';
 import {
   defaultPrivateSandboxApplicationPlan,
   provisionPrivateSandboxApplication,
@@ -43,6 +43,7 @@ if (!/^[A-Za-z0-9._-]{1,80}$/.test(bpVersion)) {
   throw new Error('BytePlus CLI version was invalid');
 }
 
+const provisioningAttemptId = randomUUID();
 const rawApi = createBpProvisioningApi({ profile, region });
 const requestObservations: Array<{
   action: string;
@@ -85,6 +86,7 @@ const baseRecord = {
     commitOrigin: source.commitOrigin,
   },
   provider: 'byteplus-vefaas',
+  provisioningAttemptId,
   region,
   retrievedAt: new Date().toISOString(),
   toolchain: { bpVersion, apiVersion: '2024-06-06' },
@@ -114,6 +116,14 @@ const baseRecord = {
     responseBodiesSerialized: false,
   },
 };
+const evidence = reserveEvidenceRecord(evidenceFile, {
+  ...baseRecord,
+  status: 'pending',
+  application: { functionId: null },
+  requests: [],
+});
+
+let successRecord: Record<string, unknown>;
 try {
   const images = await api('ListSandboxImages', {
     ImageType: 'public',
@@ -129,9 +139,11 @@ try {
   if (!selectedImage) {
     throw new Error('The planned BytePlus Code image is not currently pre-cached');
   }
-  const receipt = await provisionPrivateSandboxApplication(plan, api);
+  const receipt = await provisionPrivateSandboxApplication(plan, api, {
+    attemptId: provisioningAttemptId,
+  });
   assertSourceUnchanged();
-  writeRecord({
+  successRecord = {
     ...baseRecord,
     status: 'succeeded',
     application: {
@@ -142,9 +154,9 @@ try {
       configurationVerified: true,
     },
     requests: requestObservations,
-  });
+  };
 } catch (error) {
-  writeRecord({
+  const failureRecord = {
     ...baseRecord,
     status: 'failed',
     application: { functionId: createdFunctionId },
@@ -155,22 +167,16 @@ try {
       sourceUnchanged: readGit(['rev-parse', 'HEAD']) === source.commit
         && !readGit(['status', '--porcelain']),
     },
-  });
+  };
+  evidence.commit(failureRecord);
+  process.stdout.write(`${JSON.stringify(failureRecord, null, 2)}\n`);
   throw new Error('Private sandbox provisioning failed; sanitized evidence was retained');
 }
+evidence.commit(successRecord);
+process.stdout.write(`${JSON.stringify(successRecord, null, 2)}\n`);
 
 function assertSourceUnchanged(): void {
   if (readGit(['rev-parse', 'HEAD']) !== source.commit || readGit(['status', '--porcelain'])) {
     throw new Error('Sandbox provisioning source revision changed during the live run');
   }
-}
-
-function writeRecord(record: Record<string, unknown>): void {
-  const serialized = `${JSON.stringify(record, null, 2)}\n`;
-  writeFileSync(resolve(evidenceFile), serialized, {
-    encoding: 'utf8',
-    flag: 'wx',
-    mode: 0o600,
-  });
-  process.stdout.write(serialized);
 }

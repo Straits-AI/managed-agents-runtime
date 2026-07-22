@@ -26,6 +26,7 @@ export interface PrivateSandboxApplicationPlan {
 
 export interface PrivateSandboxProvisioningReceipt {
   disposition: 'created' | 'reused';
+  attemptId: string;
   functionId: string;
   stableRevisionNumber: number;
   releaseRecordId: string;
@@ -59,7 +60,7 @@ export function defaultPrivateSandboxApplicationPlan(
     port: 8080,
     cpuMilli: 1000,
     memoryMB: 2048,
-    maxConcurrency: 1,
+    maxConcurrency: 10,
     requestTimeoutSeconds: 900,
     initializerSeconds: 120,
     tags: MANAGED_TAGS,
@@ -72,12 +73,22 @@ export async function provisionPrivateSandboxApplication(
   dependencies: {
     sleep?: (milliseconds: number) => Promise<void>;
     attemptId?: string;
+    ambiguousCreateInventoryAttempts?: number;
   } = {},
 ): Promise<PrivateSandboxProvisioningReceipt> {
   const attemptId = dependencies.attemptId ?? randomUUID();
   if (!/^[A-Za-z0-9._-]{8,80}$/.test(attemptId)) {
     throw new Error('Private sandbox provisioning attempt ID is invalid');
   }
+  const ambiguityAttempts = dependencies.ambiguousCreateInventoryAttempts ?? 5;
+  if (!Number.isInteger(ambiguityAttempts)
+    || ambiguityAttempts < 1
+    || ambiguityAttempts > 10) {
+    throw new Error('Ambiguous CreateFunction inventory attempt limit is invalid');
+  }
+  const sleep = dependencies.sleep ?? (async (milliseconds) => {
+    await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+  });
   const requestIds: Array<{ action: string; requestId: string | null }> = [];
   const call = async (action: string, body: Record<string, unknown>) => {
     const response = await api(action, body);
@@ -106,6 +117,7 @@ export async function provisionPrivateSandboxApplication(
     assertRevisionMatches(plan, functionId, revision, stableRevisionNumber);
     return {
       disposition: 'reused',
+      attemptId,
       functionId,
       stableRevisionNumber,
       releaseRecordId,
@@ -117,8 +129,13 @@ export async function provisionPrivateSandboxApplication(
   try {
     created = await call('CreateFunction', createBody(plan, attemptId));
   } catch (error) {
-    const afterCreate = await listAllFunctionItems(call);
-    const exactName = afterCreate.filter((item) => item.Name === plan.name);
+    let exactName: Record<string, unknown>[] = [];
+    for (let attempt = 0; attempt < ambiguityAttempts; attempt += 1) {
+      const afterCreate = await listAllFunctionItems(call);
+      exactName = afterCreate.filter((item) => item.Name === plan.name);
+      if (exactName.length > 0 || attempt === ambiguityAttempts - 1) break;
+      await sleep(1_000);
+    }
     const possible = exactName.filter((item) => hasTag(
       item.Tags,
       'provisioning-attempt',
@@ -158,9 +175,6 @@ export async function provisionPrivateSandboxApplication(
     });
     const initialReleaseRecordId = boundedIdentifier(released.ReleaseRecordId);
 
-    const sleep = dependencies.sleep ?? (async (milliseconds) => {
-      await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-    });
     for (let attempt = 0; attempt < 60; attempt += 1) {
       const status = await call('GetReleaseStatus', { FunctionId: functionId });
       if (status.Status === 'done') {
@@ -177,6 +191,7 @@ export async function provisionPrivateSandboxApplication(
         assertRevisionMatches(plan, functionId, stable, stableRevisionNumber);
         return {
           disposition: 'created',
+          attemptId,
           functionId,
           stableRevisionNumber,
           releaseRecordId,
@@ -296,6 +311,7 @@ function assertRevisionMatches(
   const expected: Array<[string, unknown]> = [
     ['Id', functionId],
     ['Name', plan.name],
+    ['Description', plan.description],
     ['FunctionType', 'sandbox'],
     ['Runtime', 'native/v1'],
     ['SourceType', 'image'],
