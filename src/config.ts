@@ -92,6 +92,10 @@ const configSchema = z.object({
   TOS_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   TOS_MAX_OBJECT_BYTES: z.coerce.number().int().min(1).max(2_147_483_648)
     .default(512 * 1024 * 1024),
+  // Explicit local/private object-store root. Used by the local stack and
+  // deployment conformance; distributed deployments should use TOS or another
+  // shared ObjectStore adapter.
+  LOCAL_OBJECT_STORE_DIR: z.string().min(1).optional(),
 
   AGENTKIT_MCP_URL: z.string().optional(),
   AGENTKIT_MCP_API_KEY: z.string().optional(),
