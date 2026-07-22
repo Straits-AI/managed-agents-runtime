@@ -4,7 +4,10 @@ import { loadConfig, requireConfig } from '../src/config.js';
 import { reserveEvidenceRecord } from '../src/providers/byteplus/provisioningEvidence.js';
 import { BytePlusApiError } from '../src/providers/byteplus/signer.js';
 import { VefaasClient, type VefaasResponseMetadata } from '../src/providers/byteplus/vefaas.js';
-import { summarizeExactSandboxInventory } from '../src/providers/byteplus/sandboxInventory.js';
+import {
+  summarizeExactSandboxInventory,
+  waitForNoLiveSandboxes,
+} from '../src/providers/byteplus/sandboxInventory.js';
 import { runSandboxConformance } from '../src/providers/sandboxConformance.js';
 import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
 import { VefaasSandboxProvider } from '../src/providers/vefaasSandbox.js';
@@ -116,17 +119,18 @@ try {
     marker: `runtime-${randomUUID()}`,
   });
   conformanceStage = 'final-inventory';
-  const finalInventory = await client.listSandboxes(functionId, {
-    pageNumber: 1,
-    pageSize: 100,
+  const inventorySummary = await waitForNoLiveSandboxes({
+    list: () => client.listSandboxes(functionId, {
+      pageNumber: 1,
+      pageSize: 100,
+      metadata: { runId },
+    }),
+    target: { functionId, metadata: { runId } },
+    attempts: 10,
+    sleep: async (milliseconds) => {
+      await new Promise<void>((resolveSleep) => setTimeout(resolveSleep, milliseconds));
+    },
   });
-  const inventorySummary = summarizeExactSandboxInventory(finalInventory, {
-    functionId,
-    metadata: { runId },
-  });
-  if (inventorySummary.liveInstances !== 0) {
-    throw new Error('Runtime sandbox final instance inventory was not empty');
-  }
   conformanceStage = 'request-metadata';
   for (const action of [
     'CreateSandbox',
