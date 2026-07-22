@@ -122,6 +122,10 @@ after live startup showed their `/opt/gem/run.sh` exiting on an invalid
 receipt before creation. If creation fails after BytePlus allocates an instance,
 the provider inventories by the exact run metadata, kills only those instances,
 verifies their absence, and records a sanitized failure receipt.
+Application cleanup normally requires an empty child inventory. It also accepts
+provider-retained tombstones only when every returned child belongs to the exact
+target function and is already `Terminating`; any active, unknown, paginated, or
+cross-function child fails closed before `DeleteFunction`.
 
 This proves private WebShell execution, not public HTTP. It does not create or
 use an API Gateway route. Provisioning omits `InstanceType`, verifies the draft

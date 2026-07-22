@@ -268,8 +268,15 @@ export async function deletePrivateSandboxApplication(
     PageSize: 100,
   });
   const active = Array.isArray(sandboxes.Sandboxes) ? sandboxes.Sandboxes : null;
-  if (active === null || active.length !== 0 || sandboxes.Total !== 0) {
-    throw new Error('Private sandbox application still has instances');
+  const total = typeof sandboxes.Total === 'number' ? sandboxes.Total : null;
+  const onlyExactTerminatingTombstones = active !== null
+    && total === active.length
+    && active.every((sandbox) => isRecord(sandbox)
+      && sandbox.FunctionId === target.functionId
+      && sandbox.Status === 'Terminating');
+  if (active === null || total === null
+    || (total !== 0 && !onlyExactTerminatingTombstones)) {
+    throw new Error('Private sandbox application still has active or unowned instances');
   }
 
   const before = await listAllFunctionItems(call);

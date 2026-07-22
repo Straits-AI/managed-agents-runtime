@@ -554,6 +554,90 @@ describe('private sandbox application provisioner', () => {
       'ListFunctions',
     ]);
   });
+
+  it('deletes an exact application whose only residual child is terminating', async () => {
+    const actions: string[] = [];
+    let functionsListed = 0;
+    const api: VefaasProvisioningApi = async (action) => {
+      actions.push(action);
+      if (action === 'ListSandboxes') return {
+        result: {
+          Sandboxes: [{
+            FunctionId: 'function-1',
+            Id: 'sandbox-1',
+            Status: 'Terminating',
+          }],
+          Total: 1,
+        },
+        requestId: 'request-sandboxes',
+      };
+      if (action === 'ListFunctions') {
+        functionsListed += 1;
+        return {
+          result: {
+            Items: functionsListed === 1
+              ? [{
+                  Id: 'function-1',
+                  Name: 'managed-agents-runtime-test',
+                  Tags: [
+                    { Key: 'managed-by', Value: 'managed-agents-runtime' },
+                    { Key: 'managed-purpose', Value: 'private-sandbox' },
+                  ],
+                }]
+              : [],
+            Total: functionsListed === 1 ? 1 : 0,
+          },
+          requestId: `request-functions-${functionsListed}`,
+        };
+      }
+      if (action === 'DeleteFunction') return {
+        result: {},
+        requestId: 'request-delete',
+      };
+      throw new Error(`unexpected action ${action}`);
+    };
+
+    await expect(deletePrivateSandboxApplication({
+      functionId: 'function-1',
+      name: 'managed-agents-runtime-test',
+    }, api)).resolves.toMatchObject({
+      functionId: 'function-1',
+      absent: true,
+    });
+    expect(actions).toEqual([
+      'ListSandboxes',
+      'ListFunctions',
+      'DeleteFunction',
+      'ListFunctions',
+    ]);
+  });
+
+  it.each([
+    ['Ready', 'function-1'],
+    ['Pending', 'function-1'],
+    ['Paused', 'function-1'],
+    ['Terminating', 'function-other'],
+    ['unknown', 'function-1'],
+  ])('refuses cleanup for a %s residual child of %s', async (status, functionId) => {
+    const actions: string[] = [];
+    const api: VefaasProvisioningApi = async (action) => {
+      actions.push(action);
+      if (action === 'ListSandboxes') return {
+        result: {
+          Sandboxes: [{ FunctionId: functionId, Id: 'sandbox-1', Status: status }],
+          Total: 1,
+        },
+        requestId: 'request-sandboxes',
+      };
+      throw new Error(`unexpected destructive action ${action}`);
+    };
+
+    await expect(deletePrivateSandboxApplication({
+      functionId: 'function-1',
+      name: 'managed-agents-runtime-test',
+    }, api)).rejects.toThrow('still has active or unowned instances');
+    expect(actions).toEqual(['ListSandboxes']);
+  });
 });
 
 function matchingRevision(revisionNumber: number): Record<string, unknown> {
