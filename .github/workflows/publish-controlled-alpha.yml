@@ -164,6 +164,8 @@ jobs:
       - name: Remove registry credentials before executing released code
         if: always()
         run: docker logout ghcr.io
+      - name: Prove anonymous token and immutable manifest access
+        run: npm run release:public-image -- "${REGISTRY_IMAGE_WITH_DIGEST}"
       - name: Verify the immutable digest is publicly pullable
         run: |
           anonymous_docker_config="$(mktemp -d)"
