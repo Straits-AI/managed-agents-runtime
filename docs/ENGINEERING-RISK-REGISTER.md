@@ -122,7 +122,7 @@ operations and agreed repository checks.
 The versioned BytePlus manifest records exact-source, region, retrieval time,
 toolchain, control/data/failure/redaction/cleanup evidence for the current TOS,
 ModelArk, and private veFaaS sandbox claims. AgentKit Memory, Kafka, and KMS are
-explicitly historical-only; Skills/MCP are local-only; AgentKit Knowledge remains
+explicitly unavailable as release-current claims; Skills/MCP are local-only; AgentKit Knowledge remains
 unavailable and fail-closed for shared deployments without attestation. README
 and runbook matrices are checked mechanically against the manifest.
 

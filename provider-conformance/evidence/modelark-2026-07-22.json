@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "byteplus-modelark-02178469375026747fde1ce057a4e39ca4c3f804f8e42e0d0916c",
+  "source": {
+    "repository": "https://github.com/Straits-AI/managed-agents-runtime",
+    "commit": "903655c21fee06089054367c79f300aaa88992e3",
+    "commitOrigin": "git-clean-worktree"
+  },
+  "provider": "byteplus-modelark",
+  "region": "ap-southeast-1",
+  "retrievedAt": "2026-07-22T04:15:52.433Z",
+  "toolchain": {
+    "runtime": "node v22.23.0",
+    "controlApi": "GetApiKey 2024-01-01",
+    "inferenceApi": "chat-completions",
+    "maxOutputTokens": 32,
+    "keyScope": {
+      "resourceType": "presetendpoint",
+      "projectName": "default"
+    }
+  },
+  "evidence": {
+    "schemaVersion": 1,
+    "model": "seed-2-0-mini-260428",
+    "temporaryKey": {
+      "persisted": false,
+      "serialized": false,
+      "requestId": "20260722041548462D2FDC7C27CB55CDFE",
+      "expiresAt": "2026-07-22T04:30:49.798Z"
+    },
+    "inference": {
+      "markerMatched": true,
+      "requestId": "02178469375026747fde1ce057a4e39ca4c3f804f8e42e0d0916c",
+      "inputTokens": 38,
+      "outputTokens": 44,
+      "finishReason": "stop"
+    },
+    "redaction": {
+      "promptIncluded": false,
+      "outputIncluded": false,
+      "credentialIncluded": false
+    }
+  },
+  "expectedFailure": {
+    "model": "seed-2-0-lite-260228",
+    "expectedCode": "ModelNotOpen",
+    "observed": true,
+    "status": 404,
+    "code": "ModelNotOpen",
+    "requestId": "02178469375239547fde1ce057a4e39ca4c3f804f8e42e08459fb",
+    "temporaryKey": {
+      "persisted": false,
+      "serialized": false,
+      "requestId": "20260722041551966ABD5C0C385A56BD0F"
+    },
+    "redaction": {
+      "promptIncluded": false,
+      "outputIncluded": false,
+      "credentialIncluded": false
+    }
+  }
+}

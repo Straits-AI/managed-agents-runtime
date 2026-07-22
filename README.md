@@ -10,9 +10,9 @@ and long approval waits without losing progress or duplicating irreversible
 actions.
 
 > **Built with the [byteplus-cloud skill](https://github.com/Straits-AI/byteplus-cloud-skill).**
-> Every BytePlus resource here — ModelArk, veFaaS Cloud Sandbox, TOS, APIG, RDS
-> PostgreSQL, VikingDB/Viking Memory, Message Queue for Kafka, and KMS — was
-> provisioned and verified live through that skill.
+> The release-current BytePlus claim boundary is the
+> [versioned provider-conformance matrix](./docs/BYTEPLUS-PROVIDER-CONFORMANCE.md).
+> Historical demonstrations are not release-current verification.
 
 📘 **New here? Start with the [Usage Guide](./docs/GUIDE.md)** — how to run it,
 drive agents through the API, multi-tenancy, credentials, streaming/Kafka, and
@@ -30,8 +30,9 @@ Architecture and release boundaries:
 > passes for this source revision. It checks the full suite plus named P0
 > configuration, tenancy, admission, knowledge, HTTP/MCP, credential,
 > concurrency, and crash-recovery assertions, and retains commit-bound JSON
-> evidence in CI. This is a controlled-alpha claim only: live provider
-> conformance, the P1 register, and explicit production approval remain open.
+> evidence in CI. This is a controlled-alpha claim only: the versioned provider
+> matrix limits live claims, while the P1 register and explicit production
+> approval remain open.
 
 ## Architecture
 
@@ -171,14 +172,14 @@ private operator inventory rather than committing them to this repository:
 <!-- byteplus-conformance-matrix:start -->
 | Capability | Classification | Current evidence | Shared-deployment claim |
 | --- | --- | --- | --- |
-| TOS object storage | `verified` | byteplus-tos-56861a83-c502-4814-a17a-ba7e60d3661a at `e2665c98cb14` | Verified for the bounded object operations named in the retained record |
-| ModelArk inference | `verified` | byteplus-modelark-02178469277476285f4608cdee6bbc8f8aaf952504d48fd33e718 at `89222e4ed893` | Verified for one bounded activated preset-model chat invocation |
-| veFaaS private Cloud Sandbox | `verified` | byteplus-runtime-sandbox-runtime-f19114f at `f19114f6f409` | Verified for one bounded private CPU sandbox lifecycle with exact cleanup |
-| AgentKit Memory | `historical-only` | No release-current live record | No release-current adapter/version record; do not present as currently verified |
+| TOS object storage | `verified` | byteplus-tos-attestation-56861a83-c502-4814-a17a-ba7e60d3661a at `e2665c98cb14` | Verified for the bounded object operations named in the retained record |
+| ModelArk inference | `verified` | byteplus-modelark-02178469375026747fde1ce057a4e39ca4c3f804f8e42e0d0916c at `903655c21fee` | Verified for one bounded activated preset-model chat invocation |
+| veFaaS private Cloud Sandbox | `verified` | byteplus-runtime-sandbox-runtime-903655c at `903655c21fee` | Verified for one bounded private CPU sandbox lifecycle with exact cleanup |
+| AgentKit Memory | `unavailable` | No release-current live record | No release-current adapter/version record; do not present as currently verified |
 | AgentKit Knowledge | `unavailable` | No release-current live record | Fail-closed in shared deployments until deployment and tenant bindings are attested |
 | Skills and MCP | `local-only` | No release-current live record | Local registry semantics only; no BytePlus-hosted Skills or MCP claim |
-| Message Queue for Kafka | `historical-only` | No release-current live record | No release-current cluster/API-version record; do not present as currently verified |
-| KMS credential cipher | `historical-only` | No release-current live record | No release-current key/API-version record; do not present as currently verified |
+| Message Queue for Kafka | `unavailable` | No release-current live record | No release-current cluster/API-version record; do not present as currently verified |
+| KMS credential cipher | `unavailable` | No release-current live record | No release-current key/API-version record; do not present as currently verified |
 <!-- byteplus-conformance-matrix:end -->
 
 The versioned source and detailed limitations are in
@@ -316,23 +317,24 @@ changes; consult the provider conformance matrix for the current release gate.
 | Controlled multi-tenant alpha | ✅ automated P0 gate: fail-closed configuration, tenant inheritance, atomic admission, knowledge isolation, governed HTTP/MCP, credentials, concurrency, and crash recovery. Machine-readable evidence is retained by CI. This is not a public-beta or production-ready claim. |
 | Phase 2A: harden what we own | ✅ tool-level observability, budget-exhaustion enforcement, denied-approval, external signals + scheduled runs — all tested |
 | Phase 2 — long-term memory | ✅ cross-run memory: `remember` tool + auto-recall into context, per-agent scoped, full-text ranked. Postgres is the release-current default behind a provider-neutral `MemoryProvider`; AgentKit remains selectable but is not release-current live-verified. |
-| Phase 2 — AgentKit Memory binding | ⚠️ historical-only write/extract/recall demonstration. `MEMORY_PROVIDER=agentkit` is implemented, but no current adapter/version record exists for this release. |
+| Phase 2 — AgentKit Memory binding | ⚠️ unavailable as a release-current BytePlus claim. A historical write/extract/recall demonstration exists, but no current adapter/version record exists for this release. |
 | Phase 2 — Knowledge / Skills / MCP | ✅ Postgres knowledge, registry Skills, and policy-classified registry MCP are implemented. The AgentKit Knowledge adapter is tenant-bound but remains fail-closed in shared deployments until live conformance is attested; AgentKit Skills/MCP remain adapter seams, not live-verified integrations. |
 | Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. |
 | Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). |
 | Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. |
 | Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. |
 | Controlled-alpha operations | ✅ multi-tenant auth, atomic per-tenant admission, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Public-beta and production gates remain open. Cost reference in [`docs/COST.md`](./docs/COST.md). |
-| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, outbox relay + `EventPublisher`, and a credential broker are implemented. BytePlus Kafka and KMS evidence is historical-only for this release; local/provider-neutral contracts remain tested. |
+| Deferrals | ✅ SSE event streaming, run forking, Postgres-backed global rate limiting, outbox relay + `EventPublisher`, and a credential broker are implemented. BytePlus Kafka and KMS are unavailable as release-current provider claims; historical demonstrations and local/provider-neutral contracts remain documented. |
 
 Built well beyond the original Phase 1 cut: subagents (Phase 3), signals +
 scheduling, AgentKit Memory/Knowledge/Skills/MCP (Phase 2), the semantic
 supervisor (Phase 5), multi-tenant auth + quotas + cost attribution
 (Productionization), and the full deferral sweep — streaming, forking, global
-rate limiting, the event-publisher relay with a **Kafka adapter proven live**
-in a historical BytePlus cluster run (provisioned, publish→consume verified,
+rate limiting, the event-publisher relay with a Kafka adapter exercised in a
+historical BytePlus cluster run (provisioned, publish→consume verified,
 torn down), and the credential broker with a **BytePlus KMS** cipher. Those
-Kafka and KMS demonstrations are historical-only for this release. Remaining
+Kafka and KMS have historical demonstrations but remain unavailable as
+release-current BytePlus claims. Remaining
 external-infra items: FileNAS, and RocketMQ (the Kafka adapter covers the
 event-bus case). The KMS cipher requires the KMS service enabled on the account
 before use.

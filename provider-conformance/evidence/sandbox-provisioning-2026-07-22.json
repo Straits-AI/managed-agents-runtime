@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "byteplus-sandbox-application-managed-agents-903655c",
+  "source": {
+    "repository": "https://github.com/Straits-AI/managed-agents-runtime",
+    "commit": "903655c21fee06089054367c79f300aaa88992e3",
+    "commitOrigin": "git-clean-worktree"
+  },
+  "provider": "byteplus-vefaas",
+  "provisioningAttemptId": "0d77c8ae-b9ee-48ec-b984-cdd27c44020c",
+  "region": "ap-southeast-1",
+  "retrievedAt": "2026-07-22T04:18:46.059Z",
+  "toolchain": {
+    "bpVersion": "1.0.17",
+    "apiVersion": "2024-06-06"
+  },
+  "plannedApplication": {
+    "name": "managed-agents-903655c",
+    "functionType": "sandbox",
+    "runtime": "native/v1",
+    "image": "vefaas-ap-southeast-1.cr.volces.com/vefaas-public/sandbox-fusion:vefaas-latest",
+    "command": "bash /root/sandbox/scripts/run.sh",
+    "port": 8080,
+    "cpuMilli": 1000,
+    "memoryMB": 2048,
+    "maxConcurrency": 10,
+    "requestTimeoutSeconds": 900,
+    "initializerSeconds": 120,
+    "envs": [
+      {
+        "Key": "HOME",
+        "Value": "/home/tiger"
+      }
+    ],
+    "instanceType": "cpu-empty",
+    "tags": [
+      {
+        "Key": "managed-by",
+        "Value": "managed-agents-runtime"
+      },
+      {
+        "Key": "managed-purpose",
+        "Value": "private-sandbox"
+      }
+    ],
+    "vpcEnabled": false,
+    "sharedInternetEnabled": false,
+    "logsEnabled": false,
+    "nasEnabled": false,
+    "tosMountEnabled": false
+  },
+  "redaction": {
+    "credentialsSerialized": false,
+    "signedUrlsSerialized": false,
+    "responseBodiesSerialized": false
+  },
+  "status": "succeeded",
+  "application": {
+    "functionId": "t8ux0u9x",
+    "disposition": "created",
+    "stableRevisionNumber": 1,
+    "releaseRecordId": "hzj9m2n8k2dfgavi",
+    "configurationVerified": true
+  },
+  "requests": [
+    {
+      "action": "ListSandboxImages",
+      "status": "success",
+      "requestId": "2026072204184635B897C743B7981E8CC0"
+    },
+    {
+      "action": "ListFunctions",
+      "status": "success",
+      "requestId": "202607220418462273613E97CF7C684EC5"
+    },
+    {
+      "action": "CreateFunction",
+      "status": "success",
+      "requestId": "2026072204184735B897C743B7981E8CDE"
+    },
+    {
+      "action": "GetFunction",
+      "status": "success",
+      "requestId": "2026072204184935B897C743B7981E8D16"
+    },
+    {
+      "action": "GetRevision",
+      "status": "success",
+      "requestId": "2026072204185035B897C743B7981E8D33"
+    },
+    {
+      "action": "Release",
+      "status": "success",
+      "requestId": "20260722041851C14334053B606A23D370"
+    },
+    {
+      "action": "GetReleaseStatus",
+      "status": "success",
+      "requestId": "20260722041856A96DD375BFF86854E0C4"
+    },
+    {
+      "action": "GetRevision",
+      "status": "success",
+      "requestId": "20260722041857C14334053B606A23D45F"
+    }
+  ]
+}

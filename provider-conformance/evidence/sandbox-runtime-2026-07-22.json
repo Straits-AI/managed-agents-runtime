@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "byteplus-runtime-sandbox-runtime-903655c",
+  "source": {
+    "repository": "https://github.com/Straits-AI/managed-agents-runtime",
+    "commit": "903655c21fee06089054367c79f300aaa88992e3",
+    "commitOrigin": "git-clean-worktree"
+  },
+  "provider": "byteplus-vefaas-private-sandbox-runtime",
+  "region": "ap-southeast-1",
+  "retrievedAt": "2026-07-22T04:19:08.320Z",
+  "toolchain": {
+    "runtime": "node v22.23.0",
+    "bpVersion": "1.0.17",
+    "controlPlane": "credential-isolating bp profile",
+    "controlPlaneApiVersion": "2024-06-06",
+    "dataPlane": "ticketed-private-webshell",
+    "publicRouteUsed": false,
+    "maximumInstanceLifetimeMinutes": 10
+  },
+  "application": {
+    "functionId": "t8ux0u9x",
+    "name": "managed-agents-903655c",
+    "disposable": true
+  },
+  "redaction": {
+    "credentialsSerialized": false,
+    "signedEndpointSerialized": false,
+    "ticketSerialized": false,
+    "commandPayloadSerialized": false,
+    "fileContentSerialized": false
+  },
+  "status": "succeeded",
+  "successfulRequestMetadata": [
+    {
+      "action": "CreateSandbox",
+      "requestId": "2026072204190735B897C743B7981E9181"
+    },
+    {
+      "action": "DescribeSandbox",
+      "requestId": "20260722041912C14334053B606A23D6B9"
+    },
+    {
+      "action": "GenWebshellEndpoint",
+      "requestId": "2026072204191235B897C743B7981E923D"
+    },
+    {
+      "action": "DescribeSandbox",
+      "requestId": "2026072204191435B897C743B7981E9270"
+    },
+    {
+      "action": "GenWebshellEndpoint",
+      "requestId": "2026072204191435B897C743B7981E9288"
+    },
+    {
+      "action": "GenWebshellEndpoint",
+      "requestId": "2026072204191635B897C743B7981E92B1"
+    },
+    {
+      "action": "GenWebshellEndpoint",
+      "requestId": "2026072204191735B897C743B7981E92D2"
+    },
+    {
+      "action": "GenWebshellEndpoint",
+      "requestId": "20260722041919C14334053B606A23D761"
+    },
+    {
+      "action": "KillSandbox",
+      "requestId": "2026072204192035B897C743B7981E931A"
+    },
+    {
+      "action": "GetFunction",
+      "requestId": "2026072204192035B897C743B7981E9328"
+    },
+    {
+      "action": "ListSandboxes",
+      "requestId": "20260722041921C14334053B606A23D7A7"
+    },
+    {
+      "action": "ListSandboxes",
+      "requestId": "20260722041921C14334053B606A23D7B6"
+    },
+    {
+      "action": "ListFunctions",
+      "requestId": "20260722041922C14334053B606A23D7CC"
+    },
+    {
+      "action": "DeleteFunction",
+      "requestId": "20260722041923C14334053B606A23D7E9"
+    },
+    {
+      "action": "ListFunctions",
+      "requestId": "2026072204192435B897C743B7981E93B9"
+    }
+  ],
+  "evidence": {
+    "schemaVersion": 1,
+    "runId": "runtime-903655c",
+    "controlPlane": {
+      "ready": true,
+      "terminated": true,
+      "terminalStatus": "Deleted"
+    },
+    "dataPlane": {
+      "execMarker": true,
+      "fileRoundtrip": true
+    },
+    "network": {
+      "publicRouteUsed": false,
+      "signedEndpointSerialized": false
+    },
+    "redaction": {
+      "markerIncluded": false,
+      "commandOutputIncluded": false
+    },
+    "cleanup": {
+      "sandboxTerminated": true,
+      "terminationVerified": true
+    }
+  },
+  "finalInventory": {
+    "liveInstances": 0,
+    "terminatingTombstones": 0,
+    "applicationAbsent": true
+  },
+  "applicationCleanup": {
+    "functionId": "t8ux0u9x",
+    "absent": true,
+    "requestIds": [
+      {
+        "action": "ListSandboxes",
+        "requestId": "20260722041921C14334053B606A23D7B6"
+      },
+      {
+        "action": "ListFunctions",
+        "requestId": "20260722041922C14334053B606A23D7CC"
+      },
+      {
+        "action": "DeleteFunction",
+        "requestId": "20260722041923C14334053B606A23D7E9"
+      },
+      {
+        "action": "ListFunctions",
+        "requestId": "2026072204192435B897C743B7981E93B9"
+      }
+    ]
+  }
+}

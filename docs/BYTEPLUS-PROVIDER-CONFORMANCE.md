@@ -9,25 +9,27 @@ attest a changed adapter, tool version, API surface, region, or deployment.
 <!-- byteplus-conformance-matrix:start -->
 | Capability | Classification | Current evidence | Shared-deployment claim |
 | --- | --- | --- | --- |
-| TOS object storage | `verified` | byteplus-tos-56861a83-c502-4814-a17a-ba7e60d3661a at `e2665c98cb14` | Verified for the bounded object operations named in the retained record |
-| ModelArk inference | `verified` | byteplus-modelark-02178469277476285f4608cdee6bbc8f8aaf952504d48fd33e718 at `89222e4ed893` | Verified for one bounded activated preset-model chat invocation |
-| veFaaS private Cloud Sandbox | `verified` | byteplus-runtime-sandbox-runtime-f19114f at `f19114f6f409` | Verified for one bounded private CPU sandbox lifecycle with exact cleanup |
-| AgentKit Memory | `historical-only` | No release-current live record | No release-current adapter/version record; do not present as currently verified |
+| TOS object storage | `verified` | byteplus-tos-attestation-56861a83-c502-4814-a17a-ba7e60d3661a at `e2665c98cb14` | Verified for the bounded object operations named in the retained record |
+| ModelArk inference | `verified` | byteplus-modelark-02178469375026747fde1ce057a4e39ca4c3f804f8e42e0d0916c at `903655c21fee` | Verified for one bounded activated preset-model chat invocation |
+| veFaaS private Cloud Sandbox | `verified` | byteplus-runtime-sandbox-runtime-903655c at `903655c21fee` | Verified for one bounded private CPU sandbox lifecycle with exact cleanup |
+| AgentKit Memory | `unavailable` | No release-current live record | No release-current adapter/version record; do not present as currently verified |
 | AgentKit Knowledge | `unavailable` | No release-current live record | Fail-closed in shared deployments until deployment and tenant bindings are attested |
 | Skills and MCP | `local-only` | No release-current live record | Local registry semantics only; no BytePlus-hosted Skills or MCP claim |
-| Message Queue for Kafka | `historical-only` | No release-current live record | No release-current cluster/API-version record; do not present as currently verified |
-| KMS credential cipher | `historical-only` | No release-current live record | No release-current key/API-version record; do not present as currently verified |
+| Message Queue for Kafka | `unavailable` | No release-current live record | No release-current cluster/API-version record; do not present as currently verified |
+| KMS credential cipher | `unavailable` | No release-current live record | No release-current key/API-version record; do not present as currently verified |
 <!-- byteplus-conformance-matrix:end -->
 
 The machine-readable source is
 [`provider-conformance/byteplus.v1.json`](../provider-conformance/byteplus.v1.json).
-`npm run provider:claims` validates both this table and the README against that
-manifest. A `verified` row is limited to the named evidence and limitations; it
+`npm run provider:claims` validates this table and the README against that
+manifest, rejects blanket claims in the README and usage guide, binds the
+manifest to `package.json`, and hashes every retained receipt. A `verified` row
+is limited to the named evidence and limitations; it
 does not promote every operation offered by the product.
 
-This document records status, not secrets or live resource inventory. Operator
-evidence must be retained outside the repository unless its resource metadata
-has been reviewed for publication.
+This document records status, not secrets or live resource inventory. Sanitized,
+reviewed receipts are retained under `provider-conformance/evidence/`; raw
+operator records remain private when they contain non-public resource metadata.
 
 ## Required evidence record
 
@@ -66,7 +68,10 @@ node --env-file=.env --import tsx scripts/provision-tos.ts \
 
 The output includes direct PUT/GET/HEAD, presigned GET/PUT with 60-second URLs,
 an expected post-delete 404 with bounded code/request ID, and confirmed absence
-of both disposable objects. The configured bucket is retained.
+of both disposable objects. The configured bucket is retained. The committed
+TOS attestation names the private raw-record hash and content-hashes every
+adapter/runner source file; the claim checker withdraws continuity if any of
+those files changes.
 
 ## ModelArk record generation
 
@@ -78,17 +83,20 @@ resource ID:
 node --import tsx scripts/conformance-modelark.ts \
   --profile dev \
   --region ap-southeast-1 \
-  --model seed-2-0-lite-260228 \
+  --model seed-2-0-mini-260428 \
+  --negative-model seed-2-0-lite-260228 \
+  --expected-failure-code ModelNotOpen \
   --resource-type presetendpoint \
-  --key-resource-id seed-2-0-lite-260228 \
   --project-name default \
   --evidence-file /secure/path/modelark-conformance.json
 ```
 
 For a provisioned inference endpoint, use `--resource-type endpoint` and its
 `ep-...` identifier instead; the project field is omitted from that key request.
-The temporary key and model output remain in memory. The evidence contains only
-bounded request, token, finish, source, key-scope, and redaction metadata.
+The two temporary keys and model output remain in memory. The evidence contains
+only bounded request, token, finish, source, key-scope, expected-failure, and
+redaction metadata. The negative probe fails closed if the model becomes
+available or returns a different error code.
 
 ## Private sandbox record generation
 
@@ -167,13 +175,16 @@ an application with active non-terminating instances or a mismatched ID/name pai
 
 ## Promotion rule
 
-A matrix row moves from historical or local evidence to current live
-conformance only in the same exact source revision that:
+A matrix row moves from local or unavailable to current live conformance only
+when:
 
-1. passes the repository release gate;
-2. produces the bounded live record in the target region;
-3. receives provider-focused review; and
-4. links the retained record from the tracking issue or release evidence.
+1. the release candidate passes the repository release gate;
+2. an exact clean source revision produces the bounded live record in the
+   target region;
+3. the sanitized receipt is committed and hash-checked, or a sanitized
+   attestation binds a private raw-record hash to unchanged source-file hashes;
+4. provider-focused review passes; and
+5. the tracking issue or release evidence links the retained record.
 
 If any adapter, protocol, CLI/tool, provider API, permission boundary, or target
 region changes, the row returns to pending until rerun.

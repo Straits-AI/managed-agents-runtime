@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "byteplus-tos-attestation-56861a83-c502-4814-a17a-ba7e60d3661a",
+  "evidenceKind": "sanitized-attestation",
+  "originalEvidenceId": "byteplus-tos-56861a83-c502-4814-a17a-ba7e60d3661a",
+  "originalRecordSha256": "6093edba37293d28be2725e2ccf0189bb2a81f819fef30f54b11be7bd92d9b16",
+  "source": {
+    "repository": "https://github.com/Straits-AI/managed-agents-runtime",
+    "commit": "e2665c98cb14333ca5f17e4f5064af81e8638df4",
+    "commitOrigin": "git-clean-worktree",
+    "unchangedFiles": [
+      {
+        "path": "src/providers/tosObjectStore.ts",
+        "sha256": "bc232e51bf1f15620f911169c99de1199787ec35822c6d678bbf8f36e2950570"
+      },
+      {
+        "path": "src/providers/tosProtocol.ts",
+        "sha256": "a89b9751eec5813853866b23fa28590bb348f7478cead42ecfc1ee4ba80476a8"
+      },
+      {
+        "path": "src/providers/tosConformance.ts",
+        "sha256": "bc520a99b1cb16ac4b75c95f8749837f07f1733b5ff1c6e609448756f5b6f885"
+      },
+      {
+        "path": "scripts/provision-tos.ts",
+        "sha256": "7c79791096a7c715dd0fe831cc3fffc3fc40745e9310cebef7b14c9bed0a6829"
+      }
+    ]
+  },
+  "provider": "byteplus-tos",
+  "region": "ap-southeast-1",
+  "retrievedAt": "2026-07-19T16:24:46.520Z",
+  "toolchain": {
+    "runtime": "node v24.14.0",
+    "transport": "native-fetch",
+    "apiVersion": "TOS4-HMAC-SHA256"
+  },
+  "evidence": {
+    "controlPlane": [
+      "bucket HEAD",
+      "create-if-missing"
+    ],
+    "dataPlane": [
+      "direct PUT/GET/HEAD",
+      "presigned GET/PUT"
+    ],
+    "failure": [
+      "expected post-delete 404 with bounded provider metadata"
+    ],
+    "redaction": [
+      "no credentials, authorization material, payload, bucket name, or presigned URL serialized"
+    ],
+    "cleanup": [
+      "both disposable objects independently verified absent",
+      "configured bucket retained"
+    ]
+  },
+  "limitations": [
+    "This committed file is a sanitized attestation of the owner-only raw record, not the raw record itself",
+    "bucket ACL and policy",
+    "encryption attestation",
+    "multipart upload",
+    "versioning",
+    "bucket deletion"
+  ]
+}

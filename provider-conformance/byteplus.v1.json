@@ -10,12 +10,13 @@
       "classification": "verified",
       "sharedDeploymentClaim": "Verified for the bounded object operations named in the retained record",
       "evidence": [{
-        "evidenceId": "byteplus-tos-56861a83-c502-4814-a17a-ba7e60d3661a",
+        "evidenceId": "byteplus-tos-attestation-56861a83-c502-4814-a17a-ba7e60d3661a",
         "sourceCommit": "e2665c98cb14333ca5f17e4f5064af81e8638df4",
         "region": "ap-southeast-1",
         "retrievedAt": "2026-07-19T16:24:46.520Z",
         "toolchain": "Node.js v24.14.0, native fetch, TOS4-HMAC-SHA256",
-        "recordSha256": "6093edba37293d28be2725e2ccf0189bb2a81f819fef30f54b11be7bd92d9b16",
+        "recordPath": "provider-conformance/evidence/tos-2026-07-19.json",
+        "recordSha256": "fc25fc4c45567fcfc20deb1862b15b5fc7feb9e9ec2b56abb16f9f1feffb300c",
         "controlPlane": ["bucket HEAD", "create-if-missing"],
         "dataPlane": ["direct PUT/GET/HEAD", "presigned GET/PUT"],
         "failure": ["expected post-delete 404 with bounded provider metadata"],
@@ -31,12 +32,13 @@
       "classification": "verified",
       "sharedDeploymentClaim": "Verified for one bounded activated preset-model chat invocation",
       "evidence": [{
-        "evidenceId": "byteplus-modelark-02178469277476285f4608cdee6bbc8f8aaf952504d48fd33e718",
-        "sourceCommit": "89222e4ed893c9b3f05e68832adde17ed7544676",
+        "evidenceId": "byteplus-modelark-02178469375026747fde1ce057a4e39ca4c3f804f8e42e0d0916c",
+        "sourceCommit": "903655c21fee06089054367c79f300aaa88992e3",
         "region": "ap-southeast-1",
-        "retrievedAt": "2026-07-22T03:59:35.575Z",
+        "retrievedAt": "2026-07-22T04:15:52.433Z",
         "toolchain": "Node.js v22.23.0, GetApiKey 2024-01-01, Chat Completions",
-        "recordSha256": "9430294d9720ac9c8f8a1b045949b99f7ee2708e7686abdbcc42805a5fe4c157",
+        "recordPath": "provider-conformance/evidence/modelark-2026-07-22.json",
+        "recordSha256": "9bdbd4d7d22d7f2b96a96d2f6becffc28e773685b2ba9bbfc5a06cb3e1838070",
         "controlPlane": ["15-minute presetendpoint key scoped to project default"],
         "dataPlane": ["seed-2-0-mini-260428 marker response", "bounded usage and finish metadata"],
         "failure": ["unactivated seed-2-0-lite-260228 returned sanitized ModelNotOpen"],
@@ -52,13 +54,18 @@
       "classification": "verified",
       "sharedDeploymentClaim": "Verified for one bounded private CPU sandbox lifecycle with exact cleanup",
       "evidence": [{
-        "evidenceId": "byteplus-runtime-sandbox-runtime-f19114f",
-        "sourceCommit": "f19114f6f4090badeadebcdaa0801feb21b7b26d",
+        "evidenceId": "byteplus-runtime-sandbox-runtime-903655c",
+        "sourceCommit": "903655c21fee06089054367c79f300aaa88992e3",
         "region": "ap-southeast-1",
-        "retrievedAt": "2026-07-22T02:49:26.748Z",
+        "retrievedAt": "2026-07-22T04:19:08.320Z",
         "toolchain": "Node.js v22.23.0, bp 1.0.17, veFaaS 2024-06-06, private WebShell",
-        "recordSha256": "ed5a5434b18d605eb9ee52a29177ab1df80e078e4e6851e56832c3f6a9de2f29",
-        "relatedRecordSha256": "393075e5d8b78f0d7faead8eb351df17ce758cf458221e91ba5b4a94ae5350f3",
+        "recordPath": "provider-conformance/evidence/sandbox-runtime-2026-07-22.json",
+        "recordSha256": "c66ad648444b2bcdd68e8a1320a18bb48c15b780374fb26383769ec8f2472bb3",
+        "relatedRecords": [{
+          "evidenceId": "byteplus-sandbox-application-managed-agents-903655c",
+          "recordPath": "provider-conformance/evidence/sandbox-provisioning-2026-07-22.json",
+          "recordSha256": "507939debabf817ce4a47fa37e7ff823132509eedaa4dada2172a103f2e3776c"
+        }],
         "controlPlane": ["provision/reuse and stable release readback", "create/describe/kill and exact inventory"],
         "dataPlane": ["private command marker", "fixed-offset file write/read"],
         "failure": ["bounded pending receipts and exact-run reconciliation", "Terminating is not accepted as terminal"],
@@ -71,10 +78,10 @@
       "id": "agentkit-memory",
       "capability": "AgentKit Memory",
       "implementation": "AgentKitMemory",
-      "classification": "historical-only",
+      "classification": "unavailable",
       "sharedDeploymentClaim": "No release-current adapter/version record; do not present as currently verified",
       "evidence": [],
-      "limitations": ["historical write/extract/recall demonstration only"]
+      "limitations": ["historical write/extract/recall demonstration only; unavailable as a release-current BytePlus claim"]
     },
     {
       "id": "agentkit-knowledge",
@@ -98,19 +105,19 @@
       "id": "kafka",
       "capability": "Message Queue for Kafka",
       "implementation": "KafkaEventPublisher",
-      "classification": "historical-only",
+      "classification": "unavailable",
       "sharedDeploymentClaim": "No release-current cluster/API-version record; do not present as currently verified",
       "evidence": [],
-      "limitations": ["historical provision/publish/consume/cleanup demonstration only"]
+      "limitations": ["historical provision/publish/consume/cleanup demonstration only; unavailable as a release-current BytePlus claim"]
     },
     {
       "id": "kms",
       "capability": "KMS credential cipher",
       "implementation": "KmsCipher",
-      "classification": "historical-only",
+      "classification": "unavailable",
       "sharedDeploymentClaim": "No release-current key/API-version record; do not present as currently verified",
       "evidence": [],
-      "limitations": ["historical encrypt/decrypt demonstration only"]
+      "limitations": ["historical encrypt/decrypt demonstration only; unavailable as a release-current BytePlus claim"]
     }
   ]
 }
