@@ -10,7 +10,7 @@ attest a changed adapter, tool version, API surface, region, or deployment.
 | --- | --- | --- | --- |
 | TOS object storage | `TosObjectStore` plus `scripts/provision-tos.ts` | Automated direct and presigned runner is unit-tested locally; a fresh live record is pending operator authentication | Blocked until the live record is retained |
 | ModelArk inference | `ModelArkModel` plus `scripts/conformance-modelark.ts` | Bounded temporary-key runner is locally gated; live inference requires a current endpoint resource ID | Historical demonstration only |
-| veFaaS Cloud Sandbox | `VefaasSandbox` plus private WebShell transport and `scripts/conformance-sandbox.ts` | Live private lifecycle record retained at source `66521612d1d16258d36d66ac8a754e8825490d2a`; provider-focused promotion review remains pending | Live-tested at the pinned revision; not yet promoted for shared deployment |
+| veFaaS Cloud Sandbox | `VefaasSandboxProvider`, private WebShell, the idempotent application provisioner, and `scripts/conformance-runtime-sandbox.ts` | Exact-source provisioning, runtime, and cleanup records are required together; provider-focused promotion review remains pending | Live-tested only at the source named by the linked retained records; not yet promoted for shared deployment |
 | AgentKit Memory | `AgentKitMemory` | Historical write/extract/recall result only; current adapter-version record pending | Historical demonstration only |
 | AgentKit Knowledge | `AgentKitKnowledge` | No current shared-deployment isolation attestation | Fail-closed unless `AGENTKIT_KNOWLEDGE_LIVE_VERIFIED=1` for that deployment |
 | Skills and MCP | Registry implementations and adapter seams | Local contract evidence; no BytePlus-hosted Skills/MCP claim | Local/registry semantics only |
@@ -81,34 +81,37 @@ bounded request, token, finish, source, and redaction metadata.
 
 ## Private sandbox record generation
 
-The private runner requires a released sandbox application and creates one
-short-lived 1-vCPU/2-GiB instance. It uses the ticketed WebShell endpoint only
-inside the credential-isolating Node process, executes fixed marker operations,
-verifies the instance configuration and file round-trip, then kills the instance:
+The private workflow creates or reuses one exact, released CPU sandbox
+application, invokes the production `VefaasSandboxProvider` with one short-lived
+1-vCPU/2-GiB instance, and removes the application afterward. The signed WebShell
+endpoint remains only inside the credential-isolating process. Successful
+provider calls retain only bounded action and request-ID metadata:
 
 ```bash
-node --import tsx scripts/conformance-sandbox.ts \
-  --profile dev \
-  --region ap-southeast-1 \
+npm run byteplus:sandbox:provision -- \
+  --profile dev --region ap-southeast-1 \
+  --name managed-agents-runtime-private-<date> \
+  --evidence-file /secure/path/sandbox-provisioning.json
+
+python3 scripts/refresh-creds.py --profile dev --region ap-southeast-1
+npm run byteplus:sandbox:conformance -- \
   --function-id <released-sandbox-function-id> \
   --run-id <non-secret-run-id> \
-  --evidence-file /secure/path/sandbox-conformance.json
+  --evidence-file /secure/path/sandbox-runtime.json
+
+npm run byteplus:sandbox:cleanup -- \
+  --profile dev --region ap-southeast-1 \
+  --function-id <released-sandbox-function-id> \
+  --name managed-agents-runtime-private-<date> \
+  --evidence-file /secure/path/sandbox-cleanup.json
 ```
 
 This proves private WebShell execution, not public HTTP. It does not create or
-use an API Gateway route. The application is an explicit input and is retained;
-the disposable sandbox instance is the runner's cleanup responsibility.
-
-The current retained record is
-`byteplus-sandbox-20260722-pr35-private-webshell-v2`, generated in
-`ap-southeast-1` with BytePlus CLI `1.0.17` and veFaaS control-plane API
-`2024-06-06`. It records a 1-vCPU/2-GiB elastic instance, fixed marker
-execution, file round-trip, terminal state `Deleted`, no public route, and no
-serialized signed endpoint. The owner-only record is retained outside the
-repository with SHA-256
-`823115ff9adbc926a1cbe364ffa41afd5fb61b1eaa6ecdd2c71772c52bd49a19`.
-The temporary validation sandbox application and disposable instance were
-deleted, and the regional function inventory was verified empty after the run.
+use an API Gateway route. Provisioning omits `InstanceType`, verifies the draft
+as CPU-only before release, and refuses to adopt a differing exact-name
+application. The runtime record must show successful request IDs for create,
+describe, WebShell lease, kill, and final inventory. Cleanup refuses to delete
+an application with live instances or a mismatched ID/name pair.
 
 ## Promotion rule
 

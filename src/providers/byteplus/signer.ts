@@ -124,8 +124,21 @@ interface OpenApiResponse {
   Result?: unknown;
 }
 
-/** Sign, send, and unwrap a top-gateway OpenAPI call. Throws on any error. */
-export async function signedCall<T = unknown>(input: SignRequestInput): Promise<T> {
+export interface SignedCallMetadata<T> {
+  result: T;
+  requestId: string | null;
+}
+
+export function boundedRequestId(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,160}$/.test(value)
+    ? value
+    : null;
+}
+
+/** Sign, send, and preserve bounded successful response metadata. */
+export async function signedCallWithMetadata<T = unknown>(
+  input: SignRequestInput,
+): Promise<SignedCallMetadata<T>> {
   const req = buildSignedRequest(input);
   const res = await fetch(req.url, {
     method: req.method,
@@ -156,5 +169,13 @@ export async function signedCall<T = unknown>(input: SignRequestInput): Promise<
       parsed.ResponseMetadata?.RequestId,
     );
   }
-  return parsed.Result as T;
+  return {
+    result: parsed.Result as T,
+    requestId: boundedRequestId(parsed.ResponseMetadata?.RequestId),
+  };
+}
+
+/** Sign, send, and unwrap a top-gateway OpenAPI call. Throws on any error. */
+export async function signedCall<T = unknown>(input: SignRequestInput): Promise<T> {
+  return (await signedCallWithMetadata<T>(input)).result;
 }

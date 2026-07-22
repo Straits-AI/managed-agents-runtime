@@ -1,0 +1,136 @@
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { loadConfig, requireConfig } from '../src/config.js';
+import { VefaasClient, type VefaasResponseMetadata } from '../src/providers/byteplus/vefaas.js';
+import { runSandboxConformance } from '../src/providers/sandboxConformance.js';
+import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
+import { VefaasSandboxProvider } from '../src/providers/vefaasSandbox.js';
+
+const option = (name: string): string => {
+  const index = process.argv.indexOf(name);
+  const value = index >= 0 ? process.argv[index + 1] : undefined;
+  if (!value || value.startsWith('--')) throw new Error(`${name} requires a value`);
+  return value;
+};
+const functionId = option('--function-id');
+const runId = option('--run-id');
+const evidenceFile = option('--evidence-file');
+for (const [name, value] of [['function ID', functionId], ['run ID', runId]] as const) {
+  if (!/^[A-Za-z0-9._-]{1,160}$/.test(value)) {
+    throw new Error(`Runtime sandbox ${name} is invalid`);
+  }
+}
+const readGit = (args: string[]): string | null => {
+  try {
+    return execFileSync('git', args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+};
+const gitCommit = readGit(['rev-parse', 'HEAD']);
+const source = resolveTosConformanceSource({
+  explicitCommit: process.env.CONFORMANCE_SOURCE_COMMIT?.trim(),
+  gitCommit,
+  gitStatus: gitCommit === null ? null : readGit(['status', '--porcelain']),
+});
+const cfg = loadConfig({
+  ...process.env,
+  VEFAAS_SANDBOX_FUNCTION_ID: functionId,
+  SANDBOX_TRANSPORT: 'private-webshell',
+});
+const required = requireConfig(cfg, [
+  'BYTEPLUS_ACCESS_KEY_ID',
+  'BYTEPLUS_SECRET_ACCESS_KEY',
+]);
+const responseMetadata: VefaasResponseMetadata[] = [];
+const client = new VefaasClient({
+  host: cfg.BYTEPLUS_OPENAPI_HOST,
+  region: cfg.BYTEPLUS_REGION,
+  accessKeyId: required.BYTEPLUS_ACCESS_KEY_ID,
+  secretAccessKey: required.BYTEPLUS_SECRET_ACCESS_KEY,
+  sessionToken: cfg.BYTEPLUS_SESSION_TOKEN,
+  onResponseMetadata: (metadata) => {
+    if (responseMetadata.length < 200) responseMetadata.push(metadata);
+  },
+});
+const provider = new VefaasSandboxProvider(cfg, { lifecycle: client });
+const evidence = await runSandboxConformance({
+  create: provider.create.bind(provider),
+  describe: provider.describe.bind(provider),
+  exec: provider.exec.bind(provider),
+  writeFile: provider.writeFile.bind(provider),
+  readFile: provider.readFile.bind(provider),
+  terminate: provider.terminate.bind(provider),
+  sleep: async (milliseconds) => {
+    await new Promise<void>((resolveSleep) => setTimeout(resolveSleep, milliseconds));
+  },
+}, {
+  runId,
+  timeoutMinutes: 10,
+  marker: `runtime-${randomUUID()}`,
+});
+const finalInventory = await client.listSandboxes(functionId, { pageNumber: 1, pageSize: 100 });
+if (finalInventory.Total !== 0 || (finalInventory.Sandboxes?.length ?? 0) !== 0) {
+  throw new Error('Runtime sandbox final instance inventory was not empty');
+}
+for (const action of [
+  'CreateSandbox',
+  'DescribeSandbox',
+  'GenWebshellEndpoint',
+  'KillSandbox',
+  'ListSandboxes',
+]) {
+  if (!responseMetadata.some((metadata) => metadata.action === action && metadata.requestId)) {
+    throw new Error(`Runtime sandbox did not preserve ${action} request metadata`);
+  }
+}
+if (readGit(['rev-parse', 'HEAD']) !== source.commit || readGit(['status', '--porcelain'])) {
+  throw new Error('Runtime sandbox source revision changed during the live run');
+}
+const bpVersion = execFileSync('bp', ['version'], {
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'ignore'],
+}).trim();
+const record = {
+  schemaVersion: 1,
+  evidenceId: `byteplus-runtime-sandbox-${runId}`,
+  source: {
+    repository: 'https://github.com/Straits-AI/managed-agents-runtime',
+    commit: source.commit,
+    commitOrigin: source.commitOrigin,
+  },
+  provider: 'byteplus-vefaas-private-sandbox-runtime',
+  region: cfg.BYTEPLUS_REGION,
+  retrievedAt: new Date().toISOString(),
+  toolchain: {
+    runtime: `node ${process.version}`,
+    bpVersion,
+    controlPlaneApiVersion: '2024-06-06',
+    dataPlane: 'ticketed-private-webshell',
+    publicRouteUsed: false,
+    maximumInstanceLifetimeMinutes: 10,
+  },
+  application: { functionId },
+  successfulRequestMetadata: responseMetadata,
+  evidence,
+  finalInventory: { liveInstances: 0 },
+  redaction: {
+    credentialsSerialized: false,
+    signedEndpointSerialized: false,
+    ticketSerialized: false,
+    commandPayloadSerialized: false,
+    fileContentSerialized: false,
+  },
+};
+const serialized = `${JSON.stringify(record, null, 2)}\n`;
+writeFileSync(resolve(evidenceFile), serialized, {
+  encoding: 'utf8',
+  flag: 'wx',
+  mode: 0o600,
+});
+process.stdout.write(serialized);

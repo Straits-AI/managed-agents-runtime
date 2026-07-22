@@ -1,4 +1,4 @@
-import { signedCall } from './signer.js';
+import { signedCallWithMetadata } from './signer.js';
 
 /**
  * veFaaS Cloud Sandbox lifecycle client (control plane). API shape
@@ -11,6 +11,13 @@ export interface VefaasClientOptions {
   accessKeyId: string;
   secretAccessKey: string;
   sessionToken?: string;
+  onResponseMetadata?: (metadata: VefaasResponseMetadata) => void;
+}
+
+export interface VefaasResponseMetadata {
+  service: 'vefaas' | 'apig';
+  action: string;
+  requestId: string | null;
 }
 
 const VEFAAS_VERSION = '2024-06-06';
@@ -37,12 +44,12 @@ export interface WebshellEndpointResult {
 export class VefaasClient {
   constructor(private readonly opts: VefaasClientOptions) {}
 
-  private call<T>(
+  private async call<T>(
     service: 'vefaas' | 'apig',
     action: string,
     body: Record<string, unknown>,
   ): Promise<T> {
-    return signedCall<T>({
+    const response = await signedCallWithMetadata<T>({
       host: this.opts.host,
       region: this.opts.region,
       service,
@@ -53,6 +60,16 @@ export class VefaasClient {
       secretAccessKey: this.opts.secretAccessKey,
       sessionToken: this.opts.sessionToken,
     });
+    try {
+      this.opts.onResponseMetadata?.({
+        service,
+        action,
+        requestId: response.requestId,
+      });
+    } catch {
+      // Evidence observers must not change runtime lifecycle semantics.
+    }
+    return response.result;
   }
 
   createSandbox(input: {

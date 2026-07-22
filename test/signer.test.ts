@@ -1,6 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createHash, createHmac } from 'node:crypto';
-import { buildSignedRequest } from '../src/providers/byteplus/signer.js';
+import {
+  buildSignedRequest,
+  signedCallWithMetadata,
+} from '../src/providers/byteplus/signer.js';
 
 /**
  * Reference implementation transcribed verbatim from
@@ -151,5 +154,37 @@ describe('BytePlus signer', () => {
     expect(
       buildSignedRequest({ ...fixed, sessionToken: 'tok' }).headers['X-Security-Token'],
     ).toBe('tok');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['malformed', 'request id with spaces'],
+    ['oversized', 'r'.repeat(161)],
+  ])('returns null for %s successful request metadata', async (_case, requestId) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ResponseMetadata: requestId === undefined ? {} : { RequestId: requestId },
+      Result: { SandboxId: 'sandbox-1' },
+    }), { status: 200 })));
+
+    await expect(signedCallWithMetadata<{ SandboxId: string }>(fixed)).resolves.toEqual({
+      result: { SandboxId: 'sandbox-1' },
+      requestId: null,
+    });
+  });
+
+  it('preserves a bounded successful request ID beside the ordinary result', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ResponseMetadata: { RequestId: '20260722010000ABC:def-123' },
+      Result: { SandboxId: 'sandbox-1' },
+    }), { status: 200 })));
+
+    await expect(signedCallWithMetadata<{ SandboxId: string }>(fixed)).resolves.toEqual({
+      result: { SandboxId: 'sandbox-1' },
+      requestId: '20260722010000ABC:def-123',
+    });
   });
 });

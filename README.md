@@ -173,12 +173,15 @@ private operator inventory rather than committing them to this repository:
 | `BYTEPLUS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN` | `python3 scripts/refresh-creds.py` syncs STS creds from `bp login` (~15 min TTL; rerun before a cloud batch) |
 | `TOS_BUCKET` | `scripts/provision-tos.ts` (idempotent create plus direct/presigned conformance, bounded failure-path evidence, verified object cleanup, and a versioned provenance record) |
 | `ARK_API_KEY` / `ARK_MODEL` | activate a model in the console, then `scripts/get-ark-key.py --endpoint-id ep-…` (key + endpoint id → `.env`) |
-| `VEFAAS_SANDBOX_FUNCTION_ID` | released sandbox application created through the Function Service sandbox-application flow; on CLI `1.0.17`, create through the console unless the public API contract has been revalidated, then manage instances programmatically |
+| `VEFAAS_SANDBOX_FUNCTION_ID` | `npm run byteplus:sandbox:provision -- --profile dev --region ap-southeast-1 --name <deterministic-name> --evidence-file <owner-only-path>` creates or safely reuses an exact released CPU sandbox application |
 | `SANDBOX_TRANSPORT` | `private-webshell` by default; set `apig` only for an explicitly reviewed public gateway deployment |
 | `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | optional public APIG route for the runtime's AIO REST adapter; private conformance uses secret-isolated WebShell and does not require APIG |
 
 > **Provisioning notes learned the hard way:** sandbox application fields omitted
-> from older CLI help must be live-validated through current official schemas;
+> from older CLI help are sent through one structured body and immediately read
+> back; CPU applications omit `InstanceType` because BytePlus documents every
+> non-empty value as a specific GPU type; exact-name resources are reused only
+> after full configuration and stable-revision validation;
 > APIG is a separate public-exposure decision, not a private sandbox prerequisite;
 > private commands return at most 100,000 bytes across stdout/stderr, and the
 > UTF-8 text-file seam is bounded to 100,000 bytes per file;
@@ -194,11 +197,18 @@ node --env-file=.env --import tsx scripts/provision-tos.ts \
   --evidence-file /tmp/tos-conformance.json               # TOS live evidence
 node --env-file=.env --import tsx scripts/smoke-ark.ts       # ModelArk chat (≤32 tokens)
 node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→private exec→file r/w→verified terminate
-node --import tsx scripts/conformance-sandbox.ts \
-  --profile dev --region ap-southeast-1 \
+npm run byteplus:sandbox:provision -- \
+  --profile dev --region ap-southeast-1 --name <deterministic-name> \
+  --evidence-file /secure/path/sandbox-provisioning.json
+python3 scripts/refresh-creds.py --profile dev --region ap-southeast-1
+npm run byteplus:sandbox:conformance -- \
   --function-id <released-sandbox-function-id> \
   --run-id <non-secret-run-id> \
-  --evidence-file /secure/path/sandbox-conformance.json      # private WebShell, no APIG
+  --evidence-file /secure/path/sandbox-runtime.json          # real VefaasSandboxProvider
+npm run byteplus:sandbox:cleanup -- \
+  --profile dev --region ap-southeast-1 \
+  --function-id <released-sandbox-function-id> --name <deterministic-name> \
+  --evidence-file /secure/path/sandbox-cleanup.json
 ```
 
 Interactive `bp login` belongs in the operator's normal host browser. Containers
