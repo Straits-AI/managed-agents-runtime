@@ -536,6 +536,7 @@ export function createRealEpoch(providers: EpochProviders) {
               outcome.artifacts,
               version.verifier_policy as VerifierPolicy,
               step,
+              outcome.result,
             );
             if (result === 'completed') {
               await cleanup();
@@ -599,6 +600,7 @@ async function finishRun(
   artifacts: string[],
   policy: VerifierPolicy,
   producerStep: number,
+  durableResult: import('../core/delegatedResults.js').BoundedRunResult,
 ): Promise<'completed' | string[]> {
   const { pool, run, attempt } = ctx;
 
@@ -665,6 +667,10 @@ async function finishRun(
         payload: { summary, artifacts: stagedArtifacts.map((artifact) => artifact.id) },
       },
       attemptId: attempt.id,
+      patch: {
+        result: durableResult.value,
+        result_size_bytes: durableResult.sizeBytes,
+      },
     });
   });
   return 'completed';

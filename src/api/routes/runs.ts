@@ -9,6 +9,7 @@ import { listAttempts } from '../../store/attempts.js';
 import { listApprovals, decideApproval, getApproval } from '../../store/approvals.js';
 import { listGrants } from '../../store/grants.js';
 import { getArtifactForTenant, listArtifactsForRun } from '../../store/artifacts.js';
+import { childLineageProjection } from '../../store/childLineage.js';
 import { runUsage, tenantUsage } from '../../store/usage.js';
 import { RunAdmissionRejectedError } from '../../store/admissions.js';
 import { appendEvent, transitionRun } from '../../core/transition.js';
@@ -459,6 +460,15 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
         }
         throw err;
       }
+    },
+  );
+
+  app.get<{ Params: { runId: string } }>(
+    '/v1/runs/:runId/children',
+    async (req, reply) => {
+      const lineage = await childLineageProjection(pool, req.params.runId, req.tenantId);
+      if (!lineage) return reply.code(404).send({ error: 'run not found' });
+      return lineage;
     },
   );
 

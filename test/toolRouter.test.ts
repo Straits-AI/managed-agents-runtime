@@ -443,6 +443,38 @@ describe('delegate (subagents)', () => {
     expect(outcome).toMatchObject({ kind: 'result' });
     expect((outcome as { content: string }).content).toMatch(/requires at least one subtask/);
   });
+
+  it('rejects delegation fan-out and structured results above their explicit bounds', async () => {
+    const { run, attempt } = await runningRun([]);
+    const fanout = await dispatchTool(ctx(run, attempt), 'delegate', {
+      subtasks: Array.from({ length: 9 }, (_, index) => ({ goal: `child ${index}` })),
+    });
+    expect(fanout).toMatchObject({ kind: 'result' });
+    expect((fanout as { content: string }).content).toMatch(/at most 8/);
+
+    const oversize = await dispatchTool(ctx(run, attempt), 'run_complete', {
+      summary: 'too large',
+      result: { content: 'x'.repeat(70_000) },
+    });
+    expect(oversize).toMatchObject({ kind: 'result' });
+    expect((oversize as { content: string }).content).toMatch(/exceeds 65536/);
+
+    const tooManyArtifacts = await dispatchTool(ctx(run, attempt), 'run_complete', {
+      summary: 'too many refs',
+      artifacts: Array.from({ length: 33 }, (_, index) => `result-${index}.txt`),
+    });
+    expect(tooManyArtifacts).toMatchObject({ kind: 'result' });
+    expect((tooManyArtifacts as { content: string }).content).toMatch(/at most 32 artifacts/);
+
+    const accepted = await dispatchTool(ctx(run, attempt), 'run_complete', {
+      summary: 'bounded',
+      result: { answer: 42 },
+    });
+    expect(accepted).toMatchObject({
+      kind: 'complete',
+      result: { value: { schemaVersion: 1, summary: 'bounded', data: { answer: 42 } } },
+    });
+  });
 });
 
 describe('workspace-tool observability', () => {

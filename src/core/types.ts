@@ -95,6 +95,8 @@ export interface RunRow {
   input: Record<string, unknown>;
   status: RunStatus;
   status_reason: string | null;
+  result: import('./delegatedResults.js').DurableRunResult | null;
+  result_size_bytes: number | null;
   progress: ProgressLedger | Record<string, never>;
   workspace_id: string | null;
   current_attempt_id: string | null;

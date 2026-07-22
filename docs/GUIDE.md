@@ -209,6 +209,7 @@ curl -XPOST localhost:8080/v1/runs/$RID/cancel ...
 | POST | `/v1/runs/:id/cancel` | cancel (fences the live worker) |
 | POST | `/v1/runs/:id/fork` | branch a new run from this run's checkpoint |
 | GET | `/v1/runs/:id/usage`, `/v1/usage` | per-run / per-tenant tokens + cost |
+| GET | `/v1/runs/:id/children` | bounded delegated results and complete replacement lineage |
 | GET | `/v1/runs/:id/artifacts` | first-class artifact metadata and authorized content links |
 | GET | `/v1/runs/:id/artifacts/:artifactId/content` | authorized artifact content (proxy or short-lived redirect) |
 | GET | `/v1/runs/:id/export` | portable run bundle with digest-checked artifact bytes and lineage |
@@ -221,6 +222,14 @@ evidence references under `schemaVersion: 1`. Provider locators remain private;
 clients retrieve bytes only through the tenant-authorized content endpoint. Run
 bundle format v2 inlines artifact bytes and rejects digest, size, source-path, or
 producer-lineage tampering before import.
+
+Delegation accepts at most eight children per call, 4,096 encoded bytes per goal,
+and 32 artifact references per result. Each child may persist at most 65,536
+encoded bytes of structured completion data. The child-lineage API
+returns all generations plus a deterministic `selected` projection, token usage,
+terminal evidence, artifact references, and the workspace rule:
+`isolated-no-automatic-merge`. Child work never silently overwrites the parent;
+an agent must return and apply an explicit patch before resolving conflicts.
 
 ## 4. Multi-tenancy
 
