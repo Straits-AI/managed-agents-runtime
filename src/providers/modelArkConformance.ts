@@ -20,6 +20,43 @@ export interface ModelArkTemporaryKeyRequest {
   ProjectName?: string;
 }
 
+export interface ModelArkKeyResourceBindingInput {
+  resourceType: ModelArkKeyResourceType;
+  model: string;
+  keyResourceId: string;
+  negativeModel: string;
+  negativeKeyResourceId: string;
+}
+
+export function resolveModelArkKeyResourceBindings(
+  input: ModelArkKeyResourceBindingInput,
+): { positiveResourceId: string; negativeResourceId: string } {
+  for (const value of [
+    input.model,
+    input.keyResourceId,
+    input.negativeModel,
+    input.negativeKeyResourceId,
+  ]) {
+    if (!/^[A-Za-z0-9._:-]{1,160}$/.test(value)) {
+      throw new Error('ModelArk key resource binding is invalid');
+    }
+  }
+  if (input.resourceType === 'presetendpoint') {
+    if (input.keyResourceId !== input.model) {
+      throw new Error('ModelArk preset endpoint key resource must match the invoked model');
+    }
+    if (input.negativeKeyResourceId !== input.negativeModel) {
+      throw new Error(
+        'ModelArk preset endpoint negative key resource must match the invoked model',
+      );
+    }
+  }
+  return {
+    positiveResourceId: input.keyResourceId,
+    negativeResourceId: input.negativeKeyResourceId,
+  };
+}
+
 export function createModelArkTemporaryKeyRequest(
   input: ModelArkTemporaryKeyRequestInput,
 ): ModelArkTemporaryKeyRequest {

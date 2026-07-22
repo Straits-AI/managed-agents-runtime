@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createModelArkTemporaryKeyRequest,
   parseBoundedProviderFailure,
+  resolveModelArkKeyResourceBindings,
   runModelArkConformance,
   runModelArkExpectedFailure,
 } from '../src/providers/modelArkConformance.js';
@@ -47,6 +48,37 @@ describe('ModelArk live conformance seam', () => {
       resourceType: 'model' as never,
       resourceIds: ['seed-2-0-lite-260228'],
     })).toThrow('ModelArk temporary key resource type is invalid');
+  });
+
+  it('rejects a preset-model key scope that differs from either invoked model', () => {
+    expect(() => resolveModelArkKeyResourceBindings({
+      resourceType: 'presetendpoint',
+      model: 'seed-positive',
+      keyResourceId: 'seed-different',
+      negativeModel: 'seed-negative',
+      negativeKeyResourceId: 'seed-negative',
+    })).toThrow('ModelArk preset endpoint key resource must match the invoked model');
+
+    expect(() => resolveModelArkKeyResourceBindings({
+      resourceType: 'presetendpoint',
+      model: 'seed-positive',
+      keyResourceId: 'seed-positive',
+      negativeModel: 'seed-negative',
+      negativeKeyResourceId: 'seed-different',
+    })).toThrow('ModelArk preset endpoint negative key resource must match the invoked model');
+  });
+
+  it('retains explicit distinct endpoint bindings when the invocation alias differs', () => {
+    expect(resolveModelArkKeyResourceBindings({
+      resourceType: 'endpoint',
+      model: 'model-alias-positive',
+      keyResourceId: 'ep-positive',
+      negativeModel: 'model-alias-negative',
+      negativeKeyResourceId: 'ep-negative',
+    })).toEqual({
+      positiveResourceId: 'ep-positive',
+      negativeResourceId: 'ep-negative',
+    });
   });
 
   it('extracts only bounded provider metadata from a bp failure', () => {

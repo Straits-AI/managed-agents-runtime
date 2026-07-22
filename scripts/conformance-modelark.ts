@@ -5,6 +5,7 @@ import {
   createModelArkTemporaryKeyRequest,
   type ModelArkKeyResourceType,
   parseBoundedProviderFailure,
+  resolveModelArkKeyResourceBindings,
   runModelArkConformance,
   runModelArkExpectedFailure,
 } from '../src/providers/modelArkConformance.js';
@@ -24,6 +25,7 @@ const negativeModel = option('--negative-model', 'seed-2-0-lite-260228');
 const expectedFailureCode = option('--expected-failure-code', 'ModelNotOpen');
 const resourceType = option('--resource-type', 'presetendpoint') as ModelArkKeyResourceType;
 const keyResourceId = option('--key-resource-id', model);
+const negativeKeyResourceId = option('--negative-key-resource-id', negativeModel);
 const projectName = option('--project-name', 'default');
 const evidenceFile = option('--evidence-file');
 const durationSeconds = 900;
@@ -42,10 +44,19 @@ const source = resolveTosConformanceSource({
   gitCommit,
   gitStatus: gitCommit === null ? null : readGit(['status', '--porcelain']),
 });
+const keyBindings = resolveModelArkKeyResourceBindings({
+  resourceType,
+  model,
+  keyResourceId,
+  negativeModel,
+  negativeKeyResourceId,
+});
 
 const dependencies = {
   async getTemporaryKey(input: { model: string }) {
-    const resourceId = input.model === model ? keyResourceId : input.model;
+    const resourceId = input.model === model
+      ? keyBindings.positiveResourceId
+      : keyBindings.negativeResourceId;
     const body = JSON.stringify(createModelArkTemporaryKeyRequest({
       durationSeconds,
       resourceType,
@@ -182,6 +193,8 @@ const record = {
     keyScope: {
       resourceType,
       projectName: resourceType === 'presetendpoint' ? projectName : null,
+      positiveResourceId: keyBindings.positiveResourceId,
+      negativeResourceId: keyBindings.negativeResourceId,
     },
   },
   evidence,
