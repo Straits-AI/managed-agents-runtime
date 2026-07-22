@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
-  "evidenceId": "byteplus-modelark-02178469375026747fde1ce057a4e39ca4c3f804f8e42e0d0916c",
+  "evidenceId": "byteplus-modelark-021784694981398d82d61e1341a38f1d55b18f5893f198bb3a585",
   "source": {
     "repository": "https://github.com/Straits-AI/managed-agents-runtime",
-    "commit": "903655c21fee06089054367c79f300aaa88992e3",
+    "commit": "7c2526d9648a4f6bdfa0292340c03d18f7f10fab",
     "commitOrigin": "git-clean-worktree"
   },
   "provider": "byteplus-modelark",
   "region": "ap-southeast-1",
-  "retrievedAt": "2026-07-22T04:15:52.433Z",
+  "retrievedAt": "2026-07-22T04:36:24.861Z",
   "toolchain": {
     "runtime": "node v22.23.0",
     "controlApi": "GetApiKey 2024-01-01",
@@ -16,7 +16,9 @@
     "maxOutputTokens": 32,
     "keyScope": {
       "resourceType": "presetendpoint",
-      "projectName": "default"
+      "projectName": "default",
+      "positiveResourceId": "seed-2-0-mini-260428",
+      "negativeResourceId": "seed-2-0-lite-260228"
     }
   },
   "evidence": {
@@ -25,14 +27,14 @@
     "temporaryKey": {
       "persisted": false,
       "serialized": false,
-      "requestId": "20260722041548462D2FDC7C27CB55CDFE",
-      "expiresAt": "2026-07-22T04:30:49.798Z"
+      "requestId": "20260722043619CBCB45E76C9778EECE83",
+      "expiresAt": "2026-07-22T04:51:20.562Z"
     },
     "inference": {
       "markerMatched": true,
-      "requestId": "02178469375026747fde1ce057a4e39ca4c3f804f8e42e0d0916c",
+      "requestId": "021784694981398d82d61e1341a38f1d55b18f5893f198bb3a585",
       "inputTokens": 38,
-      "outputTokens": 44,
+      "outputTokens": 48,
       "finishReason": "stop"
     },
     "redaction": {
@@ -47,11 +49,11 @@
     "observed": true,
     "status": 404,
     "code": "ModelNotOpen",
-    "requestId": "02178469375239547fde1ce057a4e39ca4c3f804f8e42e08459fb",
+    "requestId": "021784694984796d82d61e1341a38f1d55b18f5893f198bce5457",
     "temporaryKey": {
       "persisted": false,
       "serialized": false,
-      "requestId": "20260722041551966ABD5C0C385A56BD0F"
+      "requestId": "2026072204362348F3735AA5800E224E44"
     },
     "redaction": {
       "promptIncluded": false,

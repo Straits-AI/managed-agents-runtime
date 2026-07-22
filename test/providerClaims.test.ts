@@ -22,6 +22,19 @@ describe('versioned BytePlus provider claims', () => {
     ]);
   });
 
+  it('binds each ModelArk temporary-key scope to the model it invokes', () => {
+    const record = JSON.parse(readFileSync(resolve(
+      root,
+      'provider-conformance/evidence/modelark-2026-07-22.json',
+    ), 'utf8')) as {
+      toolchain: { keyScope: { positiveResourceId: string; negativeResourceId: string } };
+      evidence: { model: string };
+      expectedFailure: { model: string };
+    };
+    expect(record.toolchain.keyScope.positiveResourceId).toBe(record.evidence.model);
+    expect(record.toolchain.keyScope.negativeResourceId).toBe(record.expectedFailure.model);
+  });
+
   it.each(['README.md', 'docs/BYTEPLUS-PROVIDER-CONFORMANCE.md'])(
     'checks %s against the conformance manifest',
     (relative) => {

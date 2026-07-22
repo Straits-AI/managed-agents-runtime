@@ -10,7 +10,7 @@ attest a changed adapter, tool version, API surface, region, or deployment.
 | Capability | Classification | Current evidence | Shared-deployment claim |
 | --- | --- | --- | --- |
 | TOS object storage | `verified` | byteplus-tos-attestation-56861a83-c502-4814-a17a-ba7e60d3661a at `e2665c98cb14` | Verified for the bounded object operations named in the retained record |
-| ModelArk inference | `verified` | byteplus-modelark-02178469375026747fde1ce057a4e39ca4c3f804f8e42e0d0916c at `903655c21fee` | Verified for one bounded activated preset-model chat invocation |
+| ModelArk inference | `verified` | byteplus-modelark-021784694981398d82d61e1341a38f1d55b18f5893f198bb3a585 at `7c2526d9648a` | Verified for one bounded activated preset-model chat invocation |
 | veFaaS private Cloud Sandbox | `verified` | byteplus-runtime-sandbox-runtime-903655c at `903655c21fee` | Verified for one bounded private CPU sandbox lifecycle with exact cleanup |
 | AgentKit Memory | `unavailable` | No release-current live record | No release-current adapter/version record; do not present as currently verified |
 | AgentKit Knowledge | `unavailable` | No release-current live record | Fail-closed in shared deployments until deployment and tenant bindings are attested |
@@ -97,6 +97,10 @@ The two temporary keys and model output remain in memory. The evidence contains
 only bounded request, token, finish, source, key-scope, expected-failure, and
 redaction metadata. The negative probe fails closed if the model becomes
 available or returns a different error code.
+For `presetendpoint`, the positive and negative key-resource IDs must equal the
+respective invoked model IDs. For an `endpoint`, pass explicit
+`--key-resource-id` and `--negative-key-resource-id`; both bindings are retained
+in the sanitized record.
 
 ## Private sandbox record generation
 
