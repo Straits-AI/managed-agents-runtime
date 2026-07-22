@@ -6,7 +6,7 @@ import type { CapabilityGrantRow } from '../store/grants.js';
 import { WORKSPACE_DIR } from './workspace.js';
 
 /** Max transcript messages replayed into context before truncation. */
-const TRANSCRIPT_TAIL = 60;
+export const TRANSCRIPT_TAIL = 60;
 
 /**
  * Assemble model context (memo §16.1). The model never sees the raw event

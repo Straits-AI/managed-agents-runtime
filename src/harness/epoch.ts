@@ -59,6 +59,9 @@ import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
 import { invocationAbortFence } from './invocationAbort.js';
 import { createArtifact } from '../store/artifacts.js';
 import { stageArtifactOutputs } from './artifacts.js';
+import { createCheckpointEnvelope } from '../core/checkpoints.js';
+import { listArtifactsForRun } from '../store/artifacts.js';
+import { TRANSCRIPT_TAIL } from './contextCompiler.js';
 
 export interface EpochProviders {
   model: ModelProvider;
@@ -116,7 +119,9 @@ export function createRealEpoch(providers: EpochProviders) {
         }
       }
     }
-    const agentState: CheckpointAgentState = ckpt?.agent_state ?? forkAgentState ?? { step: 0 };
+    const agentState: CheckpointAgentState = ckpt?.agent_state
+      ?? forkAgentState
+      ?? createCheckpointEnvelope({ step: 0 });
     let transcript: ChatMessage[] = [];
     if (agentState.transcriptTosKey) {
       transcript = JSON.parse(
@@ -224,8 +229,11 @@ export function createRealEpoch(providers: EpochProviders) {
             .search(memoryScope, run.goal, MEMORY_RECALL_LIMIT)
             .catch(() => [])
         : [];
+      let lastContextSelection = agentState.contextSelection;
 
-      const saveCheckpoint = async (state: Partial<CheckpointAgentState> = {}) => {
+      const saveCheckpoint = async (
+        state: Pick<Partial<CheckpointAgentState>, 'pendingToolCall' | 'contextSummary'> = {},
+      ) => {
         const transcriptTosKey = `runs/${run.id}/transcripts/${attempt.id}-${step}.json`;
         await providers.objectStore.put(
           transcriptTosKey,
@@ -237,17 +245,54 @@ export function createRealEpoch(providers: EpochProviders) {
           workspaceId: run.workspace_id!,
         });
         await withTransaction(pool, async (tx) => {
-          const { rows } = await tx.query<{ last_event_seq: string; progress: ProgressLedger }>(
-            'SELECT last_event_seq, progress FROM runs WHERE id = $1',
+          const { rows } = await tx.query<{
+            last_event_seq: string;
+            progress: ProgressLedger;
+            awaited_signal: string | null;
+          }>(
+            'SELECT last_event_seq, progress, awaited_signal FROM runs WHERE id = $1',
             [run.id],
           );
+          const { rows: children } = await tx.query<{ id: string; terminal: boolean }>(
+            `SELECT id, status = ANY($2::text[]) AS terminal
+               FROM runs WHERE parent_run_id = $1 ORDER BY created_at, id`,
+            [run.id, ['COMPLETED', 'FAILED', 'CANCELLED']],
+          );
+          const approvals = await listApprovals(tx, run.id);
+          const artifacts = await listArtifactsForRun(tx, run.id, run.tenant_id);
+          const progress = rows[0]!.progress;
           await insertCheckpoint(tx, {
             runId: run.id,
             attemptId: attempt.id,
             eventSeq: BigInt(rows[0]!.last_event_seq),
             workspaceRevisionId: revisionId,
-            progress: rows[0]!.progress,
-            agentState: { step, transcriptTosKey, supervisor: supervisorState, ...state },
+            progress,
+            agentState: createCheckpointEnvelope({
+              step,
+              transcriptTosKey,
+              supervisor: supervisorState,
+              ...state,
+              commitments: {
+                awaitedSignal: rows[0]!.awaited_signal,
+                pendingApprovalIds: approvals
+                  .filter((approval) => approval.status === 'PENDING')
+                  .map((approval) => approval.id),
+                activeChildRunIds: children
+                  .filter((child) => !child.terminal)
+                  .map((child) => child.id),
+                pendingWork: {
+                  active: progress.active ?? [],
+                  blocked: progress.blocked ?? [],
+                  remaining: progress.remaining ?? [],
+                },
+              },
+              references: {
+                childRunIds: children.map((child) => child.id),
+                artifactIds: artifacts.map((artifact) => artifact.id),
+                evidence: [{ runId: run.id, eventSeq: rows[0]!.last_event_seq }],
+              },
+              contextSelection: lastContextSelection,
+            }),
           });
         });
         maybeCrash(cfg, run, 'after_checkpoint');
@@ -335,13 +380,25 @@ export function createRealEpoch(providers: EpochProviders) {
               invocation = { kind: 'lease_lost' };
             } else {
               const grants = await listGrants(invocationClient, run.id);
+              const userMessages = await unseenUserMessages(invocationClient, run.id);
+              const approvalOutcomes = await recentApprovalOutcomes(invocationClient, run.id);
+              lastContextSelection = {
+                strategyVersion: 'context-compiler/v1',
+                transcriptTailLimit: TRANSCRIPT_TAIL,
+                transcriptMessagesAvailable: transcript.length,
+                transcriptMessagesSelected: Math.min(transcript.length, TRANSCRIPT_TAIL),
+                memoryIds: recalledMemories.map((memory) => memory.id),
+                userMessageCount: userMessages.length,
+                approvalOutcomeCount: approvalOutcomes.length,
+                skillRefs: skills.map((skill) => `${skill.name}@${skill.version}`),
+              };
               const messages = compileContext({
                 version,
                 run: startedRun,
                 grants,
                 transcript,
-                userMessages: await unseenUserMessages(invocationClient, run.id),
-                approvalOutcomes: await recentApprovalOutcomes(invocationClient, run.id),
+                userMessages,
+                approvalOutcomes,
                 memories: recalledMemories,
                 skills,
                 toolDocs: TOOL_DOCS,

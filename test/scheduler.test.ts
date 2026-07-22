@@ -9,6 +9,7 @@ import { listEvents } from '../src/store/events.js';
 import { listAttempts } from '../src/store/attempts.js';
 import { latestCheckpoint } from '../src/store/checkpoints.js';
 import type { ScriptOp } from '../src/harness/scriptedEpoch.js';
+import { createCheckpointEnvelope } from '../src/core/checkpoints.js';
 
 let db: TestDb;
 let agentVersionId: string;
@@ -140,6 +141,18 @@ describe('scheduler + worker', () => {
       { label: 'WAITING_SIGNAL with zero compute' },
     );
     expect(waiting.awaited_signal).toBe('payment_settled');
+    const waitingCheckpoint = await latestCheckpoint(db.pool, run.id);
+    expect(waitingCheckpoint).toMatchObject({
+      schema_version: 2,
+      agent_state: {
+        commitments: {
+          awaitedSignal: 'payment_settled',
+          pendingWork: {
+            blocked: [{ item: 'wait for payment_settled', reason: 'signal pending' }],
+          },
+        },
+      },
+    });
 
     // Deliver the signal exactly as the API endpoint does: record + wake.
     await withTransaction(db.pool, async (tx) => {
@@ -242,6 +255,17 @@ describe('scheduler + worker', () => {
       const child = await getRun(db.pool, k.id);
       expect(child!.status).toBe('COMPLETED');
     }
+    const delegatedCheckpoint = await latestCheckpoint(db.pool, parent.id);
+    expect(delegatedCheckpoint?.schema_version).toBe(2);
+    expect(delegatedCheckpoint?.agent_state.commitments.activeChildRunIds.sort()).toEqual(
+      kids.map((kid) => kid.id).sort(),
+    );
+    expect(delegatedCheckpoint?.agent_state.references.childRunIds.sort()).toEqual(
+      kids.map((kid) => kid.id).sort(),
+    );
+    expect(delegatedCheckpoint?.agent_state.commitments.pendingWork.remaining).toContain(
+      'merge delegated results',
+    );
 
     // Durable proof of "zero compute while children run": the parent's first
     // attempt EXITED with 'suspended_for_children' (it released its worker at the
@@ -343,12 +367,47 @@ describe('scheduler + worker', () => {
 
     const w1 = newWorker();
     // Wait until attempt 1 has checkpointed, then crash the worker.
-    await waitFor(
+    const firstCheckpoint = await waitFor(
       async () => {
         const c = await latestCheckpoint(db.pool, run.id);
         return c && c.agent_state.step === 2 ? c : null;
       },
       { label: 'first checkpoint' },
+    );
+    const richCheckpoint = createCheckpointEnvelope({
+      step: 2,
+      transcriptTosKey: 'runs/recovery/transcript.json',
+      contextSummary: 'resume the verified recovery plan',
+      pendingToolCall: { id: 'call-recovery', name: 'wait_for_signal', arguments: { name: 'ready' } },
+      commitments: {
+        awaitedSignal: 'ready',
+        pendingApprovalIds: ['apr_recovery'],
+        activeChildRunIds: ['run_child_recovery'],
+        pendingWork: {
+          active: ['resume after worker loss'],
+          blocked: [{ item: 'publish', reason: 'approval pending' }],
+          remaining: ['verify artifact'],
+        },
+      },
+      references: {
+        childRunIds: ['run_child_recovery'],
+        artifactIds: ['art_recovery'],
+        evidence: [{ runId: run.id, eventSeq: firstCheckpoint.event_seq }],
+      },
+      contextSelection: {
+        strategyVersion: 'context-compiler/v1',
+        transcriptTailLimit: 60,
+        transcriptMessagesAvailable: 72,
+        transcriptMessagesSelected: 60,
+        memoryIds: ['mem_recovery'],
+        userMessageCount: 2,
+        approvalOutcomeCount: 1,
+        skillRefs: ['recovery@1.0.0'],
+      },
+    });
+    await db.pool.query(
+      'UPDATE checkpoints SET agent_state = $2 WHERE id = $1',
+      [firstCheckpoint.id, JSON.stringify(richCheckpoint)],
     );
     w1.kill();
 
@@ -383,6 +442,8 @@ describe('scheduler + worker', () => {
     expect(types).toContain('AttemptOrphaned');
     // 'phase 1 work' progress ran once: resume started past the checkpoint.
     expect(types.filter((t) => t === 'ProgressUpdated')).toHaveLength(1);
+    const recoveredCheckpoint = await latestCheckpoint(db.pool, run.id);
+    expect(recoveredCheckpoint?.agent_state).toEqual(richCheckpoint);
     // Event sequence stays gapless across the crash.
     expect(events.map((e) => Number(e.seq))).toEqual(
       Array.from({ length: events.length }, (_, i) => i + 1),

@@ -10,6 +10,10 @@ import { spawnChildren } from '../scheduler/children.js';
 import { tokenBudgetExceeded } from './limits.js';
 import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
 import { buildBoundedRunResult } from '../core/delegatedResults.js';
+import {
+  createCheckpointEnvelope,
+  type CheckpointEnvelopeV2,
+} from '../core/checkpoints.js';
 
 /**
  * Deterministic no-model epoch used by tests and pre-credential milestones.
@@ -38,6 +42,18 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
     }
     signal.addEventListener('abort', done);
   });
+}
+
+function checkpointReferences(
+  runId: string,
+  eventSeq: bigint | string,
+  childRunIds: string[] = [],
+): CheckpointEnvelopeV2['references'] {
+  return {
+    childRunIds,
+    artifactIds: [],
+    evidence: [{ runId, eventSeq: eventSeq.toString() }],
+  };
 }
 
 export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason> {
@@ -96,7 +112,10 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
             attemptId: attempt.id,
             eventSeq: seq,
             progress: {},
-            agentState: { step: step + 1 },
+            agentState: createCheckpointEnvelope({
+              step: step + 1,
+              references: checkpointReferences(run.id, seq),
+            }),
           });
         });
         break;
@@ -133,7 +152,20 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
             attemptId: attempt.id,
             eventSeq: seq,
             progress: {},
-            agentState: { step: step + 1 },
+            agentState: createCheckpointEnvelope({
+              step: step + 1,
+              commitments: {
+                awaitedSignal: null,
+                pendingApprovalIds: [approval.id],
+                activeChildRunIds: [],
+                pendingWork: {
+                  active: [],
+                  blocked: [{ item: op.action.action, reason: 'approval pending' }],
+                  remaining: [],
+                },
+              },
+              references: checkpointReferences(run.id, seq),
+            }),
           });
           await transitionRun(tx, run.id, {
             expectFrom: ['RUNNING'],
@@ -166,7 +198,20 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
             attemptId: attempt.id,
             eventSeq: seq,
             progress: {},
-            agentState: { step: step + 1 },
+            agentState: createCheckpointEnvelope({
+              step: step + 1,
+              commitments: {
+                awaitedSignal: op.name,
+                pendingApprovalIds: [],
+                activeChildRunIds: [],
+                pendingWork: {
+                  active: [],
+                  blocked: [{ item: `wait for ${op.name}`, reason: 'signal pending' }],
+                  remaining: [],
+                },
+              },
+              references: checkpointReferences(run.id, seq),
+            }),
           });
           await transitionRun(tx, run.id, {
             expectFrom: ['RUNNING'],
@@ -187,14 +232,7 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
         if (alreadySpawned) break;
 
         await withTransaction(pool, async (tx) => {
-          await insertCheckpoint(tx, {
-            runId: run.id,
-            attemptId: attempt.id,
-            eventSeq: BigInt(run.last_event_seq),
-            progress: {},
-            agentState: { step: step + 1 },
-          });
-          await spawnChildren(tx, {
+          const childRunIds = await spawnChildren(tx, {
             parentRunId: run.id,
             attemptId: attempt.id,
             children: op.goals.map((g) => ({
@@ -202,6 +240,31 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
               goal: g,
               input: { script: (op.childScript ?? [{ op: 'complete' }]) as ScriptOp[] },
             })),
+          });
+          const { rows } = await tx.query<{ last_event_seq: string }>(
+            'SELECT last_event_seq FROM runs WHERE id = $1',
+            [run.id],
+          );
+          const eventSeq = rows[0]!.last_event_seq;
+          await insertCheckpoint(tx, {
+            runId: run.id,
+            attemptId: attempt.id,
+            eventSeq: BigInt(eventSeq),
+            progress: {},
+            agentState: createCheckpointEnvelope({
+              step: step + 1,
+              commitments: {
+                awaitedSignal: null,
+                pendingApprovalIds: [],
+                activeChildRunIds: childRunIds,
+                pendingWork: {
+                  active: op.goals,
+                  blocked: [],
+                  remaining: ['merge delegated results'],
+                },
+              },
+              references: checkpointReferences(run.id, eventSeq, childRunIds),
+            }),
           });
         });
         return 'suspended_for_children';
