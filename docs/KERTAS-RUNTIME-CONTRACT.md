@@ -2,8 +2,8 @@
 
 **Contract family:** `kertas.runtime`  
 **Target version:** `v1alpha1`  
-**Status:** architecture accepted; ManagedSession API not yet implemented  
-**Last reviewed:** 2026-07-19
+**Status:** architecture accepted; ManagedSession create/read/list/cancel slice implemented; inbound events pending
+**Last reviewed:** 2026-07-22
 
 Implementation is tracked by
 [Issue #31](https://github.com/Straits-AI/managed-agents-runtime/issues/31) and
@@ -89,10 +89,12 @@ may have zero Attempts while queued or when cancelled before its first claim.
 
 ## Current compatibility mapping
 
-The current runtime exposes `Run` as the top-level durable object and has no
-ManagedSession endpoint.
+The compatibility surface continues to expose `Run` as its top-level durable
+object. The target implementation now has a reviewed ManagedSession
+create/read/list/cancel slice, but target discovery remains unavailable until
+the inbound-event contract is implemented.
 
-Until the target resource is implemented:
+Until the complete target contract is advertised as supported:
 
 - Kertas MAY map one runtime Run to one temporary ManagedSession;
 - Kertas MUST persist that mapping in Kertas, not in runtime internals;
@@ -116,15 +118,15 @@ Outcome or created a Release.
 | Capability | Current controlled-alpha runtime | `v1alpha1` target |
 | --- | --- | --- |
 | Top-level continuity | `Run` is the top-level durable object | `ManagedSession` contains multiple Runs |
-| Session API | Not implemented | Versioned create/read/event/cancel/list routes |
-| Active execution admission | Tenant-level atomic Run admission | One active top-level Run per session plus child Runs |
+| Session API | Create/read/list/cancel implemented behind `v1alpha1`; inbound events pending | Versioned create/read/event/cancel/list routes |
+| Active execution admission | Tenant-level admission plus one active top-level Run per implemented session | One active top-level Run per session plus child Runs |
 | Inbound session event queue | Signals target an existing Run | Deduplicated ordered session events create/resume Runs |
 | Run/Attempt execution | Implemented internally with leases and fencing | Existing behavior exposed through versioned schemas; Attempt need not be a direct public mutation surface |
 | Runtime event ledger | Implemented per Run | Versioned session/Run events with resource sequence, correlation, and causation |
 | Workspace recovery | Versioned v1/v2 Run checkpoints preserve commitments, resource/evidence refs, and context-selection decisions; workspace snapshots implemented | Session workspace lineage plus explicit Kertas snapshot transfer |
 | Artifact output | First-class content-addressed Artifact resources implemented | Versioned Kertas ingestion through the public contract |
 | Child delegation | Bounded results, artifact/evidence refs, usage, replacement, and queryable lineage implemented | Versioned session-scoped projection through the public contract |
-| Public schemas/client fixtures | TypeScript/API behavior exists without a published machine-readable contract | Discoverable schemas, compatibility fixtures, and Kertas SDK conformance |
+| Public schemas/client fixtures | Run compatibility schema and partial ManagedSession schema published; target remains planned | Discoverable complete schemas, compatibility fixtures, and Kertas SDK conformance |
 | Provider selection | Versioned capability catalog, local/BytePlus/AWS subset manifests, and checked capability-selected deployment profiles | Kertas supplies capability and assurance requirements; provider identity remains a resolved runtime binding |
 
 Normative requirements below describe the target unless the table marks them as

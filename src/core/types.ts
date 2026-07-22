@@ -83,6 +83,7 @@ export type EventType =
 export interface RunRow {
   id: string;
   tenant_id: string;
+  managed_session_id: string | null;
   agent_version_id: string;
   parent_run_id: string | null;
   /** The failed child run this run replaces (memo §25 subagent replacement). */

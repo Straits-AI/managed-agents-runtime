@@ -4,6 +4,8 @@ export type IdPrefix =
   | 'ad'   // agent definition
   | 'av'   // agent version
   | 'run'
+  | 'ses'  // managed session
+  | 'scmd' // managed-session command receipt
   | 'att'  // run attempt
   | 'ws'   // workspace
   | 'rev'  // workspace revision

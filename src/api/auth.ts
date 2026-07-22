@@ -1,7 +1,16 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { Pool } from 'pg';
 import type { Config } from '../config.js';
-import { getTenant, resolveApiKey, type TenantRow } from '../store/tenants.js';
+import {
+  getTenant,
+  resolveApiKeyContext,
+  type TenantRow,
+} from '../store/tenants.js';
+
+export interface AuthenticatedCaller {
+  tenant: TenantRow;
+  principalId: string;
+}
 
 /** Constant-time string compare that never short-circuits on length. */
 function safeEqual(a: string, b: string): boolean {
@@ -29,6 +38,14 @@ export async function resolveTenant(
   cfg: Config,
   authorization: string | undefined,
 ): Promise<TenantRow | null> {
+  return (await resolveCaller(pool, cfg, authorization))?.tenant ?? null;
+}
+
+export async function resolveCaller(
+  pool: Pool,
+  cfg: Config,
+  authorization: string | undefined,
+): Promise<AuthenticatedCaller | null> {
   const prefix = 'Bearer ';
   if (!authorization || !authorization.startsWith(prefix)) return null;
   const token = authorization.slice(prefix.length);
@@ -36,8 +53,9 @@ export async function resolveTenant(
 
   // Built-in operator token → default tenant.
   if (safeEqual(token, cfg.API_AUTH_TOKEN)) {
-    return getTenant(pool, 'default');
+    const tenant = await getTenant(pool, 'default');
+    return tenant ? { tenant, principalId: 'operator-token:default' } : null;
   }
   // Per-tenant API key.
-  return resolveApiKey(pool, token);
+  return resolveApiKeyContext(pool, token);
 }

@@ -133,7 +133,7 @@ describe('run-as-session/v1 public contract', () => {
         {
           id: 'kertas.runtime/v1alpha1',
           lifecycle: 'not_available',
-          features: { managedSession: false },
+          features: { managedSession: true, inboundEvents: false },
         },
       ],
       deprecationPolicy: {
