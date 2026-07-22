@@ -114,6 +114,9 @@ success or sanitized failure evidence replaces that receipt atomically.
 BytePlus may omit default CPU allocation, empty environment variables, and a
 disabled VPC from application/revision readback; omission is accepted only for
 those canonical defaults, while any returned conflicting value fails closed.
+After a release completes, `GetReleaseStatus` may also omit the transient
+release-record ID; reuse still requires `Status: done`, a positive stable
+revision, and full application plus revision configuration readback.
 The released image is the exact pre-cached SandboxFusion image using its
 documented `bash /root/sandbox/scripts/run.sh`, port 8080, and
 `HOME=/home/tiger` contract. Current pre-cached All-in-one images were rejected

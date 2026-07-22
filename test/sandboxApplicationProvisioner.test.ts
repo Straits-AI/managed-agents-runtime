@@ -94,7 +94,6 @@ describe('private sandbox application provisioner', () => {
             ? {
                 Status: 'done',
                 StableRevisionNumber: 1,
-                ReleaseRecordId: 'release-1',
               }
             : (() => { throw new Error(`unexpected mutation ${action}`); })();
       return { result, requestId: `request-${action}` };
@@ -107,7 +106,7 @@ describe('private sandbox application provisioner', () => {
       disposition: 'reused',
       functionId: 'function-1',
       stableRevisionNumber: 1,
-      releaseRecordId: 'release-1',
+      releaseRecordId: null,
     });
     expect(actions).toEqual([
       'ListFunctions',

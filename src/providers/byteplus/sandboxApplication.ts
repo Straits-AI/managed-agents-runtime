@@ -31,7 +31,7 @@ export interface PrivateSandboxProvisioningReceipt {
   attemptId: string;
   functionId: string;
   stableRevisionNumber: number;
-  releaseRecordId: string;
+  releaseRecordId: string | null;
   requestIds: Array<{ action: string; requestId: string | null }>;
 }
 
@@ -120,7 +120,7 @@ export async function provisionPrivateSandboxApplication(
     const status = await call('GetReleaseStatus', { FunctionId: functionId });
     const stableRevisionNumber = positiveInteger(status.StableRevisionNumber);
     const releaseRecordId = boundedIdentifier(status.ReleaseRecordId);
-    if (status.Status !== 'done' || stableRevisionNumber === null || !releaseRecordId) {
+    if (status.Status !== 'done' || stableRevisionNumber === null) {
       throw new Error('Existing private sandbox application is not stably released');
     }
     const application = await call('GetFunction', { Id: functionId });
