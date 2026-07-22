@@ -152,6 +152,7 @@ jobs:
           registry_image_with_digest="${REGISTRY_IMAGE}@${registry_digest}"
           echo "REGISTRY_DIGEST=${registry_digest}" >> "${GITHUB_ENV}"
           echo "REGISTRY_IMAGE_WITH_DIGEST=${registry_image_with_digest}" >> "${GITHUB_ENV}"
+          echo "CONTAINER_IMAGE=${registry_image_with_digest}" >> "${GITHUB_ENV}"
           docker buildx imagetools inspect \
             "${registry_image_with_digest}" \
             --format '{{ json .Provenance }}' > release-evidence/registry-provenance.json
@@ -175,6 +176,11 @@ jobs:
       - name: Remove registry credentials before executing released code
         if: always()
         run: docker logout ghcr.io
+      - name: Verify the immutable digest is publicly pullable
+        run: |
+          anonymous_docker_config="$(mktemp -d)"
+          trap 'rm -rf "${anonymous_docker_config}"' EXIT
+          DOCKER_CONFIG="${anonymous_docker_config}" docker pull "${REGISTRY_IMAGE_WITH_DIGEST}"
       - name: Smoke the pulled immutable registry digest
         run: npm run container:smoke
       - name: Record evidence for the pulled immutable registry digest
