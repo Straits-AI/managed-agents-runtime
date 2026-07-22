@@ -118,6 +118,9 @@ describe('controlled-alpha GitHub Actions supply chain', () => {
 
   it('proves the release digest can be pulled without registry credentials', () => {
     const logout = publishAlpha.indexOf('docker logout ghcr.io');
+    const tokenProof = publishAlpha.indexOf(
+      'npm run release:public-image -- "${REGISTRY_IMAGE_WITH_DIGEST}"',
+    );
     const anonymousConfig = publishAlpha.indexOf('anonymous_docker_config="$(mktemp -d)"');
     const anonymousPull = publishAlpha.indexOf(
       'DOCKER_CONFIG="${anonymous_docker_config}" docker pull "${REGISTRY_IMAGE_WITH_DIGEST}"',
@@ -125,7 +128,9 @@ describe('controlled-alpha GitHub Actions supply chain', () => {
     const smoke = publishAlpha.indexOf('npm run container:smoke');
 
     expect(logout).toBeGreaterThan(-1);
+    expect(tokenProof).toBeGreaterThan(logout);
     expect(anonymousConfig).toBeGreaterThan(logout);
+    expect(anonymousConfig).toBeGreaterThan(tokenProof);
     expect(anonymousPull).toBeGreaterThan(anonymousConfig);
     expect(smoke).toBeGreaterThan(anonymousPull);
   });

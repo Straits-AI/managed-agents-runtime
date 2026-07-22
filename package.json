@@ -22,6 +22,7 @@
     "byteplus:sandbox:cleanup": "tsx scripts/cleanup-sandbox-application.ts",
     "release:version": "tsx scripts/check-release-version.ts",
     "release:attestations": "tsx scripts/validate-registry-attestations.ts",
+    "release:public-image": "tsx scripts/verify-public-registry-image.ts",
     "provider:claims": "tsx scripts/check-provider-claims.ts",
     "provider:portability": "tsx scripts/check-provider-portability.ts",
     "kertas:boundary": "tsx scripts/check-kertas-client-boundary.ts",
