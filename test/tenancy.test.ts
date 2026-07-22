@@ -6,6 +6,7 @@ import { loadConfig } from '../src/config.js';
 import { createTenant, createApiKey } from '../src/store/tenants.js';
 import { pgRateLimiter } from '../src/api/rateLimit.js';
 import { appendEvent } from '../src/core/transition.js';
+import { listEvents } from '../src/store/events.js';
 import { withTransaction } from '../src/db/tx.js';
 import { FsObjectStore } from '../src/providers/local/fsObjectStore.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -344,6 +345,85 @@ describe('tenant quotas', () => {
 });
 
 describe('usage & cost attribution', () => {
+  it('attributes tokens by event time within an explicit half-open reporting window', async () => {
+    const windowTenant = await createTenant(db.pool, { name: 'Usage window tenant' });
+    const windowKey = (await createApiKey(db.pool, { tenantId: windowTenant.id })).plaintext;
+    const runId = await makeRun(windowKey);
+    const insideSeq = await withTransaction(db.pool, (tx) =>
+      appendEvent(tx, runId, {
+        type: 'ModelInvocationCompleted',
+        payload: { usage: { inputTokens: 20, outputTokens: 2 } },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const boundarySeq = await withTransaction(db.pool, (tx) =>
+      appendEvent(tx, runId, {
+        type: 'ModelInvocationCompleted',
+        payload: { usage: { inputTokens: 30, outputTokens: 3 } },
+      }),
+    );
+    const events = await listEvents(db.pool, runId);
+    const insideAt = events.find((event) => event.seq === insideSeq.toString())!.created_at;
+    const boundaryAt = events.find((event) => event.seq === boundarySeq.toString())!.created_at;
+    const since = new Date(Date.UTC(
+      insideAt.getUTCFullYear(),
+      insideAt.getUTCMonth(),
+      insideAt.getUTCDate(),
+    ));
+    const until = boundaryAt;
+    expect(until.getTime()).toBeGreaterThan(insideAt.getTime());
+    await db.pool.query(
+      `UPDATE runs SET created_at = $2 WHERE id = $1`,
+      [runId, new Date(since.getTime() - 1).toISOString()],
+    );
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/usage?since=${encodeURIComponent(since.toISOString())}` +
+        `&until=${encodeURIComponent(until.toISOString())}`,
+      headers: bearer(windowKey),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      runs: 0,
+      inputTokens: 20,
+      outputTokens: 2,
+      totalTokens: 22,
+      since: since.toISOString(),
+      until: until.toISOString(),
+    });
+  });
+
+  it.each([
+    ['/v1/usage?since=not-a-date', 'malformed since'],
+    [
+      '/v1/usage?since=2026-07-22T01%3A00%3A00.000Z&until=2026-07-22T00%3A00%3A00.000Z',
+      'reversed bounds',
+    ],
+    [
+      '/v1/usage?since=2026-07-22T00%3A00%3A00.000Z&until=2026-07-22T00%3A00%3A00.000Z',
+      'equal bounds',
+    ],
+    ['/v1/usage?until=2026-07-23T00%3A00%3A00.000Z', 'until without since'],
+  ])('rejects invalid usage window: %s (%s)', async (url) => {
+    const response = await app.inject({ method: 'GET', url, headers: bearer(keyA) });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('accepts valid ISO usage windows with explicit UTC offsets', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/usage?since=2026-07-22T08%3A00%3A00%2B08%3A00' +
+        '&until=2026-07-23T08%3A00%3A00%2B08%3A00',
+      headers: bearer(keyA),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      since: '2026-07-22T00:00:00.000Z',
+      until: '2026-07-23T00:00:00.000Z',
+    });
+  });
+
   it('reports per-run token usage and estimated cost from the ledger', async () => {
     const runId = await makeRun(keyA);
     // A fresh run has no model usage yet.

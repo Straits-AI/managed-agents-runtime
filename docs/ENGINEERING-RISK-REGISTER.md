@@ -85,15 +85,18 @@ Attempt state; prove the full path remains stable after reaping.
 
 ### MAR-P1-003 — usage windows use event time
 
-**Status:** open — [Issue #24](https://github.com/Straits-AI/managed-agents-runtime/issues/24)  
+**Status:** closed — [Issue #24](https://github.com/Straits-AI/managed-agents-runtime/issues/24)
+
 **Owner:** runtime
 
 Tenant usage joins invocation events but filters by `runs.created_at`. A Run
 created before the reporting window can spend tokens inside the window without
 being counted.
 
-**Closure:** filter immutable usage-event timestamps; test a UTC-midnight crossing
-and caller-selected windows; use identical semantics for reporting and admission.
+**Closure:** tenant token and cost reporting filters immutable invocation-event
+timestamps in an explicit half-open window. Regression coverage crosses UTC
+midnight, proves an exclusive upper bound, and keeps Run-count semantics separate.
+The default reporting window now matches admission's UTC-day boundary.
 
 ### MAR-P1-005 — reproducible deployable release
 

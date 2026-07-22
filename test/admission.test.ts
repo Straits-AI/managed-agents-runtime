@@ -189,6 +189,60 @@ describe('atomic run admission', () => {
     ).rejects.toMatchObject({ reason: 'token_capacity_exhausted' });
   });
 
+  it('charges today\'s invocation event even when its run predates UTC midnight', async () => {
+    const { tenant, version } = await fixture('Event-time token capacity', {
+      dailyTokenBudget: 100,
+    });
+    const historical = await withTransaction(db.pool, (tx) =>
+      createRun(tx, {
+        tenantId: tenant.id,
+        agentVersionId: version.id,
+        goal: 'run created yesterday, model called today',
+        tokenBudget: 100,
+      }),
+    );
+    await db.pool.query(
+      `UPDATE runs
+       SET created_at = (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+                        - interval '1 minute'
+       WHERE id = $1`,
+      [historical.id],
+    );
+    await withTransaction(db.pool, async (tx) => {
+      await appendEvent(tx, historical.id, {
+        type: 'ModelInvocationCompleted',
+        payload: { usage: { inputTokens: 40, outputTokens: 20 } },
+      }, { patch: { tokens_used: '60' } });
+      await transitionRun(tx, historical.id, {
+        expectFrom: ['QUEUED'],
+        to: 'FAILED',
+        event: { type: 'RunFailed' },
+        reason: 'fixture_complete',
+      });
+    });
+
+    await expect(
+      withTransaction(db.pool, (tx) =>
+        createRun(tx, {
+          tenantId: tenant.id,
+          agentVersionId: version.id,
+          goal: 'one token beyond today\'s remaining capacity',
+          tokenBudget: 41,
+        }),
+      ),
+    ).rejects.toMatchObject({ reason: 'token_capacity_exhausted' });
+    await expect(
+      withTransaction(db.pool, (tx) =>
+        createRun(tx, {
+          tenantId: tenant.id,
+          agentVersionId: version.id,
+          goal: 'exactly today\'s remaining capacity',
+          tokenBudget: 40,
+        }),
+      ),
+    ).resolves.toMatchObject({ token_budget: '40' });
+  });
+
   it('serializes token reservations under a parallel burst', async () => {
     const { tenant, version } = await fixture('Token burst', {
       dailyTokenBudget: 100,
