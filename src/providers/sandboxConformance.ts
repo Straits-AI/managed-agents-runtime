@@ -20,7 +20,13 @@ export interface SandboxConformanceEvidence {
   cleanup: { sandboxTerminated: true; terminationVerified: true };
 }
 
-const TERMINAL_STATUSES = new Set(['Killed', 'Terminated', 'Stopped', 'Deleted']);
+const TERMINAL_STATUSES = new Set([
+  'Killed',
+  'Terminating',
+  'Terminated',
+  'Stopped',
+  'Deleted',
+]);
 
 export async function runSandboxConformance(
   provider: SandboxConformanceProvider,

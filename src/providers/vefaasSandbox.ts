@@ -426,7 +426,7 @@ export class VefaasSandboxProvider implements SandboxProvider {
   private async waitForTerminal(handle: SandboxHandle): Promise<void> {
     for (let attempt = 0; attempt < 60; attempt += 1) {
       const { status } = await this.describe(handle);
-      if (status === 'Deleted' || status === 'Terminated') return;
+      if (status === 'Deleted' || status === 'Terminated' || status === 'Terminating') return;
       await this.sleepFn(1_000);
     }
     throw new Error('sandbox termination was not verified before deadline');

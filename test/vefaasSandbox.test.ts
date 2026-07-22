@@ -160,6 +160,47 @@ describe('BytePlus private sandbox runtime provider', () => {
     expect(states).toHaveLength(0);
   });
 
+  it('accepts an exact provider Terminating tombstone after KillSandbox', async () => {
+    const states: Array<Record<string, unknown>> = [
+      { Id: 'sandbox-terminating', Status: 'Ready' },
+      { Id: 'sandbox-terminating', Status: 'Terminating' },
+    ];
+    const lifecycle = {
+      createSandbox: vi.fn(async () => ({ SandboxId: 'sandbox-terminating' })),
+      describeSandbox: vi.fn(async () => states.shift() ?? {
+        Id: 'sandbox-terminating', Status: 'Terminating',
+      }),
+      genWebshellEndpoint: vi.fn(async () => ({
+        Endpoint: 'wss://sandbox.example/webshell?ticket=runtime-secret',
+      })),
+      killSandbox: vi.fn(async () => ({})),
+      listSandboxes: vi.fn(async () => ({ Sandboxes: [], Total: 0 })),
+      getApigDomains: vi.fn(),
+    };
+    const cfg = loadConfig({
+      BYTEPLUS_ACCESS_KEY_ID: 'fixture-ak',
+      BYTEPLUS_SECRET_ACCESS_KEY: 'fixture-sk',
+      VEFAAS_SANDBOX_FUNCTION_ID: 'function-fixture',
+      SANDBOX_TRANSPORT: 'private-webshell',
+    });
+    const provider = new VefaasSandboxProvider(cfg, {
+      lifecycle,
+      privateCommand: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
+      sleep: async () => {},
+    });
+
+    const handle = await provider.create({
+      runId: 'run-terminating',
+      timeoutMinutes: 10,
+    });
+    await expect(provider.terminate(handle)).resolves.toBeUndefined();
+    expect(lifecycle.killSandbox).toHaveBeenCalledWith(
+      'function-fixture',
+      'sandbox-terminating',
+    );
+    expect(states).toHaveLength(0);
+  });
+
   it('terminates a Ready instance when explicit APIG discovery fails', async () => {
     const states: Array<Record<string, unknown>> = [
       { Id: 'sandbox-apig', Status: 'Ready' },

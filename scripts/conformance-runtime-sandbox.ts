@@ -4,6 +4,7 @@ import { loadConfig, requireConfig } from '../src/config.js';
 import { reserveEvidenceRecord } from '../src/providers/byteplus/provisioningEvidence.js';
 import { BytePlusApiError } from '../src/providers/byteplus/signer.js';
 import { VefaasClient, type VefaasResponseMetadata } from '../src/providers/byteplus/vefaas.js';
+import { summarizeExactSandboxInventory } from '../src/providers/byteplus/sandboxInventory.js';
 import { runSandboxConformance } from '../src/providers/sandboxConformance.js';
 import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
 import { VefaasSandboxProvider } from '../src/providers/vefaasSandbox.js';
@@ -117,7 +118,11 @@ try {
     pageNumber: 1,
     pageSize: 100,
   });
-  if (finalInventory.Total !== 0 || (finalInventory.Sandboxes?.length ?? 0) !== 0) {
+  const inventorySummary = summarizeExactSandboxInventory(finalInventory, {
+    functionId,
+    metadata: { runId },
+  });
+  if (inventorySummary.liveInstances !== 0) {
     throw new Error('Runtime sandbox final instance inventory was not empty');
   }
   for (const action of [
@@ -137,7 +142,7 @@ try {
     status: 'succeeded',
     successfulRequestMetadata: responseMetadata,
     evidence,
-    finalInventory: { liveInstances: 0 },
+    finalInventory: inventorySummary,
   };
   receipt.commit(record);
   process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
@@ -149,7 +154,10 @@ try {
       pageSize: 100,
       metadata: { runId },
     });
-    liveInstances = finalInventory.Sandboxes?.length ?? finalInventory.Total ?? null;
+    liveInstances = summarizeExactSandboxInventory(finalInventory, {
+      functionId,
+      metadata: { runId },
+    }).liveInstances;
   } catch {
     // The failure receipt must still survive an unavailable final inventory read.
   }

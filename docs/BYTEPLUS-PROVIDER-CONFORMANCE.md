@@ -126,6 +126,9 @@ Application cleanup normally requires an empty child inventory. It also accepts
 provider-retained tombstones only when every returned child belongs to the exact
 target function and is already `Terminating`; any active, unknown, paginated, or
 cross-function child fails closed before `DeleteFunction`.
+Runtime termination likewise treats the provider's post-kill `Terminating`
+state as accepted termination, but final evidence separately reports live
+instances and retained tombstones and requires exact function and run metadata.
 
 This proves private WebShell execution, not public HTTP. It does not create or
 use an API Gateway route. Provisioning omits `InstanceType`, verifies the draft

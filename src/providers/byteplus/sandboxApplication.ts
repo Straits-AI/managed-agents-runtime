@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { summarizeExactSandboxInventory } from './sandboxInventory.js';
 
 export interface VefaasProvisioningResponse {
   result: Record<string, unknown>;
@@ -267,15 +268,15 @@ export async function deletePrivateSandboxApplication(
     PageNumber: 1,
     PageSize: 100,
   });
-  const active = Array.isArray(sandboxes.Sandboxes) ? sandboxes.Sandboxes : null;
-  const total = typeof sandboxes.Total === 'number' ? sandboxes.Total : null;
-  const onlyExactTerminatingTombstones = active !== null
-    && total === active.length
-    && active.every((sandbox) => isRecord(sandbox)
-      && sandbox.FunctionId === target.functionId
-      && sandbox.Status === 'Terminating');
-  if (active === null || total === null
-    || (total !== 0 && !onlyExactTerminatingTombstones)) {
+  let inventory: ReturnType<typeof summarizeExactSandboxInventory>;
+  try {
+    inventory = summarizeExactSandboxInventory(sandboxes, {
+      functionId: target.functionId,
+    });
+  } catch {
+    throw new Error('Private sandbox application still has active or unowned instances');
+  }
+  if (inventory.liveInstances !== 0) {
     throw new Error('Private sandbox application still has active or unowned instances');
   }
 
