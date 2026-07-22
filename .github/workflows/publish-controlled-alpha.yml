@@ -31,7 +31,7 @@ jobs:
           --health-retries 15
     env:
       TEST_DATABASE_URL: postgres://postgres@127.0.0.1:5433/postgres
-      RELEASE_VERSION: 0.1.0-alpha.1
+      RELEASE_VERSION: 0.1.0-alpha.2
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
@@ -91,7 +91,7 @@ jobs:
       contents: write
       packages: write
     env:
-      RELEASE_VERSION: 0.1.0-alpha.1
+      RELEASE_VERSION: 0.1.0-alpha.2
       RELEASE_TAG: ${{ github.ref_name }}
       RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
       RELEASE_EVIDENCE_DIR: release-evidence/container
@@ -159,19 +159,7 @@ jobs:
           docker buildx imagetools inspect \
             "${registry_image_with_digest}" \
             --format '{{ json .SBOM }}' > release-evidence/registry-sbom.json
-          node --input-type=module <<'NODE'
-          import { readFile } from 'node:fs/promises';
-          const evidence = [
-            ['release-evidence/registry-provenance.json', 'https://slsa.dev/provenance/v1'],
-            ['release-evidence/registry-sbom.json', 'https://spdx.dev/Document'],
-          ];
-          for (const [path, predicate] of evidence) {
-            const value = JSON.parse(await readFile(path, 'utf8'));
-            if (!JSON.stringify(value).includes(predicate)) {
-              throw new Error(`${path} does not contain ${predicate}`);
-            }
-          }
-          NODE
+          npm run release:attestations
           docker pull "${registry_image_with_digest}"
       - name: Remove registry credentials before executing released code
         if: always()
@@ -219,7 +207,7 @@ jobs:
               `${process.env.REGISTRY_IMAGE}:${process.env.RELEASE_TAG}`,
               `${process.env.REGISTRY_IMAGE}:${process.env.RELEASE_VERSION}`,
             ],
-            attestations: ['https://slsa.dev/provenance/v1', 'https://spdx.dev/Document'],
+            attestations: ['BuildKit SLSA provenance', 'SPDX-2.3'],
             platform: 'linux/amd64',
           };
           await writeFile('release-evidence/registry-summary.json', `${JSON.stringify(summary, null, 2)}\n`);

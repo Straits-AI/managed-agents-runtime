@@ -33,7 +33,7 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://postgres@127.0.0.1:5433/postgres
       RELEASE_GATE_COMMIT: ${{ github.sha }}
-      RELEASE_VERSION: 0.1.0-alpha.1
+      RELEASE_VERSION: 0.1.0-alpha.2
       RELEASE_COMMIT: ${{ github.sha }}
       RELEASE_EVIDENCE_DIR: release-evidence/container
       CONTAINER_IMAGE: managed-agents-runtime:${{ github.sha }}

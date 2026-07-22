@@ -1,10 +1,10 @@
 # Controlled-alpha deployment and rollback
 
-**Applies to:** `v0.1.0-alpha.1`
+**Applies to:** `v0.1.0-alpha.2`
 
 **Release level:** controlled multi-tenant alpha
 
-**Image:** `ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.1`
+**Image:** `ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.2`
 
 This runbook defines the deployable image contract. Passing it does not establish
 live provider conformance, public-beta readiness, or production approval.
@@ -46,9 +46,9 @@ accept the release until the isolated anonymous pull passes.
 Always deploy by digest after resolving the tag:
 
 ```bash
-docker pull ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.1
+docker pull ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.2
 docker image inspect \
-  ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.1 \
+  ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.2 \
   --format '{{index .RepoDigests 0}}'
 ```
 
@@ -173,7 +173,7 @@ must remain blocked until it has an explicit data migration and recovery plan.
 3. The same checks pass on the exact `main` commit.
 4. Live provider conformance is recorded for every provider capability claimed
    by the release; unavailable capabilities remain labelled and fail closed.
-5. Only then is the annotated `v0.1.0-alpha.1` tag created.
+5. Only then is the annotated `v0.1.0-alpha.2` tag created.
 6. The tag workflow rejects a tag that is not annotated, is not the exact
    current `main` commit, or lacks a successful exact-commit `main` gate.
 7. The publish job pushes an unpromoted candidate, verifies its attestations,

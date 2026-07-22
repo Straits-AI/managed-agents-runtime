@@ -165,10 +165,10 @@ The versioned image runs as a non-root user and exposes explicit process roles:
 
 ```bash
 docker run --rm --env-file runtime.env \
-  ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.1 migrate
+  ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.2 migrate
 
 docker run --rm --env-file runtime.env -p 8080:8080 \
-  ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.1 api
+  ghcr.io/straits-ai/managed-agents-runtime:v0.1.0-alpha.2 api
 ```
 
 Deploy by the registry digest recorded in the GitHub prerelease, not by tag

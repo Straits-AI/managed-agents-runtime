@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. Release tags use the
 package version with a `v` prefix.
 
+## [0.1.0-alpha.2] - 2026-07-22
+
+First published controlled-alpha release. This supersedes the unpublished
+`v0.1.0-alpha.1` candidate tag, which remains immutable for audit history.
+
+### Added
+
+- the complete public `kertas.runtime/v1alpha1` ManagedSession and inbound-event
+  contract, compatibility discovery, standalone Kertas client, and deployment
+  conformance evidence;
+- bounded public artifact content and delegated-child result projections; and
+- BytePlus private WebSocket execution with live, sanitized provider evidence.
+
+### Hardened
+
+- tenant isolation, authenticated non-loopback deployment, credential handling,
+  public API limits, container cleanup, and exact source/image evidence binding;
+- registry attestation validation against BuildKit's decoded SLSA and SPDX
+  documents rather than an inapplicable raw predicate-type string; and
+- PR, main, and tag pipelines now run the standalone Kertas conformance through
+  the release image smoke contract.
+
+### Release boundary
+
+- This remains a controlled alpha, not a public-beta or production-ready release.
+- Database migrations are forward-only; application rollback does not
+  automatically reverse schema changes.
+
 ## [0.1.0-alpha.1] - 2026-07-19
 
 First deployable controlled-alpha release.

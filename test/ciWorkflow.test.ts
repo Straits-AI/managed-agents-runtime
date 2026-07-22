@@ -99,8 +99,9 @@ describe('controlled-alpha GitHub Actions supply chain', () => {
     expect(smoke).toBeGreaterThan(digestImage);
     expect(promote).toBeGreaterThan(smoke);
     expect(publishAlpha).toContain('docker logout ghcr.io');
-    expect(publishAlpha).toContain("'https://slsa.dev/provenance/v1'");
-    expect(publishAlpha).toContain("'https://spdx.dev/Document'");
+    expect(publishAlpha).toContain('npm run release:attestations');
+    expect(publishAlpha).toContain("'BuildKit SLSA provenance'");
+    expect(publishAlpha).toContain("'SPDX-2.3'");
   });
 
   it('passes the pulled immutable digest to container smoke and evidence generation', () => {
