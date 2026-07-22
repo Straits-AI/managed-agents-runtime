@@ -63,7 +63,7 @@ export interface ModelArkInvocationResult {
 }
 
 export interface ModelArkConformanceDependencies {
-  getTemporaryKey(): Promise<ModelArkTemporaryKey>;
+  getTemporaryKey(input: { model: string }): Promise<ModelArkTemporaryKey>;
   invoke(input: { apiKey: string; model: string }): Promise<ModelArkInvocationResult>;
 }
 
@@ -120,7 +120,7 @@ export async function runModelArkConformance(
     throw new Error('ModelArk conformance model identifier is invalid');
   }
   try {
-    const temporaryKey = await dependencies.getTemporaryKey();
+    const temporaryKey = await dependencies.getTemporaryKey({ model: options.model });
     const now = options.now ?? new Date();
     if (!temporaryKey.apiKey || temporaryKey.expiresAt.getTime() <= now.getTime()) {
       throw new Error('ModelArk temporary key is absent or expired');
@@ -159,6 +159,73 @@ export async function runModelArkConformance(
   }
 }
 
+export interface ModelArkExpectedFailureEvidence {
+  model: string;
+  expectedCode: string;
+  observed: true;
+  status: number | null;
+  code: string;
+  requestId: string | null;
+  temporaryKey: {
+    persisted: false;
+    serialized: false;
+    requestId: string | null;
+  };
+  redaction: {
+    promptIncluded: false;
+    outputIncluded: false;
+    credentialIncluded: false;
+  };
+}
+
+export async function runModelArkExpectedFailure(
+  dependencies: ModelArkConformanceDependencies,
+  options: { model: string; expectedCode: string; now?: Date },
+): Promise<ModelArkExpectedFailureEvidence> {
+  if (!/^[A-Za-z0-9._-]{1,160}$/.test(options.model)
+    || !/^[A-Za-z0-9._:-]{1,160}$/.test(options.expectedCode)) {
+    throw new Error('ModelArk negative-probe configuration is invalid');
+  }
+  let temporaryKey: ModelArkTemporaryKey;
+  try {
+    temporaryKey = await dependencies.getTemporaryKey({ model: options.model });
+    const now = options.now ?? new Date();
+    if (!temporaryKey.apiKey || temporaryKey.expiresAt.getTime() <= now.getTime()) {
+      throw new Error('ModelArk temporary key is absent or expired');
+    }
+  } catch (error) {
+    throw sanitizedModelArkFailure(error);
+  }
+
+  try {
+    await dependencies.invoke({ apiKey: temporaryKey.apiKey, model: options.model });
+  } catch (error) {
+    const failure = boundedFailureFromError(error);
+    if (failure.code !== options.expectedCode) {
+      throw sanitizedModelArkFailure(error);
+    }
+    return {
+      model: options.model,
+      expectedCode: options.expectedCode,
+      observed: true,
+      status: failure.status,
+      code: options.expectedCode,
+      requestId: failure.requestId,
+      temporaryKey: {
+        persisted: false,
+        serialized: false,
+        requestId: safeToken(temporaryKey.requestId),
+      },
+      redaction: {
+        promptIncluded: false,
+        outputIncluded: false,
+        credentialIncluded: false,
+      },
+    };
+  }
+  throw new Error('ModelArk negative probe unexpectedly succeeded');
+}
+
 function safeToken(value: unknown): string | null {
   return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,160}$/.test(value)
     ? value
@@ -170,18 +237,22 @@ function boundedCount(value: number): number {
 }
 
 function sanitizedModelArkFailure(error: unknown): Error {
-  if (typeof error !== 'object' || error === null) {
-    return new Error('ModelArk conformance failed');
-  }
-  const status = 'status' in error && typeof error.status === 'number'
-    ? error.status
-    : null;
-  const code = 'code' in error ? safeToken(error.code) : null;
-  const requestId = 'requestId' in error ? safeToken(error.requestId) : null;
+  const { status, code, requestId } = boundedFailureFromError(error);
   if (status !== null || code !== null || requestId !== null) {
     return new Error(
       `ModelArk conformance failed (HTTP ${status ?? 'unknown'}, ${code ?? 'Unknown'}, request ${requestId ?? 'unknown'})`,
     );
   }
   return new Error('ModelArk conformance failed');
+}
+
+function boundedFailureFromError(error: unknown): BoundedProviderFailure {
+  if (typeof error !== 'object' || error === null) {
+    return { status: null, code: null, requestId: null };
+  }
+  return {
+    status: 'status' in error && typeof error.status === 'number' ? error.status : null,
+    code: 'code' in error ? safeToken(error.code) : null,
+    requestId: 'requestId' in error ? safeToken(error.requestId) : null,
+  };
 }

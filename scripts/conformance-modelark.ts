@@ -6,6 +6,7 @@ import {
   type ModelArkKeyResourceType,
   parseBoundedProviderFailure,
   runModelArkConformance,
+  runModelArkExpectedFailure,
 } from '../src/providers/modelArkConformance.js';
 import { resolveTosConformanceSource } from '../src/providers/tosConformance.js';
 
@@ -18,9 +19,11 @@ const option = (name: string, fallback?: string): string => {
 
 const profile = option('--profile', 'dev');
 const region = option('--region', 'ap-southeast-1');
-const model = option('--model', 'seed-2-0-lite-260228');
-const resourceType = option('--resource-type') as ModelArkKeyResourceType;
-const keyResourceId = option('--key-resource-id');
+const model = option('--model', 'seed-2-0-mini-260428');
+const negativeModel = option('--negative-model', 'seed-2-0-lite-260228');
+const expectedFailureCode = option('--expected-failure-code', 'ModelNotOpen');
+const resourceType = option('--resource-type', 'presetendpoint') as ModelArkKeyResourceType;
+const keyResourceId = option('--key-resource-id', model);
 const projectName = option('--project-name', 'default');
 const evidenceFile = option('--evidence-file');
 const durationSeconds = 900;
@@ -40,12 +43,13 @@ const source = resolveTosConformanceSource({
   gitStatus: gitCommit === null ? null : readGit(['status', '--porcelain']),
 });
 
-const evidence = await runModelArkConformance({
-  async getTemporaryKey() {
+const dependencies = {
+  async getTemporaryKey(input: { model: string }) {
+    const resourceId = input.model === model ? keyResourceId : input.model;
     const body = JSON.stringify(createModelArkTemporaryKeyRequest({
       durationSeconds,
       resourceType,
-      resourceIds: [keyResourceId],
+      resourceIds: [resourceId],
       projectName,
     }));
     let stdout: string;
@@ -97,7 +101,7 @@ const evidence = await runModelArkConformance({
       expiresAt: new Date(Date.now() + durationSeconds * 1_000),
     };
   },
-  async invoke({ apiKey, model: selectedModel }) {
+  async invoke({ apiKey, model: selectedModel }: { apiKey: string; model: string }) {
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -148,7 +152,12 @@ const evidence = await runModelArkConformance({
       output,
     };
   },
-}, { model });
+};
+const evidence = await runModelArkConformance(dependencies, { model });
+const expectedFailure = await runModelArkExpectedFailure(dependencies, {
+  model: negativeModel,
+  expectedCode: expectedFailureCode,
+});
 
 const sourceAfter = readGit(['rev-parse', 'HEAD']);
 if (sourceAfter !== source.commit || readGit(['status', '--porcelain'])) {
@@ -176,6 +185,7 @@ const record = {
     },
   },
   evidence,
+  expectedFailure,
 };
 writeFileSync(resolve(evidenceFile), `${JSON.stringify(record, null, 2)}\n`, {
   encoding: 'utf8', flag: 'wx', mode: 0o600,

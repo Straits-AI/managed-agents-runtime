@@ -3,6 +3,7 @@ import {
   createModelArkTemporaryKeyRequest,
   parseBoundedProviderFailure,
   runModelArkConformance,
+  runModelArkExpectedFailure,
 } from '../src/providers/modelArkConformance.js';
 
 describe('ModelArk live conformance seam', () => {
@@ -59,11 +60,14 @@ describe('ModelArk live conformance seam', () => {
   });
 
   it('uses a temporary key in memory and emits metadata without key, prompt, or output', async () => {
-    const getTemporaryKey = vi.fn(async () => ({
+    const getTemporaryKey = vi.fn(async (input: { model: string }) => {
+      expect(input.model).toBe('seed-fixture');
+      return {
       apiKey: 'canary-model-key',
       requestId: 'key-request-1',
       expiresAt: new Date('2026-07-20T01:00:00Z'),
-    }));
+      };
+    });
     const invoke = vi.fn(async (input: { apiKey: string; model: string }) => {
       expect(input.apiKey).toBe('canary-model-key');
       return {
@@ -120,5 +124,74 @@ describe('ModelArk live conformance seam', () => {
     })).rejects.toThrow(
       'ModelArk conformance failed (HTTP 429, RateLimitExceeded, request inference-request-2)',
     );
+  });
+
+  it('serializes only bounded metadata for an expected unavailable-model failure', async () => {
+    const getTemporaryKey = vi.fn(async (input: { model: string }) => {
+      expect(input.model).toBe('seed-unavailable');
+      return {
+        apiKey: 'negative-canary-key',
+        requestId: 'negative-key-request-1',
+        expiresAt: new Date('2026-07-20T01:00:00Z'),
+      };
+    });
+    const invoke = vi.fn(async (input: { apiKey: string; model: string }) => {
+      expect(input).toEqual({ apiKey: 'negative-canary-key', model: 'seed-unavailable' });
+      throw Object.assign(new Error('secret negative-canary-key'), {
+        status: 400,
+        code: 'ModelNotOpen',
+        requestId: 'negative-inference-request-1',
+      });
+    });
+
+    const evidence = await runModelArkExpectedFailure({ getTemporaryKey, invoke }, {
+      model: 'seed-unavailable',
+      expectedCode: 'ModelNotOpen',
+      now: new Date('2026-07-20T00:00:00Z'),
+    });
+
+    expect(evidence).toEqual({
+      model: 'seed-unavailable',
+      expectedCode: 'ModelNotOpen',
+      observed: true,
+      status: 400,
+      code: 'ModelNotOpen',
+      requestId: 'negative-inference-request-1',
+      temporaryKey: {
+        persisted: false,
+        serialized: false,
+        requestId: 'negative-key-request-1',
+      },
+      redaction: {
+        promptIncluded: false,
+        outputIncluded: false,
+        credentialIncluded: false,
+      },
+    });
+    expect(JSON.stringify(evidence)).not.toContain('negative-canary-key');
+  });
+
+  it('rejects an unexpected negative-probe outcome', async () => {
+    const dependencies = {
+      getTemporaryKey: vi.fn(async () => ({
+        apiKey: 'negative-canary-key',
+        requestId: 'negative-key-request-2',
+        expiresAt: new Date('2026-07-20T01:00:00Z'),
+      })),
+      invoke: vi.fn(async () => ({
+        markerMatched: true,
+        requestId: 'unexpected-success',
+        inputTokens: 1,
+        outputTokens: 1,
+        finishReason: 'stop',
+        output: 'PONG',
+      })),
+    };
+
+    await expect(runModelArkExpectedFailure(dependencies, {
+      model: 'seed-unavailable',
+      expectedCode: 'ModelNotOpen',
+      now: new Date('2026-07-20T00:00:00Z'),
+    })).rejects.toThrow('ModelArk negative probe unexpectedly succeeded');
   });
 });
