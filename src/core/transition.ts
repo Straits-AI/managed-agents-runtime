@@ -26,6 +26,7 @@ export interface TransitionOptions {
     Pick<
       RunRow,
       'workspace_id' | 'current_attempt_id' | 'progress' | 'tokens_used' | 'awaited_signal'
+      | 'result' | 'result_size_bytes'
     >
   >;
 }
@@ -124,6 +125,8 @@ export async function transitionRun(
        progress = COALESCE($7, progress),
        tokens_used = COALESCE($9, tokens_used),
        awaited_signal = CASE WHEN $10 THEN $11 ELSE awaited_signal END,
+       result = CASE WHEN $12 THEN $13::jsonb ELSE result END,
+       result_size_bytes = CASE WHEN $14 THEN $15 ELSE result_size_bytes END,
        updated_at = now()
      WHERE id = $1
      RETURNING *`,
@@ -139,6 +142,10 @@ export async function transitionRun(
       patch.tokens_used ?? null,
       'awaited_signal' in patch,
       patch.awaited_signal ?? null,
+      'result' in patch,
+      patch.result === undefined || patch.result === null ? null : JSON.stringify(patch.result),
+      'result_size_bytes' in patch,
+      patch.result_size_bytes ?? null,
     ],
   );
   if (isTerminal(opts.to)) {

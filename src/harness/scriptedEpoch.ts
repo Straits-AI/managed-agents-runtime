@@ -9,6 +9,7 @@ import { getRun } from '../store/runs.js';
 import { spawnChildren } from '../scheduler/children.js';
 import { tokenBudgetExceeded } from './limits.js';
 import { MODEL_INVOCATION_LOCK_SEED } from '../core/locks.js';
+import { buildBoundedRunResult } from '../core/delegatedResults.js';
 
 /**
  * Deterministic no-model epoch used by tests and pre-credential milestones.
@@ -210,7 +211,8 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
         if (op.once && attempt.attempt_no > 1) break; // succeed on retry
         throw new Error(`scripted failure at step ${step}`);
 
-      case 'complete':
+      case 'complete': {
+        const scriptedResult = buildBoundedRunResult('scripted completion', {});
         await withTransaction(pool, async (tx) => {
           // Preserve the atomic VERIFYING -> COMPLETED scripted fast path while
           // taking the terminal lock before the first run-row lock.
@@ -229,14 +231,20 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
             to: 'COMPLETED',
             event: { type: 'RunCompleted', payload: { verification: 'scripted-pass' } },
             attemptId: attempt.id,
+            patch: {
+              result: scriptedResult.value,
+              result_size_bytes: scriptedResult.sizeBytes,
+            },
           });
         });
         return 'completed';
+      }
     }
     step += 1;
   }
 
   // Script ended without an explicit complete op.
+  const scriptedResult = buildBoundedRunResult('scripted completion', {});
   await withTransaction(pool, async (tx) => {
     await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1, $2))', [
       run.id,
@@ -253,6 +261,10 @@ export async function scriptedEpoch(ctx: EpochContext): Promise<EpochExitReason>
       to: 'COMPLETED',
       event: { type: 'RunCompleted' },
       attemptId: attempt.id,
+      patch: {
+        result: scriptedResult.value,
+        result_size_bytes: scriptedResult.sizeBytes,
+      },
     });
   });
   return 'completed';

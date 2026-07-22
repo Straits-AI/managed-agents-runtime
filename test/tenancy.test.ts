@@ -112,7 +112,7 @@ describe('multi-tenancy & auth', () => {
     expect((await app.inject({ method: 'GET', url: `/v1/runs/${runA}`, headers: bearer('op-token') })).statusCode).toBe(404);
 
     // Sub-resources are scoped the same way.
-    for (const sub of ['events', 'approvals', 'artifacts', 'usage', 'export']) {
+    for (const sub of ['events', 'approvals', 'artifacts', 'children', 'usage', 'export']) {
       const res = await app.inject({ method: 'GET', url: `/v1/runs/${runA}/${sub}`, headers: bearer(keyB) });
       expect(res.statusCode, `${sub} cross-tenant`).toBe(404);
     }

@@ -147,14 +147,17 @@ and pre-migration compatibility fixtures.
 
 ### MAR-P1-008 — bounded delegated results and lineage
 
-**Status:** open — [Issue #28](https://github.com/Straits-AI/managed-agents-runtime/issues/28)  
+**Status:** closed — [Issue #28](https://github.com/Straits-AI/managed-agents-runtime/issues/28)
 **Owner:** runtime
 
-Parent wake-up receives child ID, status, and goal, but not a bounded structured
-result, artifact/evidence references, usage, or a first-class lineage query.
+Parent wake-up and `GET /v1/runs/:id/children` now expose the same versioned,
+bounded child-result projection. It includes every replacement generation, the
+deterministically selected generation, terminal reason, token usage,
+artifact/evidence references, and the explicit isolated-workspace merge policy.
 
-**Closure:** define a bounded child-result contract; expose current/replaced child
-lineage and usage; test merge/conflict behavior without raw-event parsing.
+**Closure:** 64 KiB structured-result and eight-child fan-out bounds, one-successor
+lineage enforcement, first-class lineage projection, parent/API consumption
+without raw-event parsing, and success/failure/replacement/oversize/tenant tests.
 
 ### MAR-P1-009 — durable context and checkpoint evolution
 

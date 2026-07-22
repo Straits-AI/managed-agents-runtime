@@ -21,6 +21,13 @@ import { withTransaction } from '../db/tx.js';
 import { appendEvent, transitionRun } from '../core/transition.js';
 import { listEvents } from '../store/events.js';
 import { spawnChildren } from '../scheduler/children.js';
+import {
+  buildBoundedRunResult,
+  MAX_DELEGATED_ARTIFACT_REFS,
+  MAX_DELEGATED_CHILDREN,
+  MAX_DELEGATED_GOAL_BYTES,
+  type BoundedRunResult,
+} from '../core/delegatedResults.js';
 import { WORKSPACE_DIR } from './workspace.js';
 import { maybeCrash, type FaultPoint } from './faults.js';
 import { executeGovernedAction } from './governedAction.js';
@@ -31,7 +38,7 @@ export type ToolOutcome =
   | { kind: 'suspend_approval'; approvalId: string }
   | { kind: 'suspend_signal'; signalName: string }
   | { kind: 'suspend_children'; childRunIds: string[] }
-  | { kind: 'complete'; summary: string; artifacts: string[] };
+  | { kind: 'complete'; summary: string; artifacts: string[]; result: BoundedRunResult };
 
 export interface ToolContext {
   pool: Pool;
@@ -126,6 +133,7 @@ export const TOOL_DEFS: ToolDef[] = [
       properties: {
         subtasks: {
           type: 'array',
+          maxItems: MAX_DELEGATED_CHILDREN,
           description: 'the child goals to run in parallel',
           items: {
             type: 'object',
@@ -199,7 +207,16 @@ export const TOOL_DEFS: ToolDef[] = [
       type: 'object',
       properties: {
         summary: { type: 'string' },
-        artifacts: { type: 'array', items: { type: 'string' } },
+        artifacts: {
+          type: 'array',
+          maxItems: MAX_DELEGATED_ARTIFACT_REFS,
+          items: { type: 'string' },
+        },
+        result: {
+          type: 'object',
+          description: 'bounded structured completion data for callers and parent agents',
+          additionalProperties: true,
+        },
       },
       required: ['summary'],
     },
@@ -472,10 +489,23 @@ export async function dispatchTool(
 
     case 'run_complete': {
       const artifacts = Array.isArray(args.artifacts) ? args.artifacts.map(String) : [];
+      if (artifacts.length > MAX_DELEGATED_ARTIFACT_REFS) {
+        return {
+          kind: 'result',
+          content: `error: run completion supports at most ${MAX_DELEGATED_ARTIFACT_REFS} artifacts`,
+        };
+      }
+      let result: BoundedRunResult;
+      try {
+        result = buildBoundedRunResult(String(args.summary ?? ''), args.result);
+      } catch (err) {
+        return { kind: 'result', content: `error: ${(err as Error).message}` };
+      }
       return {
         kind: 'complete',
         summary: String(args.summary ?? ''),
         artifacts,
+        result,
       };
     }
 
@@ -610,6 +640,18 @@ async function delegate(ctx: ToolContext, args: Record<string, unknown>): Promis
     .filter((g): g is string => typeof g === 'string' && g.trim().length > 0);
   if (goals.length === 0) {
     return { kind: 'result', content: 'error: delegate requires at least one subtask with a goal' };
+  }
+  if (goals.length > MAX_DELEGATED_CHILDREN) {
+    return {
+      kind: 'result',
+      content: `error: delegate supports at most ${MAX_DELEGATED_CHILDREN} subtasks`,
+    };
+  }
+  if (goals.some((goal) => Buffer.byteLength(goal) > MAX_DELEGATED_GOAL_BYTES)) {
+    return {
+      kind: 'result',
+      content: `error: delegated goals must not exceed ${MAX_DELEGATED_GOAL_BYTES} encoded bytes`,
+    };
   }
 
   // Carve budget: split the parent's remaining tokens across children.

@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDb, type TestDb } from './helpers/db.js';
-import { createAgentDefinition, createAgentVersion } from '../src/store/agents.js';
-import { createRun } from '../src/store/runs.js';
 import { withTransaction } from '../src/db/tx.js';
 import { newId } from '../src/ids.js';
 import { createArtifact } from '../src/store/artifacts.js';
@@ -16,19 +14,24 @@ afterAll(async () => db.drop());
 
 describe('artifact schema migration', () => {
   it('upgrades an existing run without rewriting historical state', async () => {
-    const definition = await createAgentDefinition(db.pool, { name: 'pre-artifact-agent' });
-    const version = await withTransaction(db.pool, (tx) => createAgentVersion(tx, {
-      agentId: definition.id,
-      instructions: 'legacy run',
-      modelPolicy: { model: 'none' },
-    }));
-    const run = await withTransaction(db.pool, (tx) => createRun(tx, {
-      tenantId: 'default', agentVersionId: version.id, goal: 'survive migration',
-    }));
+    const run = { id: 'run_pre_artifact_migration' };
+    await db.pool.query(
+      `INSERT INTO agent_definitions (id, tenant_id, name)
+       VALUES ('agt_pre_artifact', 'default', 'pre-artifact-agent')`,
+    );
+    await db.pool.query(
+      `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+       VALUES ('av_pre_artifact', 'agt_pre_artifact', 1, 'legacy run', '{"model":"none"}')`,
+    );
+    await db.pool.query(
+      `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+       VALUES ($1, 'default', 'av_pre_artifact', 'survive migration', 'COMPLETED')`,
+      [run.id],
+    );
     const attemptId = newId('att');
     await db.pool.query(
       `INSERT INTO run_attempts (id, run_id, attempt_no, worker_id, state, lease_expires_at)
-       VALUES ($1, $2, 1, 'migration-worker', 'ACTIVE', now() + interval '1 minute')`,
+       VALUES ($1, $2, 1, 'migration-worker', 'EXITED', now() + interval '1 minute')`,
       [attemptId, run.id],
     );
     const before = await db.pool.query('SELECT status, last_event_seq FROM runs WHERE id = $1', [run.id]);

@@ -9,6 +9,11 @@ import {
   lockRunAdmissionTenantRow,
   RunAdmissionRejectedError,
 } from '../store/admissions.js';
+import { childLineageProjection } from '../store/childLineage.js';
+import {
+  MAX_DELEGATED_CHILDREN,
+  MAX_DELEGATED_GOAL_BYTES,
+} from '../core/delegatedResults.js';
 
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED'];
 
@@ -36,6 +41,12 @@ export async function spawnChildren(
   tx: Tx,
   input: { parentRunId: string; attemptId: string; children: ChildSpec[] },
 ): Promise<string[]> {
+  if (input.children.length < 1 || input.children.length > MAX_DELEGATED_CHILDREN) {
+    throw new Error(`delegation requires 1-${MAX_DELEGATED_CHILDREN} children`);
+  }
+  if (input.children.some((child) => Buffer.byteLength(child.goal) > MAX_DELEGATED_GOAL_BYTES)) {
+    throw new Error(`delegated goals must not exceed ${MAX_DELEGATED_GOAL_BYTES} encoded bytes`);
+  }
   const { rows: ownershipRows } = await tx.query<{ tenant_id: string }>(
     'SELECT tenant_id FROM runs WHERE id = $1',
     [input.parentRunId],
@@ -260,13 +271,15 @@ export async function wakeReadyParents(
       }
 
       // Every current-generation child is resolved and none is replaceable.
+      const lineage = await childLineageProjection(tx, id, parentTenantId);
+      if (!lineage) throw new Error(`parent ${id} disappeared while resolving children`);
       await transitionRun(tx, id, {
         expectFrom: ['WAITING_CHILDREN'],
         to: 'QUEUED',
         event: {
           type: 'ChildrenResolved',
           payload: {
-            children: active.map((k) => ({ id: k.id, status: k.status, goal: k.goal })),
+            children: lineage.selected,
           },
         },
         patch: { current_attempt_id: null },
