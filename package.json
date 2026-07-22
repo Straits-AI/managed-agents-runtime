@@ -16,6 +16,8 @@
     "bench:survival": "tsx bench/survival.ts",
     "release:gate": "tsx scripts/release-gate.ts",
     "container:smoke": "tsx scripts/smoke-container.ts",
+    "quickstart:smoke": "tsx scripts/smoke-quickstart.ts",
+    "docs:check": "tsx scripts/check-doc-links.ts",
     "container:evidence": "tsx scripts/write-container-evidence.ts",
     "byteplus:sandbox:provision": "tsx scripts/provision-sandbox-application.ts",
     "byteplus:sandbox:conformance": "tsx scripts/conformance-runtime-sandbox.ts",

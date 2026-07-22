@@ -1,6 +1,7 @@
 # Managed Agents Runtime
 
-A durable, serverless execution kernel for long-running agents on BytePlus —
+A durable, provider-neutral execution kernel for long-running agents, with a
+release-current BytePlus adapter —
 specified in [`memo.md`](./memo.md) and built out through the full roadmap
 (durable kernel, Phase 2 enterprise capabilities, Phase 3 subagents, Phase 5
 semantic operations, productionization, and the deferral features). An agent run
@@ -14,9 +15,35 @@ actions.
 > [versioned provider-conformance matrix](./docs/BYTEPLUS-PROVIDER-CONFORMANCE.md).
 > Historical demonstrations are not release-current verification.
 
-📘 **New here? Start with the [Usage Guide](./docs/GUIDE.md)** — how to run it,
-drive agents through the API, multi-tenancy, credentials, streaming/Kafka, and
-best practices. Cost is in [docs/COST.md](./docs/COST.md).
+📘 **New here? Complete the
+[first durable run](./docs/tutorials/01-first-durable-run.md).** It needs only
+Docker and no BytePlus credentials. The [Usage Guide](./docs/GUIDE.md) is the
+complete API and operations reference; cost is in
+[docs/COST.md](./docs/COST.md).
+
+## Choose your path
+
+| Goal | Start here |
+| --- | --- |
+| Complete a run without local Node.js or cloud credentials | [Tutorials](./docs/tutorials/README.md) → [first durable run](./docs/tutorials/01-first-durable-run.md) |
+| Develop or test from source | [Getting started](#getting-started-no-byteplus-credentials-needed) |
+| Deploy the controlled alpha | [Deployment and rollback runbook](./docs/CONTROLLED-ALPHA-DEPLOYMENT.md) |
+| Integrate a product such as Kertas | [Kertas runtime contract](./docs/KERTAS-RUNTIME-CONTRACT.md) |
+
+The public controlled-alpha image is `linux/amd64` and anonymously pullable at:
+
+```text
+ghcr.io/straits-ai/managed-agents-runtime@sha256:07dcb446d811fa51fb30a7746f55ed72becbbb8b5ad41dfafc6ec8cff9af2440
+```
+
+Release: [`v0.1.0-alpha.2`](https://github.com/Straits-AI/managed-agents-runtime/releases/tag/v0.1.0-alpha.2).
+Use the tag for discovery and the digest above for a reproducible deployment.
+
+This repository is the managed execution plane. It owns Managed Sessions, Runs,
+Attempts, leases, recovery, events, approvals, artifacts, and governed side
+effects. **Kertas owns Projects**, interactive Workspaces, knowledge provenance,
+Outcome Contracts, Releases, Deployments, Routines, connectors, and product UX.
+The systems integrate only through the runtime's public API and event protocol.
 
 Architecture and release boundaries:
 
@@ -28,7 +55,8 @@ Architecture and release boundaries:
 
 > **Release status:** the automated
 > [controlled multi-tenant alpha gate](./docs/CONTROLLED-ALPHA-RELEASE-GATE.md)
-> passes for this source revision. It checks the full suite plus named P0
+> passes for this source revision, and `v0.1.0-alpha.2` is publicly available as
+> a controlled alpha. The gate checks the full suite plus named P0
 > configuration, tenancy, admission, knowledge, HTTP/MCP, credential,
 > concurrency, and crash-recovery assertions, and retains commit-bound JSON
 > evidence in CI. This is a controlled-alpha claim only: the versioned provider
