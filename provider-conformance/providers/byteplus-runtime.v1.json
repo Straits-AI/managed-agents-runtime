@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "provider-manifest/v1",
+  "providerId": "byteplus",
+  "profileId": "managed-runtime",
+  "displayName": "BytePlus managed runtime capabilities",
+  "providerClass": "cloud",
+  "releaseVersion": "0.1.0-alpha.1",
+  "capabilities": [
+    {
+      "contract": "model.chat/v1",
+      "status": "required",
+      "implementation": "ModelArkProvider",
+      "assurance": {
+        "level": "live",
+        "tests": ["test/modelArkConformance.test.ts", "test/modelArkProvider.test.ts", "test/modelUsage.test.ts"],
+        "evidencePath": "provider-conformance/evidence/modelark-2026-07-22.json",
+        "evidenceSha256": "0dbc029ac3c0625ea55aec70c335def2838941d509bad2c96a15efbaddfc1423"
+      },
+      "failureBoundary": "The retained live proof covers one activated preset-model chat invoked with a 32-token request ceiling; the provider reported 48 output tokens, so the claim is request forwarding rather than provider-side ceiling enforcement.",
+      "limitations": ["provider usage may exceed the requested max_tokens value", "no image/video claim", "no throughput or regional failover claim"]
+    },
+    {
+      "contract": "sandbox.workspace/v1",
+      "status": "required",
+      "implementation": "VefaasSandboxProvider private WebShell transport",
+      "assurance": {
+        "level": "live",
+        "tests": ["test/bpPrivateSandboxConformance.test.ts", "test/sandboxConformance.test.ts"],
+        "evidencePath": "provider-conformance/evidence/sandbox-runtime-2026-07-22.json",
+        "evidenceSha256": "c66ad648444b2bcdd68e8a1320a18bb48c15b780374fb26383769ec8f2472bb3"
+      },
+      "failureBoundary": "The private CPU sandbox is bounded to the retained lifecycle and fixed file/command limits; Terminating is not terminal cleanup.",
+      "limitations": ["no APIG/public route", "no VPC, mounts, GPU, or warm-capacity claim", "10-minute live-proof lifetime"]
+    },
+    {
+      "contract": "object.read/v1",
+      "status": "required",
+      "implementation": "TosObjectStore",
+      "assurance": {
+        "level": "live",
+        "tests": ["test/tosObjectStore.test.ts", "test/tosConformance.test.ts"],
+        "evidencePath": "provider-conformance/evidence/tos-2026-07-19.json",
+        "evidenceSha256": "fc25fc4c45567fcfc20deb1862b15b5fc7feb9e9ec2b56abb16f9f1feffb300c"
+      },
+      "failureBoundary": "GET/HEAD are bounded; absence is 404, while other provider failures reject with sanitized metadata.",
+      "limitations": ["no versioned-read or multipart claim"]
+    },
+    {
+      "contract": "object.write/v1",
+      "status": "required",
+      "implementation": "TosObjectStore",
+      "assurance": {
+        "level": "live",
+        "tests": ["test/tosObjectStore.test.ts", "test/tosConformance.test.ts"],
+        "evidencePath": "provider-conformance/evidence/tos-2026-07-19.json",
+        "evidenceSha256": "fc25fc4c45567fcfc20deb1862b15b5fc7feb9e9ec2b56abb16f9f1feffb300c"
+      },
+      "failureBoundary": "PUT uses bounded attempts and payload size; bucket policy, versioning, and conditional writes are outside the claim.",
+      "limitations": ["no multipart or conditional-put claim"]
+    },
+    {
+      "contract": "object.presign/v1",
+      "status": "required",
+      "implementation": "TosObjectStore TOS4 presigning",
+      "assurance": {
+        "level": "live",
+        "tests": ["test/tosObjectStore.test.ts", "test/signer.test.ts", "test/tosConformance.test.ts"],
+        "evidencePath": "provider-conformance/evidence/tos-2026-07-19.json",
+        "evidenceSha256": "fc25fc4c45567fcfc20deb1862b15b5fc7feb9e9ec2b56abb16f9f1feffb300c"
+      },
+      "failureBoundary": "Presigned URLs are bearer credentials, cannot be revoked by the runtime, and must never enter checkpoints or evidence.",
+      "limitations": ["no per-URL revocation"]
+    },
+    {
+      "contract": "event.publish/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "BytePlus Kafka has no release-current live cluster/API evidence and is unavailable in this profile.",
+      "limitations": ["use the local ledger/API or another attested event provider"]
+    },
+    {
+      "contract": "credential.resolve/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "BytePlus KMS has no release-current live key/API evidence and must fail deployment selection.",
+      "limitations": ["use LocalCipher only where operator key custody is acceptable"]
+    },
+    {
+      "contract": "knowledge.retrieve/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "AgentKit Knowledge lacks a current shared-deployment tenant-isolation attestation.",
+      "limitations": ["normal shared workers fail closed"]
+    },
+    {
+      "contract": "memory.semantic/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "AgentKit Memory has no release-current adapter/version record.",
+      "limitations": ["historical demonstrations are not a current claim"]
+    },
+    {
+      "contract": "tool.skill.resolve/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "No BytePlus-hosted Skills provider is live-attested for this release.",
+      "limitations": ["local registry semantics are a separate provider profile"]
+    },
+    {
+      "contract": "tool.mcp.invoke/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "No BytePlus-hosted MCP gateway is live-attested for this release.",
+      "limitations": ["local registry semantics are a separate provider profile"]
+    }
+  ]
+}

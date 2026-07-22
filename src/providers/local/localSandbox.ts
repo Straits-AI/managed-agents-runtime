@@ -1,9 +1,11 @@
 import { exec } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import type { ExecResult, SandboxHandle, SandboxProvider } from '../types.js';
 import { WORKSPACE_DIR } from '../../harness/workspace.js';
+
+const MAX_TEXT_FILE_BYTES = 100_000;
 
 /**
  * Local child-process sandbox for the no-BytePlus stack (memo §21 portability).
@@ -17,6 +19,7 @@ import { WORKSPACE_DIR } from '../../harness/workspace.js';
  */
 export class LocalSandboxProvider implements SandboxProvider {
   private readonly roots = new Map<string, string>();
+  private readonly terminated = new Set<string>();
 
   async create(req: {
     runId: string;
@@ -31,6 +34,7 @@ export class LocalSandboxProvider implements SandboxProvider {
     mkdirSync(join(root, 'tmp'), { recursive: true });
     const sandboxId = `local-${root.split('-').pop()}`;
     this.roots.set(sandboxId, root);
+    this.terminated.delete(sandboxId);
     return { sandboxId, baseUrl: 'local' };
   }
 
@@ -65,21 +69,31 @@ export class LocalSandboxProvider implements SandboxProvider {
   }
 
   async writeFile(handle: SandboxHandle, path: string, content: string): Promise<void> {
+    if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_BYTES) {
+      throw new Error('local sandbox file exceeds 100000-byte limit');
+    }
     const p = this.mapText(handle, path);
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, content);
   }
   async readFile(handle: SandboxHandle, path: string): Promise<string> {
-    return readFileSync(this.mapText(handle, path), 'utf8');
+    const mapped = this.mapText(handle, path);
+    if (statSync(mapped).size > MAX_TEXT_FILE_BYTES) {
+      throw new Error('local sandbox file exceeds 100000-byte limit');
+    }
+    return readFileSync(mapped, 'utf8');
   }
-  async describe(): Promise<{ status: string }> {
-    return { status: 'Ready' };
+  async describe(handle: SandboxHandle): Promise<{ status: string }> {
+    if (this.roots.has(handle.sandboxId)) return { status: 'Ready' };
+    if (this.terminated.has(handle.sandboxId)) return { status: 'Killed' };
+    return { status: 'NotFound' };
   }
   async terminate(handle: SandboxHandle): Promise<void> {
     const root = this.roots.get(handle.sandboxId);
     if (root) {
       rmSync(root, { recursive: true, force: true });
       this.roots.delete(handle.sandboxId);
+      this.terminated.add(handle.sandboxId);
     }
   }
 }

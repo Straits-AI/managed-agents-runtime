@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
@@ -17,7 +17,13 @@ export class FsObjectStore implements ObjectStore {
   private port = 0;
   private readonly tokens = new Map<string, { key: string; op: 'get' | 'put'; exp: number }>();
 
-  constructor(private readonly baseDir: string) {
+  constructor(
+    private readonly baseDir: string,
+    private readonly maxObjectBytes = 512 * 1024 * 1024,
+  ) {
+    if (!Number.isSafeInteger(maxObjectBytes) || maxObjectBytes < 1) {
+      throw new Error('FsObjectStore maxObjectBytes is invalid');
+    }
     mkdirSync(baseDir, { recursive: true });
     this.server = createServer((req, res) => this.handle(req, res));
   }
@@ -38,19 +44,25 @@ export class FsObjectStore implements ObjectStore {
   }
 
   async put(key: string, body: Buffer): Promise<{ etag: string | null }> {
+    this.assertSize(body.length);
     const p = this.path(key);
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, body);
     return { etag: createHash('md5').update(body).digest('hex') };
   }
   async get(key: string): Promise<Buffer> {
-    return readFileSync(this.path(key));
+    const path = this.path(key);
+    this.assertSize(statSync(path).size);
+    return readFileSync(path);
   }
   async exists(key: string): Promise<boolean> {
     return existsSync(this.path(key));
   }
 
   private presign(key: string, op: 'get' | 'put', ttlSec: number): string {
+    if (!Number.isSafeInteger(ttlSec) || ttlSec < 1 || ttlSec > 86_400) {
+      throw new Error('FsObjectStore presign TTL is invalid');
+    }
     const token = randomBytes(16).toString('hex');
     this.tokens.set(token, { key, op, exp: Date.now() + ttlSec * 1000 });
     return `http://127.0.0.1:${this.port}/o?token=${token}`;
@@ -71,17 +83,36 @@ export class FsObjectStore implements ObjectStore {
       return;
     }
     if (req.method === 'GET' && entry.op === 'get') {
-      try {
-        res.writeHead(200).end(readFileSync(this.path(entry.key)));
-      } catch {
+      const path = this.path(entry.key);
+      if (!existsSync(path)) {
         res.writeHead(404).end('not found');
+        return;
       }
+      if (statSync(path).size > this.maxObjectBytes) {
+        res.writeHead(413).end('object too large');
+        return;
+      }
+      res.writeHead(200).end(readFileSync(path));
       return;
     }
     if (req.method === 'PUT' && entry.op === 'put') {
       const chunks: Buffer[] = [];
-      req.on('data', (c: Buffer) => chunks.push(c));
+      let total = 0;
+      let tooLarge = false;
+      req.on('data', (c: Buffer) => {
+        total += c.length;
+        if (total > this.maxObjectBytes) {
+          tooLarge = true;
+          chunks.length = 0;
+          return;
+        }
+        if (!tooLarge) chunks.push(c);
+      });
       req.on('end', () => {
+        if (tooLarge) {
+          res.writeHead(413).end('object too large');
+          return;
+        }
         const p = this.path(entry.key);
         mkdirSync(dirname(p), { recursive: true });
         writeFileSync(p, Buffer.concat(chunks));
@@ -90,5 +121,11 @@ export class FsObjectStore implements ObjectStore {
       return;
     }
     res.writeHead(405).end('method not allowed');
+  }
+
+  private assertSize(bytes: number): void {
+    if (!Number.isSafeInteger(bytes) || bytes > this.maxObjectBytes) {
+      throw new Error('FsObjectStore object exceeds configured byte limit');
+    }
   }
 }

@@ -204,6 +204,11 @@ const dependencyAudit = runStep(
   process.platform === 'win32' ? 'npm.cmd' : 'npm',
   ['audit', '--omit=dev', '--audit-level=high', '--json'],
 );
+const providerPortability = runStep(
+  'provider-portability',
+  join(root, 'node_modules', '.bin', 'tsx'),
+  ['scripts/check-provider-portability.ts'],
+);
 const typecheck = runStep('typecheck', join(root, 'node_modules', '.bin', 'tsc'), ['--noEmit']);
 const vitestPath = join(evidenceDir, 'vitest.json');
 const vitestRawPath = join(
@@ -240,6 +245,7 @@ try {
     `could not evaluate dependency audit evidence: ${error instanceof Error ? error.message : 'unknown error'}`,
   );
 }
+if (providerPortability.exitCode !== 0) errors.push('provider portability failed');
 if (typecheck.exitCode !== 0) errors.push('typecheck failed');
 if (tests.exitCode !== 0) errors.push('Vitest failed');
 if (!existsSync(vitestRawPath)) {
@@ -281,7 +287,7 @@ const summary = {
     architecture: process.arch,
     databaseTarget: process.env.TEST_DATABASE_URL ? 'TEST_DATABASE_URL' : 'local-default',
   },
-  steps: [dependencyAudit, typecheck, tests],
+  steps: [dependencyAudit, providerPortability, typecheck, tests],
   dependencyEvaluation,
   evaluation,
   providerSurfaces: manifest.providerSurfaces,

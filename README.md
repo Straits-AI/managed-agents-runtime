@@ -22,6 +22,7 @@ Architecture and release boundaries:
 
 - [Kertas product boundary](./docs/KERTAS-PRODUCT-BOUNDARY.md)
 - [Kertas ↔ runtime contract](./docs/KERTAS-RUNTIME-CONTRACT.md)
+- [Provider portability contract](./docs/PROVIDER-PORTABILITY.md)
 - [Engineering risk register](./docs/ENGINEERING-RISK-REGISTER.md)
 - [Controlled-alpha deployment and rollback](./docs/CONTROLLED-ALPHA-DEPLOYMENT.md)
 
@@ -82,6 +83,17 @@ POST /v1/runs ──▶ Fastify API ──▶ Postgres (runs, gapless run_events
   **local, no-BytePlus** ones (`src/providers/local/`): a child-process
   `LocalSandbox` + filesystem `ObjectStore` let the whole runtime execute
   without any cloud dependency (memo §21 portability).
+- **Provider capability selection** (`provider-conformance/`,
+  `deploy/provider-profiles/`): versioned model, sandbox, object, event,
+  credential, knowledge, memory, Skill, and MCP contracts declare required,
+  optional, and unsupported semantics. Kertas supplies capabilities and minimum
+  assurance—not a provider brand—and stale or unsatisfied bindings fail closed.
+  Authenticated clients discover and resolve the same checked data through
+  `GET /v1/provider-capabilities` and
+  `POST /v1/provider-capabilities/resolve`.
+  The release-current second-cloud proof is intentionally limited to anonymous,
+  read-only AWS S3; see the
+  [portability boundary](./docs/PROVIDER-PORTABILITY.md).
 - **Portability** (`src/export/runBundle.ts`): a run exports as a
   self-contained bundle — gapless events, receipts, grants, and the workspace
   snapshot — so customer execution state is owned and movable across
@@ -320,7 +332,7 @@ changes; consult the provider conformance matrix for the current release gate.
 | Phase 2 — AgentKit Memory binding | ⚠️ unavailable as a release-current BytePlus claim. A historical write/extract/recall demonstration exists, but no current adapter/version record exists for this release. |
 | Phase 2 — Knowledge / Skills / MCP | ✅ Postgres knowledge, registry Skills, and policy-classified registry MCP are implemented. The AgentKit Knowledge adapter is tenant-bound but remains fail-closed in shared deployments until live conformance is attested; AgentKit Skills/MCP remain adapter seams, not live-verified integrations. |
 | Phase 3 — managed subagents | ✅ `delegate` tool → parallel child runs, `WAITING_CHILDREN` suspend + wake, parent→child budget carving, copy-on-write isolated workspaces. |
-| Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; run-bundle export (`GET /v1/runs/{id}/export`). |
+| Phase 4 — private deployment & portability | ✅ no-BytePlus local stack (`LocalSandbox` + FS `ObjectStore`) runs the full durable workspace cycle; capability-level manifests distinguish supported subsets across local, BytePlus, and read-only AWS S3; run-bundle export (`GET /v1/runs/{id}/export`). This is subset portability, not semantic equivalence across clouds. |
 | Phase 5A — semantic agent operations | ✅ semantic supervisor: loop / stagnation / context-loss / budget-low detection → corrective note → adaptive model routing → definitive terminate (no infinite spins); crash-safe (checkpointed) and fully auditable via events. Unit-tested + live-epoch integration test on the local stack. |
 | Phase 5B — subagent replacement | ✅ a failed delegated child is replaced with a fresh attempt for the same subtask (durable lineage, bounded by `MAX_CHILD_REPLACEMENTS`) before the parent resumes. |
 | Controlled-alpha operations | ✅ multi-tenant auth, atomic per-tenant admission, cost attribution + `/usage`, health/readiness probes, structured logging, per-tenant rate limiting, graceful-shutdown timeouts, and an admin CLI for tenants/keys. Public-beta and production gates remain open. Cost reference in [`docs/COST.md`](./docs/COST.md). |

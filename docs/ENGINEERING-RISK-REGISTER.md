@@ -180,16 +180,22 @@ exact merge commit `8a347cba8d7b21d5ce064ff0f095066272df61ac` passed the retaine
 
 ### MAR-P1-010 — actual portability boundary
 
-**Status:** open — [Issue #30](https://github.com/Straits-AI/managed-agents-runtime/issues/30)  
+**Status:** closure candidate — [Issue #30](https://github.com/Straits-AI/managed-agents-runtime/issues/30)
 **Owner:** runtime/provider adapters
 
-Local and BytePlus adapters demonstrate useful seams, but there is no unified
-provider conformance suite or second materially different cloud stack passing a
-declared supported subset.
+The candidate publishes 11 versioned capability contracts, complete local and
+BytePlus manifests, and a deliberately narrow AWS anonymous S3 read profile.
+Required, optional, and unsupported semantics are machine-checked; live evidence
+is digest-bound; object read/write/presign affinity prevents dishonest mixed
+provider selection; and Kertas deployment profiles resolve from capability plus
+minimum assurance rather than brand-specific inputs. The deployed authenticated
+API exposes the same discovery and resolution contract, including selected
+failure boundaries and limitations.
 
 **Closure:** publish capability-level model/sandbox/object/event/credential/
 knowledge/memory/tool contracts; test local plus at least two non-identical
-providers; declare unsupported semantics in deployment manifests.
+providers; declare unsupported semantics in deployment manifests. Closure still
+requires independent review, merged CI, and the exact post-merge main gate.
 
 ## P2 backlog
 

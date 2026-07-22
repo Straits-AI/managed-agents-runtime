@@ -30,6 +30,8 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
 
 COPY --from=build /build/dist ./dist
 COPY migrations ./migrations
+COPY provider-conformance ./provider-conformance
+COPY deploy/provider-profiles ./deploy/provider-profiles
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/managed-agents-runtime
 
 USER node

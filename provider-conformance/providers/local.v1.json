@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "provider-manifest/v1",
+  "providerId": "local",
+  "profileId": "reference",
+  "displayName": "Local reference providers",
+  "providerClass": "local",
+  "releaseVersion": "0.1.0-alpha.1",
+  "capabilities": [
+    {
+      "contract": "model.chat/v1",
+      "status": "unsupported",
+      "assurance": { "level": "none", "tests": [] },
+      "failureBoundary": "The local reference stack has no production model adapter; real epochs must bind a separate model capability.",
+      "limitations": ["scripted epochs only without a separately selected model provider"]
+    },
+    {
+      "contract": "sandbox.workspace/v1",
+      "status": "required",
+      "implementation": "LocalSandboxProvider",
+      "assurance": { "level": "integration", "tests": ["test/localStack.test.ts", "test/sandboxConformance.test.ts"] },
+      "failureBoundary": "Commands execute as host child processes; this is a compatibility reference, not an isolation boundary.",
+      "limitations": ["no untrusted or shared execution", "no CPU or memory enforcement"]
+    },
+    {
+      "contract": "object.read/v1",
+      "status": "required",
+      "implementation": "FsObjectStore",
+      "assurance": { "level": "integration", "tests": ["test/localStack.test.ts", "test/export.test.ts"] },
+      "failureBoundary": "Objects are process-local filesystem data and disappear with the configured directory.",
+      "limitations": ["single-host durability", "no provider replication"]
+    },
+    {
+      "contract": "object.write/v1",
+      "status": "required",
+      "implementation": "FsObjectStore",
+      "assurance": { "level": "integration", "tests": ["test/localStack.test.ts", "test/artifacts.test.ts"] },
+      "failureBoundary": "Writes use the local filesystem and do not provide remote conditional-put semantics.",
+      "limitations": ["MD5 ETag is a local integrity marker only"]
+    },
+    {
+      "contract": "object.presign/v1",
+      "status": "required",
+      "implementation": "FsObjectStore loopback transport",
+      "assurance": { "level": "integration", "tests": ["test/localStack.test.ts"] },
+      "failureBoundary": "URLs are ephemeral process-memory tokens reachable only through the loopback server.",
+      "limitations": ["tokens are lost on process restart", "not remotely reachable"]
+    },
+    {
+      "contract": "event.publish/v1",
+      "status": "optional",
+      "implementation": "InProcessPublisher",
+      "assurance": { "level": "integration", "tests": ["test/outbox.test.ts"] },
+      "failureBoundary": "Publication drains the outbox without external delivery; consumers must read the durable API ledger.",
+      "limitations": ["no external subscriber delivery"]
+    },
+    {
+      "contract": "credential.resolve/v1",
+      "status": "optional",
+      "implementation": "CredentialBroker with LocalCipher",
+      "assurance": { "level": "integration", "tests": ["test/credentials.test.ts", "test/governedAction.test.ts"] },
+      "failureBoundary": "Key custody is an operator-supplied local AES key rather than managed HSM/KMS custody.",
+      "limitations": ["operator-managed encryption key"]
+    },
+    {
+      "contract": "knowledge.retrieve/v1",
+      "status": "optional",
+      "implementation": "PgKnowledgeProvider",
+      "assurance": { "level": "integration", "tests": ["test/knowledge.test.ts"] },
+      "failureBoundary": "Evidence availability and ranking depend on the deployment PostgreSQL instance.",
+      "limitations": ["lexical PostgreSQL reference implementation"]
+    },
+    {
+      "contract": "memory.semantic/v1",
+      "status": "optional",
+      "implementation": "PgMemoryProvider",
+      "assurance": { "level": "integration", "tests": ["test/memory.test.ts"] },
+      "failureBoundary": "Memory availability shares the runtime PostgreSQL failure domain.",
+      "limitations": ["PostgreSQL ranking reference implementation"]
+    },
+    {
+      "contract": "tool.skill.resolve/v1",
+      "status": "optional",
+      "implementation": "RegistrySkillProvider",
+      "assurance": { "level": "integration", "tests": ["test/skills.test.ts"] },
+      "failureBoundary": "Only skills registered in the current process are resolvable.",
+      "limitations": ["no remote registry or cross-process distribution"]
+    },
+    {
+      "contract": "tool.mcp.invoke/v1",
+      "status": "optional",
+      "implementation": "RegistryMcpProvider",
+      "assurance": { "level": "integration", "tests": ["test/mcp.test.ts"] },
+      "failureBoundary": "Only in-process registered toolsets are reachable; provider recovery policy remains mandatory.",
+      "limitations": ["no hosted MCP gateway"]
+    }
+  ]
+}

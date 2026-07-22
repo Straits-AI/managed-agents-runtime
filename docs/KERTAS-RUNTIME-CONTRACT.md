@@ -118,6 +118,7 @@ contract.
 | Artifact output | First-class content-addressed Artifact resources implemented | Versioned Kertas ingestion through the public contract |
 | Child delegation | Bounded results, artifact/evidence refs, usage, replacement, and queryable lineage implemented | Versioned session-scoped projection through the public contract |
 | Public schemas/client fixtures | TypeScript/API behavior exists without a published machine-readable contract | Discoverable schemas, compatibility fixtures, and Kertas SDK conformance |
+| Provider selection | Versioned capability catalog, local/BytePlus/AWS subset manifests, and checked capability-selected deployment profiles | Kertas supplies capability and assurance requirements; provider identity remains a resolved runtime binding |
 
 Normative requirements below describe the target unless the table marks them as
 implemented. They do not retroactively claim a current public endpoint.
@@ -340,6 +341,16 @@ the same mutation MUST NOT be independently committed by both systems.
 - A server MUST publish supported versions and deprecation dates.
 - Kertas and runtime releases MUST declare the contract versions they require and
   provide.
+
+Provider choice follows the versioned
+[provider portability contract](./PROVIDER-PORTABILITY.md). Kertas MUST express
+required capability IDs and minimum assurance. It MUST NOT make BytePlus, AWS,
+or another provider-specific configuration field part of the Kertas/runtime
+public contract. The runtime returns the resolved provider bindings and rejects
+an unsatisfied requirement or affinity group. Kertas uses only the authenticated
+`GET /v1/provider-capabilities` discovery and
+`POST /v1/provider-capabilities/resolve` selection endpoints; it does not read
+provider manifests or runtime configuration files directly.
 
 ## Security invariants
 
