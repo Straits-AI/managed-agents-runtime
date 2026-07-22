@@ -171,7 +171,7 @@ private operator inventory rather than committing them to this repository:
 | Setting | How to obtain |
 | --- | --- |
 | `BYTEPLUS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN` | `python3 scripts/refresh-creds.py` syncs STS creds from `bp login` (~15 min TTL; rerun before a cloud batch) |
-| `TOS_BUCKET` | `scripts/provision-tos.ts` (idempotent create + roundtrip verify) |
+| `TOS_BUCKET` | `scripts/provision-tos.ts` (idempotent create plus direct/presigned conformance, bounded failure-path evidence, verified object cleanup, and a versioned provenance record) |
 | `ARK_API_KEY` / `ARK_MODEL` | activate a model in the console, then `scripts/get-ark-key.py --endpoint-id ep-…` (key + endpoint id → `.env`) |
 | `VEFAAS_SANDBOX_FUNCTION_ID` | sandbox application created in the console (only surface that sets `FunctionType: sandbox`); instances are then fully programmatic |
 | `SANDBOX_GATEWAY_DOMAIN` / `SANDBOX_GATEWAY_API_KEY` | APIG serverless gateway + Key Auth route fronting the sandbox; key registered via `bp apig CreateConsumerCredential` |
@@ -186,9 +186,17 @@ Then verify every surface:
 
 ```bash
 npm run preflight       # control-plane PASS/FAIL per provider
+node --env-file=.env --import tsx scripts/provision-tos.ts \
+  --evidence-file /tmp/tos-conformance.json               # TOS live evidence
 node --env-file=.env --import tsx scripts/smoke-ark.ts       # ModelArk chat (≤32 tokens)
 node --env-file=.env --import tsx scripts/smoke-sandbox.ts   # sandbox create→exec→file r/w→terminate via gateway
 ```
+
+Interactive `bp login` belongs in the operator's normal host browser. Containers
+may run these non-interactive checks only after the resulting credentials have
+been granted to them explicitly. The current claim/evidence boundary for each
+adapter is tracked in
+[`docs/BYTEPLUS-PROVIDER-CONFORMANCE.md`](./docs/BYTEPLUS-PROVIDER-CONFORMANCE.md).
 
 Run the platform:
 
@@ -246,6 +254,10 @@ verification → COMPLETED with a gapless event history and TOS-verifiable
 artifacts. Exit code 0 = Phase 1 accepted.
 
 ## Status
+
+The dated live runs below are historical demonstrations. They do not substitute
+for current adapter-level conformance after source, tool, API, or provider
+changes; consult the provider conformance matrix for the current release gate.
 
 | Milestone | State |
 | --- | --- |

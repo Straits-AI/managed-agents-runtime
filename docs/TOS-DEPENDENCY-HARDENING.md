@@ -31,11 +31,30 @@ The replacement additionally enforces:
 - bounded 64 KiB error bodies and configurable 512 MiB default object reads; and
 - structured status, TOS code, and request-ID errors.
 
-The existing live preflight remains the authoritative deployment check for
+The live conformance runner is the authoritative deployment check for
 put/get/presign behavior. `scripts/provision-tos.ts` exercises bucket
-head/create plus put/get/delete without reintroducing the SDK. Unit fixtures
-prove protocol compatibility but are not represented as current live-provider
-evidence.
+head/create, direct put/get/head, presigned GET/PUT, a post-delete 404, and
+verified cleanup of both disposable objects without reintroducing the SDK. It
+emits a versioned record containing the exact source commit, adapter and package
+version, runtime and protocol version, region, retrieval time, capabilities,
+explicit untested/unsupported semantics, credential mode and source, bounded
+provider error metadata, and redaction/cleanup assertions. It never includes
+credential values, payload bytes, or presigned URLs.
+
+Write evidence to a new operator-controlled file with:
+
+```bash
+node --env-file=.env --import tsx scripts/provision-tos.ts \
+  --evidence-file /secure/path/tos-conformance.json
+```
+
+The destination is created with mode `0600` and is never overwritten. A run is
+not current live-provider evidence until this command succeeds against the
+target deployment and its record is retained with the release evidence. Unit
+fixtures prove protocol compatibility but are not represented as current
+live-provider evidence. Source runs require a clean Git worktree; packaged
+builds set `CONFORMANCE_SOURCE_COMMIT` to their exact full revision. See
+[`BYTEPLUS-PROVIDER-CONFORMANCE.md`](./BYTEPLUS-PROVIDER-CONFORMANCE.md).
 
 ## Dependency release policy
 
