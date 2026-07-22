@@ -1,0 +1,127 @@
+{
+  "apiVersion": "kertas.runtime/contracts/v1",
+  "id": "kertas.runtime/v1alpha1",
+  "status": "planned",
+  "semantics": {
+    "topLevelResource": "ManagedSession",
+    "contractCompleteness": "partial",
+    "projectCorrelationIsAuthorization": false,
+    "runCompletionImpliesKertasOutcome": false,
+    "runCompletionImpliesKertasRelease": false
+  },
+  "routes": {
+    "createSession": "POST /v1alpha1/sessions",
+    "getSession": "GET /v1alpha1/sessions/{sessionId}",
+    "listSessionRuns": "GET /v1alpha1/sessions/{sessionId}/runs",
+    "cancelSession": "POST /v1alpha1/sessions/{sessionId}/cancel"
+  },
+  "schemas": {
+    "sessionCreate": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/kertas.runtime/v1alpha1/session-create",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentVersionId", "objective"],
+      "properties": {
+        "agentVersionId": { "type": "string", "minLength": 1 },
+        "objective": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "correlationRef": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "policy": { "type": "object", "additionalProperties": true },
+        "credentialGrantRefs": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        },
+        "start": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["goal"],
+          "properties": {
+            "goal": { "type": "string", "minLength": 1, "maxLength": 16384 },
+            "input": { "type": "object", "additionalProperties": true },
+            "maxSteps": { "type": "integer", "minimum": 1 },
+            "tokenBudget": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "sessionResource": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/kertas.runtime/v1alpha1/session-resource",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion", "kind", "id", "tenantId", "version", "state",
+        "agentVersionId", "objective", "correlationRef", "policy",
+        "credentialGrantRefs", "currentTopLevelRunId", "createdAt", "updatedAt"
+      ],
+      "properties": {
+        "apiVersion": { "const": "kertas.runtime/v1alpha1" },
+        "kind": { "const": "ManagedSession" },
+        "id": { "type": "string", "minLength": 1 },
+        "tenantId": { "type": "string", "minLength": 1 },
+        "version": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["IDLE", "ACTIVE", "WAITING", "REQUIRES_ACTION", "CANCELLED", "ARCHIVED"] },
+        "agentVersionId": { "type": "string", "minLength": 1 },
+        "objective": { "type": "string", "minLength": 1 },
+        "correlationRef": { "type": ["string", "null"] },
+        "policy": { "type": "object", "additionalProperties": true },
+        "credentialGrantRefs": { "type": "array", "items": { "type": "string" } },
+        "currentTopLevelRunId": { "type": ["string", "null"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "sessionRunList": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/kertas.runtime/v1alpha1/session-run-list",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "kind", "sessionId", "runs"],
+      "properties": {
+        "apiVersion": { "const": "kertas.runtime/v1alpha1" },
+        "kind": { "const": "ManagedSessionRunList" },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "apiVersion", "kind", "id", "sessionId", "parentRunId",
+              "status", "statusReason", "goal", "createdAt", "updatedAt"
+            ],
+            "properties": {
+              "apiVersion": { "const": "kertas.runtime/v1alpha1" },
+              "kind": { "const": "Run" },
+              "id": { "type": "string", "minLength": 1 },
+              "sessionId": { "type": "string", "minLength": 1 },
+              "parentRunId": { "type": ["string", "null"] },
+              "status": {
+                "enum": [
+                  "CREATED", "RESOLVING", "QUEUED", "STARTING", "RUNNING",
+                  "WAITING_APPROVAL", "WAITING_SIGNAL", "WAITING_CHILDREN",
+                  "SLEEPING", "SUSPENDED", "RETRY_PENDING", "VERIFYING",
+                  "COMPLETED", "FAILED", "CANCELLED"
+                ]
+              },
+              "statusReason": { "type": ["string", "null"] },
+              "goal": { "type": "string", "minLength": 1 },
+              "createdAt": { "type": "string", "format": "date-time" },
+              "updatedAt": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "sessionCancel": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "$id": "https://managed-agents-runtime.invalid/contracts/kertas.runtime/v1alpha1/session-cancel",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
+      }
+    }
+  }
+}

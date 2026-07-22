@@ -80,6 +80,36 @@ async function insertEvent(
   );
 }
 
+async function projectTopLevelRunStateToSession(
+  tx: Tx,
+  run: RunRow,
+  status: RunStatus,
+): Promise<void> {
+  if (!run.managed_session_id || run.parent_run_id !== null) return;
+
+  const state = status === 'WAITING_APPROVAL'
+    ? 'REQUIRES_ACTION'
+    : ['WAITING_SIGNAL', 'WAITING_CHILDREN', 'SLEEPING', 'SUSPENDED'].includes(status)
+      ? 'WAITING'
+      : isTerminal(status)
+        ? 'IDLE'
+        : 'ACTIVE';
+  const clearCurrentRun = isTerminal(status);
+  await tx.query(
+    `UPDATE managed_sessions
+     SET state = $2,
+         current_top_level_run_id = CASE WHEN $3 THEN NULL ELSE current_top_level_run_id END,
+         version = version + 1,
+         updated_at = now()
+     WHERE id = $1
+       AND current_top_level_run_id = $4
+       AND state NOT IN ('CANCELLED', 'ARCHIVED')
+       AND (state IS DISTINCT FROM $2
+            OR ($3 AND current_top_level_run_id IS NOT NULL))`,
+    [run.managed_session_id, state, clearCurrentRun, run.id],
+  );
+}
+
 export async function transitionRun(
   tx: Tx,
   runId: string,
@@ -151,6 +181,7 @@ export async function transitionRun(
   if (isTerminal(opts.to)) {
     await releaseRunAdmission(tx, runId, `run_${opts.to.toLowerCase()}`);
   }
+  await projectTopLevelRunStateToSession(tx, run, opts.to);
   return rows[0]!;
 }
 

@@ -176,6 +176,32 @@ describe('schema', () => {
     );
     expect(reauthorizationMigration).toHaveLength(1);
   });
+
+  it('rejects a ManagedSession pinned to another tenant agent version', async () => {
+    const tenantId = newId('tnt');
+    const adId = newId('ad');
+    const avId = newId('av');
+    await db.pool.query('INSERT INTO tenants (id, name) VALUES ($1, $2)', [
+      tenantId,
+      `tenant-${tenantId}`,
+    ]);
+    await db.pool.query(
+      `INSERT INTO agent_definitions (id, tenant_id, name)
+       VALUES ($1, 'default', $2)`,
+      [adId, `agent-${adId}`],
+    );
+    await db.pool.query(
+      `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+       VALUES ($1, $2, 1, 'x', '{}')`,
+      [avId, adId],
+    );
+    await expect(db.pool.query(
+      `INSERT INTO managed_sessions
+         (id, tenant_id, principal_id, agent_version_id, objective)
+       VALUES ($1, $2, 'principal', $3, 'cross-tenant')`,
+      [newId('ses'), tenantId, avId],
+    )).rejects.toThrow(/agent version must belong to the same tenant/);
+  });
 });
 
 describe('tenant-lineage migration', () => {
@@ -256,6 +282,37 @@ describe('tenant-lineage migration', () => {
         `SELECT tenant_id FROM runs WHERE id = 'run_ambiguous_child'`,
       );
       expect(rows[0]?.tenant_id).toBe('tenant_ambiguous');
+    } finally {
+      await legacy.drop();
+    }
+  });
+});
+
+describe('managed-session migration', () => {
+  it('upgrades historical Runs without inventing ManagedSessions', async () => {
+    const legacy = await createTestDb({ through: '0018_checkpoint_envelopes.sql' });
+    try {
+      await legacy.pool.query(
+        `INSERT INTO agent_definitions (id, name) VALUES ('ad_session_upgrade', 'session-upgrade')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO agent_versions (id, agent_id, version, instructions, model_policy)
+         VALUES ('av_session_upgrade', 'ad_session_upgrade', 1, 'x', '{}')`,
+      );
+      await legacy.pool.query(
+        `INSERT INTO runs (id, tenant_id, agent_version_id, goal, status)
+         VALUES ('run_session_upgrade', 'default', 'av_session_upgrade', 'historical', 'COMPLETED')`,
+      );
+
+      await expect(legacy.applyRemainingMigrations()).resolves.toContain(
+        '0019_managed_sessions.sql',
+      );
+      const { rows: runs } = await legacy.pool.query<{ managed_session_id: string | null }>(
+        `SELECT managed_session_id FROM runs WHERE id = 'run_session_upgrade'`,
+      );
+      const { rows: sessions } = await legacy.pool.query('SELECT id FROM managed_sessions');
+      expect(runs[0]?.managed_session_id).toBeNull();
+      expect(sessions).toHaveLength(0);
     } finally {
       await legacy.drop();
     }

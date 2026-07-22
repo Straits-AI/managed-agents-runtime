@@ -18,9 +18,17 @@ export class AgentVersionTenantMismatchError extends Error {
   }
 }
 
+export class ManagedSessionAdmissionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ManagedSessionAdmissionError';
+  }
+}
+
 export interface CreateRunInput {
   /** Owning tenant. Internal callers must derive this explicitly. */
   tenantId: string;
+  managedSessionId?: string;
   agentVersionId: string;
   goal: string;
   input?: Record<string, unknown>;
@@ -62,6 +70,54 @@ function admissionKind(input: CreateRunInput): RunAdmissionKind {
  */
 export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> {
   const capacity = await prepareRunAdmission(tx, input);
+  let managedSessionId = input.managedSessionId ?? null;
+  if (input.parentRunId) {
+    const { rows: parents } = await tx.query<{
+      tenant_id: string;
+      managed_session_id: string | null;
+    }>(
+      'SELECT tenant_id, managed_session_id FROM runs WHERE id = $1',
+      [input.parentRunId],
+    );
+    const parent = parents[0];
+    if (!parent || parent.tenant_id !== input.tenantId) {
+      throw new Error('parent run does not belong to the requested tenant');
+    }
+    if (
+      input.managedSessionId !== undefined
+      && input.managedSessionId !== parent.managed_session_id
+    ) {
+      throw new Error('child run managed session must match its parent');
+    }
+    managedSessionId = parent.managed_session_id;
+  }
+  if (managedSessionId) {
+    const sessionLock = input.parentRunId ? '' : ' FOR UPDATE';
+    const { rows: sessions } = await tx.query<{
+      tenant_id: string;
+      state: string;
+    }>(
+      `SELECT tenant_id, state FROM managed_sessions WHERE id = $1${sessionLock}`,
+      [managedSessionId],
+    );
+    const session = sessions[0];
+    if (!session || session.tenant_id !== input.tenantId) {
+      throw new ManagedSessionAdmissionError('managed session not found for tenant');
+    }
+    if (session.state === 'CANCELLED' || session.state === 'ARCHIVED') {
+      throw new ManagedSessionAdmissionError(
+        `managed session does not accept runs in state ${session.state}`,
+      );
+    }
+    if (
+      !input.parentRunId
+      && (session.state !== 'IDLE' || input.managedSessionId === undefined)
+    ) {
+      throw new ManagedSessionAdmissionError(
+        'managed session already has an active top-level run',
+      );
+    }
+  }
   const { rows: ownedVersions } = await tx.query<{ id: string }>(
     `SELECT av.id
      FROM agent_versions av
@@ -82,8 +138,9 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
   await tx.query(
     `INSERT INTO runs (id, tenant_id, agent_version_id, goal, input, status, progress, max_steps,
                        token_budget, scheduled_for, parent_run_id, debug_fault_points,
-                       replaces_run_id, replacement_generation, forked_from_run_id)
-     VALUES ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+                       replaces_run_id, replacement_generation, forked_from_run_id,
+                       managed_session_id)
+     VALUES ($1, $2, $3, $4, $5, 'CREATED', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
     [
       runId,
       input.tenantId,
@@ -99,8 +156,18 @@ export async function createRun(tx: Tx, input: CreateRunInput): Promise<RunRow> 
       input.replacesRunId ?? null,
       input.replacementGeneration ?? 0,
       input.forkedFromRunId ?? null,
+      managedSessionId,
     ],
   );
+  if (managedSessionId && !input.parentRunId) {
+    await tx.query(
+      `UPDATE managed_sessions
+       SET state = 'ACTIVE', current_top_level_run_id = $2,
+           version = version + 1, updated_at = now()
+       WHERE id = $1`,
+      [managedSessionId, runId],
+    );
+  }
   await recordRunAdmission(tx, {
     runId,
     tenantId: input.tenantId,

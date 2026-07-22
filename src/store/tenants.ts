@@ -24,6 +24,11 @@ export interface ApiKeyRow {
   last_used_at: Date | null;
 }
 
+export interface ApiKeyResolution {
+  tenant: TenantRow;
+  principalId: string;
+}
+
 /** SHA-256 of the presented key; only the hash is ever stored or compared. */
 export function hashApiKey(plaintext: string): string {
   return createHash('sha256').update(plaintext, 'utf8').digest('hex');
@@ -71,7 +76,10 @@ export async function createApiKey(
  * Resolve a presented API key to its active tenant, or null. Touches
  * last_used_at (best-effort). Only active keys of active tenants resolve.
  */
-export async function resolveApiKey(pool: Pool, plaintext: string): Promise<TenantRow | null> {
+export async function resolveApiKeyContext(
+  pool: Pool,
+  plaintext: string,
+): Promise<ApiKeyResolution | null> {
   const { rows } = await pool.query<TenantRow & { key_id: string }>(
     `SELECT t.*, k.id AS key_id
      FROM api_keys k JOIN tenants t ON t.id = k.tenant_id
@@ -80,11 +88,16 @@ export async function resolveApiKey(pool: Pool, plaintext: string): Promise<Tena
   );
   const row = rows[0];
   if (!row) return null;
+  const { key_id: keyId, ...tenant } = row;
   // Best-effort usage stamp; never block auth on it.
   void pool
-    .query(`UPDATE api_keys SET last_used_at = now() WHERE id = $1`, [row.key_id])
+    .query(`UPDATE api_keys SET last_used_at = now() WHERE id = $1`, [keyId])
     .catch(() => {});
-  return row;
+  return { tenant, principalId: `api-key:${keyId}` };
+}
+
+export async function resolveApiKey(pool: Pool, plaintext: string): Promise<TenantRow | null> {
+  return (await resolveApiKeyContext(pool, plaintext))?.tenant ?? null;
 }
 
 export async function getTenant(q: Q, id: string): Promise<TenantRow | null> {

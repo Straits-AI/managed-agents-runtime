@@ -15,11 +15,17 @@ import { RunAdmissionRejectedError } from '../../store/admissions.js';
 import { appendEvent, transitionRun } from '../../core/transition.js';
 import { isTerminal } from '../../core/stateMachine.js';
 import type { ModelPrice } from '../../core/costs.js';
+import type { RunRow } from '../../core/types.js';
 
 // Keys the server owns inside a run's `input`; a client must never set them —
 // they drive workspace/transcript seeding from other runs and would otherwise
 // allow pointing a run at another tenant's data (IDOR).
 const RESERVED_INPUT_KEYS = ['forkFrom', 'parentWorkspaceId'] as const;
+
+function compatibilityRunResource(run: RunRow): Omit<RunRow, 'managed_session_id'> {
+  const { managed_session_id: _managedSessionId, ...resource } = run;
+  return resource;
+}
 
 function stripReservedInput(input: Record<string, unknown>): Record<string, unknown> {
   const clean = { ...input };
@@ -108,7 +114,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
       const run = await withTransaction(pool, (tx) =>
         createRun(tx, { ...body, tenantId: req.tenantId }),
       );
-      return reply.code(201).send(run);
+      return reply.code(201).send(compatibilityRunResource(run));
     } catch (err) {
       if (err instanceof RunAdmissionRejectedError) {
         const status = err.reason === 'tenant_unavailable' ? 403 : 429;
@@ -122,7 +128,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
     const run = await getRun(pool, req.params.runId, req.tenantId);
     if (!run) return reply.code(404).send({ error: 'run not found' });
     const attempts = await listAttempts(pool, run.id);
-    return { ...run, attempts };
+    return { ...compatibilityRunResource(run), attempts };
   });
 
   // Tenant-wide usage rollup (memo §20 /usage). Defaults to the current UTC day;
@@ -380,7 +386,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
       if (result.code === 409) {
         return reply.code(409).send({ error: `run is ${result.status}` });
       }
-      return result.run;
+      return compatibilityRunResource(result.run);
     },
   );
 
@@ -426,7 +432,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ApiDeps): void {
           grants,
         }),
       );
-      return reply.code(201).send(fork);
+      return reply.code(201).send(compatibilityRunResource(fork));
     } catch (err) {
       if (err instanceof RunAdmissionRejectedError) {
         const status = err.reason === 'tenant_unavailable' ? 403 : 429;

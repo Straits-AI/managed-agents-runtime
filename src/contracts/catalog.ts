@@ -7,33 +7,60 @@ export const CURRENT_COMPATIBILITY_MODE = 'run-as-session/v1' as const;
 export interface RuntimeContractDocument {
   apiVersion: typeof CONTRACT_CATALOG_VERSION;
   id: string;
-  status: 'compatibility' | 'active' | 'deprecated';
+  status: 'compatibility' | 'planned' | 'active' | 'deprecated';
   semantics: Record<string, unknown>;
   routes: Record<string, string>;
   schemas: Record<string, Record<string, unknown>>;
 }
 
-let cached: RuntimeContractDocument | undefined;
+const cache = new Map<string, RuntimeContractDocument>();
+
+function loadContract(
+  filename: string,
+  expectedId: string,
+  expectedStatus: RuntimeContractDocument['status'],
+  requiredSchemas: string[],
+  contractsRoot = path.resolve(process.cwd(), 'contracts'),
+): RuntimeContractDocument {
+  const cacheKey = `${contractsRoot}:${filename}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+  const fullPath = path.join(contractsRoot, filename);
+  const parsed = JSON.parse(readFileSync(fullPath, 'utf8')) as RuntimeContractDocument;
+  if (
+    parsed.apiVersion !== CONTRACT_CATALOG_VERSION
+    || parsed.id !== expectedId
+    || parsed.status !== expectedStatus
+    || requiredSchemas.some((name) => !parsed.schemas?.[name])
+  ) {
+    throw new Error(`invalid packaged runtime contract: ${fullPath}`);
+  }
+  cache.set(cacheKey, parsed);
+  return parsed;
+}
 
 export function loadCurrentRunContract(
   contractsRoot = path.resolve(process.cwd(), 'contracts'),
 ): RuntimeContractDocument {
-  if (cached && contractsRoot === path.resolve(process.cwd(), 'contracts')) return cached;
-  const filename = path.join(contractsRoot, 'run-as-session.v1.json');
-  const parsed = JSON.parse(readFileSync(filename, 'utf8')) as RuntimeContractDocument;
-  if (
-    parsed.apiVersion !== CONTRACT_CATALOG_VERSION ||
-    parsed.id !== CURRENT_COMPATIBILITY_MODE ||
-    parsed.status !== 'compatibility' ||
-    !parsed.schemas?.runCreate ||
-    !parsed.schemas?.runResource ||
-    !parsed.schemas?.runEvent ||
-    !parsed.schemas?.runEventsResponse
-  ) {
-    throw new Error(`invalid packaged runtime contract: ${filename}`);
-  }
-  if (contractsRoot === path.resolve(process.cwd(), 'contracts')) cached = parsed;
-  return parsed;
+  return loadContract(
+    'run-as-session.v1.json',
+    CURRENT_COMPATIBILITY_MODE,
+    'compatibility',
+    ['runCreate', 'runResource', 'runEvent', 'runEventsResponse'],
+    contractsRoot,
+  );
+}
+
+export function loadManagedSessionContract(
+  contractsRoot = path.resolve(process.cwd(), 'contracts'),
+): RuntimeContractDocument {
+  return loadContract(
+    'managed-session.v1alpha1.json',
+    'kertas.runtime/v1alpha1',
+    'planned',
+    ['sessionCreate', 'sessionResource', 'sessionRunList', 'sessionCancel'],
+    contractsRoot,
+  );
 }
 
 export function runtimeContractCatalog() {
@@ -57,7 +84,7 @@ export function runtimeContractCatalog() {
       {
         id: 'kertas.runtime/v1alpha1',
         lifecycle: 'not_available' as const,
-        features: { managedSession: false },
+        features: { managedSession: true, inboundEvents: false },
       },
     ],
     deprecationPolicy: {

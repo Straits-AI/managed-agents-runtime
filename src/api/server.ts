@@ -8,7 +8,8 @@ import { registerRunRoutes } from './routes/runs.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerProviderRoutes } from './routes/providers.js';
 import { registerContractRoutes } from './routes/contracts.js';
-import { resolveTenant } from './auth.js';
+import { registerSessionRoutes } from './routes/sessions.js';
+import { resolveCaller } from './auth.js';
 import { rateLimiter } from './rateLimit.js';
 import { log } from '../log.js';
 import type { ProviderPortabilityBundle } from '../providers/portability.js';
@@ -17,6 +18,7 @@ import type { ProviderPortabilityBundle } from '../providers/portability.js';
 declare module 'fastify' {
   interface FastifyRequest {
     tenantId: string;
+    principalId: string;
   }
 }
 
@@ -49,14 +51,16 @@ export function buildServer(deps: ApiDeps): FastifyInstance {
   app.addHook('onRequest', async (req, reply) => {
     if (PUBLIC_PATHS.has(req.url.split('?')[0]!)) return; // probes are open
 
-    const tenant = await resolveTenant(deps.pool, deps.cfg, req.headers.authorization);
-    if (!tenant) {
+    const caller = await resolveCaller(deps.pool, deps.cfg, req.headers.authorization);
+    if (!caller) {
       return reply.code(401).send({ error: 'unauthorized' });
     }
+    const tenant = caller.tenant;
     if (tenant.status !== 'active') {
       return reply.code(403).send({ error: 'tenant suspended' });
     }
     req.tenantId = tenant.id;
+    req.principalId = caller.principalId;
 
     // Per-tenant rate limiting (in-process or Postgres-backed per config).
     const verdict = await limiter.check(tenant.id);
@@ -97,6 +101,7 @@ export function buildServer(deps: ApiDeps): FastifyInstance {
 
   registerHealthRoutes(app, deps);
   registerContractRoutes(app);
+  registerSessionRoutes(app, deps);
   registerProviderRoutes(app, deps);
   registerAgentRoutes(app, deps);
   registerRunRoutes(app, deps);
